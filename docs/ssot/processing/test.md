@@ -7,3 +7,4 @@
 - A strict CUBE parser validates axis order, domain, scientific notation, finite values, sample count, tetrahedron boundaries, and all six tetrahedral branches.
 - Corrected preview applies EV, including both supported boundaries, to both Base and LUT views while preserving the requested aspect ratio.
 - TIFF export produces a readable Deflate-compressed RGB16 image with the requested dimensions.
+- A multi-strip TIFF render visits contiguous source ranges, bounds each quantized strip to approximately 1 MB, and produces independently decodable Deflate strips.

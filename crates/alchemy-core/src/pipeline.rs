@@ -120,14 +120,22 @@ impl ColorPipeline {
     }
 
     /// Renders and Deflate-compresses a 16-bit RGB TIFF. Processing is fused
-    /// per pixel, so no full-size float image is retained.
+    /// into bounded strips, so no full-size float or quantized image is retained.
     ///
     /// # Errors
     ///
     /// Returns an error for invalid image input or encoder failure.
     pub fn render_tiff(&self, pixels: &[u16], width: u32, height: u32) -> Result<Vec<u8>> {
-        let output = self.render_rgb16(pixels, width, height)?;
-        tiff::encode_rgb16(width, height, &output)
+        validate_image(pixels, width, height)?;
+        tiff::encode_rgb16_strips(width, height, |range, output| {
+            for input in pixels[range].chunks_exact(3) {
+                output.extend(
+                    self.render_lut(self.input_pixel(input))
+                        .map(|value| quantize_u16(value, self.mode)),
+                );
+            }
+            Ok(())
+        })
     }
 
     fn input_pixel(&self, input: &[u16]) -> [f32; 3] {

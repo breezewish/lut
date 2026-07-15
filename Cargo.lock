@@ -32,6 +32,8 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tiff",
+ "tiff-core",
+ "tiff-writer",
  "wasm-bindgen",
 ]
 
@@ -341,6 +343,21 @@ checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
 dependencies = [
  "getrandom",
  "libc",
+]
+
+[[package]]
+name = "lerc-core"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c52050f983cb85074a1b9107a6db8b3c8242e9261f42c3e319ada57b2acca2e"
+
+[[package]]
+name = "lerc-writer"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e44ac5a9f7b1069751e7138a82a42fd37c17e8605a79d38d6ccf6e9e3ced5721"
+dependencies = [
+ "lerc-core",
 ]
 
 [[package]]
@@ -707,6 +724,29 @@ dependencies = [
  "quick-error",
  "weezl",
  "zune-jpeg",
+]
+
+[[package]]
+name = "tiff-core"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f582d8e16c31f4e46b52ccf64a609d71c627c122d2d372336cc039426fe447c4"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "tiff-writer"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1081699b9b14641c5479a516822698a18ec2f9f92ccad58c33d4eb9191372fc0"
+dependencies = [
+ "flate2",
+ "lerc-core",
+ "lerc-writer",
+ "thiserror",
+ "tiff-core",
+ "weezl",
 ]
 
 [[package]]

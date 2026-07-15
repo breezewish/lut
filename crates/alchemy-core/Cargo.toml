@@ -15,7 +15,8 @@ wasm = ["dep:wasm-bindgen"]
 
 [dependencies]
 thiserror = "2.0.17"
-tiff = { version = "0.10.3", default-features = false, features = ["deflate"] }
+tiff-core = "0.7.0"
+tiff-writer = { version = "0.7.0", default-features = false }
 wasm-bindgen = { version = "0.2.106", optional = true }
 
 [dev-dependencies]
@@ -24,6 +25,7 @@ ndarray = "0.17.1"
 ndarray-npy = { version = "0.10.0", features = ["npz"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
+tiff = { version = "0.10.3", default-features = false, features = ["deflate"] }
 
 [lints]
 workspace = true

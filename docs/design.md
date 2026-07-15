@@ -12,7 +12,7 @@ The workspace contains three Rust crates:
 - `alchemy-libraw`: a small safe Rust API over a pinned LibRaw C++ build.
 - `alchemy-cli`: native RAW-to-TIFF product surface.
 
-The browser uses one Dedicated Worker. It hosts a custom, single-threaded LibRaw WASM build and the `alchemy-core` WASM build. Commands are serialized. The worker caches one half-size RGB16 preview; EV and LUT changes rerun only the Rust color core. Full-resolution export decodes on demand and runs sequentially. Batch TIFFs enter a pass-through ZIP incrementally, avoiding redundant compression and contiguous archive copies while retaining the final Blob chunks required by portable browser downloads.
+The browser uses one Dedicated Worker. It hosts a custom, single-threaded LibRaw WASM build and the `alchemy-core` WASM build. Commands are serialized. The worker caches one half-size RGB16 preview; EV and LUT changes rerun only the Rust color core. Full-resolution export decodes on demand and runs sequentially. Color processing feeds bounded RGB16 strips directly to a streaming Deflate TIFF writer. Batch TIFFs enter a pass-through ZIP incrementally, avoiding redundant compression and contiguous archive copies while retaining the final Blob chunks required by portable browser downloads.
 
 `alchemy-core/include/alchemy.h` is the stable corrected-v2 C surface. It accepts the same decoded RGB16 contract, returns an owned TIFF buffer with stable status codes, and pairs allocation with `alchemy_free_buffer`. The Rust API remains the native CLI's direct integration surface.
 
@@ -23,8 +23,8 @@ The browser uses one Dedicated Worker. It hosts a custom, single-threaded LibRaw
 - Both LibRaw builds replace one pinned post-processing source unit with an otherwise identical local copy whose color-matrix dot products use explicit fused multiply-add order. This preserves the native/Python result exactly on WASM, which has no scalar hardware FMA.
 - The canonical core is single-threaded f32 WASM SIMD and never uses `fast-math`.
 - Preview and export share one pipeline; only input resolution and output sink differ.
-- TIFF output is Deflate-compressed RGB16 and never creates a full-size float image.
-- Full-resolution export holds one decoded RGB16 image, one quantized RGB16 output, and one encoded output at a time.
+- TIFF output is Deflate-compressed RGB16 and never creates a full-size float or quantized image.
+- Full-resolution export holds one decoded RGB16 image, one encoded output, and bounded strip buffers at a time.
 
 ## Versioned behavior
 
@@ -38,8 +38,8 @@ The browser uses one Dedicated Worker. It hosts a custom, single-threaded LibRaw
 
 ## Operational design
 
-LibRaw WASM is built in `emscripten/emsdk:5.0.7` with C++17, portable O3 arithmetic, explicit color-matrix FMA, one worker environment, memory growth, and exception handling. Its JPEG dependency is built from the same pinned libjpeg-turbo source as native decoding. Build IDs include the LibRaw, wrapper, libjpeg-turbo, FMA override, and toolchain revisions. The separate Rust color core enables WASM SIMD. Rust is pinned by `rust-toolchain.toml`; JavaScript and Python baseline dependencies use lockfiles.
+LibRaw WASM is built in `emscripten/emsdk:5.0.7` with C++17, portable O3 arithmetic, explicit color-matrix FMA, one worker environment, memory growth, and exception handling. Its JPEG dependency is built from the same pinned libjpeg-turbo source as native decoding. Build IDs include the LibRaw, wrapper, libjpeg-turbo, FMA override, and toolchain revisions. The separate Rust color core enables WASM SIMD. Rust is pinned by `rust-toolchain.toml`; JavaScript and Python baseline dependencies use lockfiles. The TIFF writer receives approximately 1 MB of quantized samples per strip and emits each compressed block immediately; the final encoded `Vec` remains necessary for the current Rust/WASM return contract.
 
 ## Alternatives
 
-WebGPU is excluded because a CPU/WASM reference is easier to prove and fast enough for the first version. Browser pthreads are excluded to avoid cross-origin isolation and state complexity. A handwritten TIFF container is excluded in favor of the mature Rust `tiff`/Deflate implementation. Its safe public compression API accepts a complete typed image; bounded strip streaming remains a future memory optimization rather than duplicating TIFF container logic.
+WebGPU is excluded because a CPU/WASM reference is easier to prove and fast enough for the first version. Browser pthreads are excluded to avoid cross-origin isolation and state complexity. A handwritten TIFF container is excluded in favor of a typed pure-Rust writer whose public block API performs Deflate compression and TIFF offset finalization while processing supplies one bounded strip at a time.

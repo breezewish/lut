@@ -13,3 +13,4 @@ assets/luts.json
 package-lock.json
 AGENTS.md
 .codexpotter/
+.impeccable/

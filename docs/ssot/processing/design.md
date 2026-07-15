@@ -12,7 +12,7 @@ Native and WASM LibRaw builds replace upstream `postprocessing_utils.cpp` with t
 
 ## Memory
 
-Preview downsamples directly while reading RGB16 and allocates only two destination RGBA8 images. TIFF rendering fuses color operations per pixel into one quantized RGB16 destination and passes it to the mature encoder's compressed image API. No full-size float image is created. Direct compressed-strip streaming is deferred until the encoder exposes a safe public streaming contract; RAW Alchemy does not duplicate TIFF offsets and compression framing.
+Preview downsamples directly while reading RGB16 and allocates only two destination RGBA8 images. TIFF rendering fuses color operations per pixel into approximately 1 MB RGB16 strips. The typed TIFF writer Deflate-compresses and writes each strip immediately, then owns offset and directory finalization. No full-size float or quantized image is created; only the decoded RGB16 source, bounded strip temporaries, and final encoded output coexist.
 
 ## Baseline
 
