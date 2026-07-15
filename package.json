@@ -1,0 +1,44 @@
+{
+  "name": "raw-alchemy-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "assets": "node scripts/prepare-assets.mjs",
+    "libraw-wasm": "bash scripts/build-libraw-wasm.sh",
+    "wasm": "RUSTFLAGS='-C target-feature=+simd128' wasm-pack build crates/alchemy-core --target web --out-dir ../../web/src/wasm --release -- --features wasm",
+    "predev": "npm run assets && npm run libraw-wasm && npm run wasm",
+    "dev": "vite",
+    "build": "npm run assets && npm run libraw-wasm && npm run wasm && tsc -b && vite build",
+    "test": "vitest run",
+    "test:e2e": "npm run build && node scripts/check-libraw-parity.mjs && playwright test",
+    "check": "npm run test && npm run build && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@radix-ui/react-select": "2.2.6",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "fflate": "0.8.2",
+    "lucide-react": "0.468.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "tailwind-merge": "3.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@tailwindcss/vite": "4.1.16",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.0",
+    "@types/node": "24.10.0",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-react": "5.1.0",
+    "jsdom": "27.1.0",
+    "prettier": "3.6.2",
+    "tailwindcss": "4.1.16",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vitest": "4.1.10"
+  }
+}

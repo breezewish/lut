@@ -1,0 +1,13 @@
+dist/
+node_modules/
+target/
+test-results/
+vendor/
+web/public/
+web/src/libraw/
+web/src/wasm/
+baselines/legacy-python-v1/.venv/
+baselines/legacy-python-v1/*.npz
+assets/luts.json
+package-lock.json
+AGENTS.md

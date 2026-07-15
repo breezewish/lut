@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "mode": "legacy-python-v1",
+  "recipe": {
+    "exposureEv": 0.0,
+    "lensCorrection": false,
+    "log": "V-Log",
+    "lut": "vendor/V-Log-Alchemy/Luts/Fujifilm/FLog2C_to_CLASSIC-Neg_VLog.cube"
+  },
+  "sources": {
+    "raw": {
+      "path": "tests/fixtures/linear.dng",
+      "sha256": "39de68b5c7620fd2967202fe07ff5a93bfaf71096b6139d61b72218fb3616561"
+    },
+    "lut": {
+      "path": "vendor/V-Log-Alchemy/Luts/Fujifilm/FLog2C_to_CLASSIC-Neg_VLog.cube",
+      "sha256": "3e2da957fc86cbe06d382ec68ae653df7a70d2de577d521c829b48d7c5a37d02"
+    },
+    "rawAlchemyCommit": "10d4f5bded68d75d4db87cfeeddec1e5fea297d5"
+  },
+  "environment": {
+    "python": "3.11.15",
+    "numpy": "2.3.4",
+    "numba": "0.62.1",
+    "colour": "0.4.7",
+    "rawpy": "0.27.0",
+    "libraw": [0, 22, 0]
+  },
+  "arrays": {
+    "rgb16": {
+      "dtype": "uint16",
+      "shape": [48, 64, 3],
+      "sha256": "8a6cb090809fe853d4803741218662e14c814a9e3bd64abc006425e2e749ff1b"
+    },
+    "exposure": {
+      "dtype": "float32",
+      "shape": [48, 64, 3],
+      "sha256": "78e1f479249d5de33f19ae6f3808d8e555924413a9211033ce6fb6613802a1f1"
+    },
+    "boost": {
+      "dtype": "float32",
+      "shape": [48, 64, 3],
+      "sha256": "b7f8624d7f46650fe1b79e5f72e96df40608a9427e2e41f0d8892d635298291f"
+    },
+    "gamut": {
+      "dtype": "float32",
+      "shape": [48, 64, 3],
+      "sha256": "c99fdce0517b0b7478e43a824bb40c1432e09a52242eaecc686ba12440f2d6db"
+    },
+    "vlog": {
+      "dtype": "float64",
+      "shape": [48, 64, 3],
+      "sha256": "b82d36af673525b262fc15ca95ec9a4d9cae87487e512732857b7280694d7d32"
+    },
+    "lut": {
+      "dtype": "float32",
+      "shape": [48, 64, 3],
+      "sha256": "d8b41b615eaee746854bd499795a0bdc0f0fdb054b8e31cdfefb787fc70bf2e0"
+    },
+    "final_uint16": {
+      "dtype": "uint16",
+      "shape": [48, 64, 3],
+      "sha256": "e6a2deae057b27ea52fe0a20c2b96f63aedfba52698b82cc90832d2f65eb437a"
+    }
+  },
+  "fixture": {
+    "path": "linear-classic-negative-ev0.npz",
+    "sha256": "67a473ca9f3d3b0eb03dd28e0a9d6d51e08e5675f26c1160541d28739ee20419"
+  }
+}

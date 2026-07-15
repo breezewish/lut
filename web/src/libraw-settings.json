@@ -1,0 +1,11 @@
+{
+  "bright": 1,
+  "useCameraWb": 1,
+  "useCameraMatrix": 1,
+  "outputColor": 4,
+  "outputBps": 16,
+  "noAutoBright": 1,
+  "highlight": 2,
+  "gamm": [1, 1, 0, 0, 0, 0],
+  "userQual": 12
+}

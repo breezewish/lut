@@ -1,0 +1,21 @@
+# Processing Design
+
+## Model
+
+`ColorPipeline` is an immutable recipe containing EV, processing mode, and one parsed LUT. It accepts decoded RGB16 and exposes preview, RGB16 reference output, and TIFF output. Fixed matrices and transfer constants are checked into source rather than resolved from runtime color-space registries.
+
+The C ABI exposes only corrected-v2 TIFF rendering. It returns a status plus a Rust-owned byte buffer, with one explicit paired free function. Stable integer statuses cross the ABI; Rust error details remain in the native Rust API.
+
+Corrected processing uses f32 throughout and maps cleanly to WASM SIMD. Legacy processing has isolated f64 matrix and LUT-coordinate operations only where required to match the Python baseline.
+
+Native and WASM LibRaw builds replace upstream `postprocessing_utils.cpp` with the pinned local copy in `alchemy-libraw`. Only the final color-matrix dot products differ: their fused operation order is explicit, so WASM reproduces the native/Python RGB16 result exactly instead of inheriting target-dependent compiler contraction.
+
+## Memory
+
+Preview downsamples directly while reading RGB16 and allocates only two destination RGBA8 images. TIFF rendering fuses color operations per pixel into one quantized RGB16 destination and passes it to the mature encoder's compressed image API. No full-size float image is created. Direct compressed-strip streaming is deferred until the encoder exposes a safe public streaming contract; RAW Alchemy does not duplicate TIFF offsets and compression framing.
+
+## Baseline
+
+`baselines/legacy-python-v1` locks Python 3.11, Raw Alchemy and dependency revisions, recipe hashes, array types and shapes, every checkpoint hash, and a compressed NPZ fixture. Rust reads the committed fixture directly; normal tests do not execute Python or require the original external repository.
+
+The baseline covers decode RGB16, exposure, Boost, gamut matrix, V-Log, LUT, and final uint16. Decode is exact. Float tolerances are stage-local. LUT maximum absolute error is `2e-6`; final maximum error is one code value.

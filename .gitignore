@@ -1,0 +1,12 @@
+/dist/
+/node_modules/
+**/node_modules/
+/target/
+/test-results/
+/playwright-report/
+/web/public/luts/
+/web/src/libraw/
+/web/src/wasm/
+/.venv/
+**/.venv/
+*.tsbuildinfo

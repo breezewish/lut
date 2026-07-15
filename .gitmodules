@@ -1,0 +1,15 @@
+[submodule "vendor/V-Log-Alchemy"]
+	path = vendor/V-Log-Alchemy
+	url = https://github.com/shenmintao/V-Log-Alchemy.git
+[submodule "vendor/Raw-Alchemy"]
+	path = vendor/Raw-Alchemy
+	url = https://github.com/shenmintao/Raw-Alchemy.git
+[submodule "vendor/LibRaw-Wasm"]
+	path = vendor/LibRaw-Wasm
+	url = https://github.com/ybouane/LibRaw-Wasm.git
+[submodule "vendor/LibRaw"]
+	path = vendor/LibRaw
+	url = https://github.com/shenmintao/LibRaw.git
+[submodule "vendor/libjpeg-turbo"]
+	path = vendor/libjpeg-turbo
+	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git

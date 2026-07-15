@@ -1,0 +1,27 @@
+[package]
+name = "alchemy-core"
+description = "Color processing and TIFF encoding for browser RAW Alchemy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib", "staticlib"]
+
+[features]
+default = []
+wasm = ["dep:wasm-bindgen"]
+
+[dependencies]
+thiserror = "2.0.17"
+tiff = { version = "0.10.3", default-features = false, features = ["deflate"] }
+wasm-bindgen = { version = "0.2.106", optional = true }
+
+[dev-dependencies]
+alchemy-libraw = { path = "../alchemy-libraw" }
+ndarray = "0.17.1"
+ndarray-npy = { version = "0.10.0", features = ["npz"] }
+
+[lints]
+workspace = true
