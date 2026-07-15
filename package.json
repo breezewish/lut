@@ -11,7 +11,7 @@
     "dev": "vite",
     "build": "npm run assets && npm run libraw-wasm && npm run wasm && tsc -b && vite build",
     "test": "vitest run",
-    "test:e2e": "npm run build && node scripts/check-libraw-parity.mjs && playwright test",
+    "test:e2e": "npm run build && cargo build --quiet --release -p alchemy-cli && node scripts/check-libraw-parity.mjs && playwright test",
     "check": "npm run test && npm run build && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
     "format:check": "prettier --check ."
   },

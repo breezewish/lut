@@ -8,6 +8,7 @@ web/src/libraw/
 web/src/wasm/
 baselines/legacy-python-v1/.venv/
 baselines/legacy-python-v1/*.npz
+baselines/legacy-python-v1/manifest.json
 assets/luts.json
 package-lock.json
 AGENTS.md

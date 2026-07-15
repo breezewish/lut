@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { unzipSync } from "fflate";
 
 import { decodeRgb16Tiff } from "./tiff";
 
@@ -27,12 +28,54 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
     timeout: 20_000,
   });
   await expect(page.getByText("Unknown camera")).toHaveCount(0);
+  const comparison = page.getByRole("region", {
+    name: "Base and LUT comparison",
+  });
+  await expect(comparison).toHaveAttribute("data-decode-count", "1");
+  const baseBeforeExposure = await page
+    .getByLabel("Base preview")
+    .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
 
   await page.getByRole("slider", { name: "Exposure" }).fill("1");
   await expect(
     page.getByRole("spinbutton", { name: "Exposure value" }),
   ).toHaveValue("1");
-  await expect(page.getByLabel("Base preview")).toBeVisible();
+  await expect
+    .poll(() =>
+      page
+        .getByLabel("Base preview")
+        .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
+    )
+    .not.toBe(baseBeforeExposure);
+  await expect(comparison).toHaveAttribute("data-decode-count", "1");
+
+  const classicNegativePreview = await page
+    .getByLabel("Classic Negative preview")
+    .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
+  await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
+  await page.getByRole("option", { name: "PROVIA", exact: true }).click();
+  await expect(page.getByLabel("PROVIA preview")).toBeVisible();
+  await expect
+    .poll(() =>
+      page
+        .getByLabel("PROVIA preview")
+        .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
+    )
+    .not.toBe(classicNegativePreview);
+  await expect(comparison).toHaveAttribute("data-decode-count", "1");
+
+  await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
+  await page
+    .getByRole("option", { name: "Classic Negative", exact: true })
+    .click();
+  await expect
+    .poll(() =>
+      page
+        .getByLabel("Classic Negative preview")
+        .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
+    )
+    .toBe(classicNegativePreview);
+  await expect(comparison).toHaveAttribute("data-decode-count", "1");
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export selected" }).click();
@@ -93,6 +136,28 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
   expect(download.suggestedFilename()).toBe(
     "raw-alchemy-fuji-classic-negative.zip",
   );
+  const archivePath = await download.path();
+  expect(archivePath).not.toBeNull();
+  const archive = unzipSync(new Uint8Array(await readFile(archivePath!)));
+  expect(Object.keys(archive).sort()).toEqual([
+    "first-fuji-classic-negative.tif",
+    "second-fuji-classic-negative.tif",
+  ]);
+  const first = decodeRgb16Tiff(
+    Buffer.from(archive["first-fuji-classic-negative.tif"]),
+  );
+  const second = decodeRgb16Tiff(
+    Buffer.from(archive["second-fuji-classic-negative.tif"]),
+  );
+  expect([first.width, first.height]).toEqual([second.width, second.height]);
+  let batchMaxCodeDifference = 0;
+  for (let index = 0; index < first.rgb.length; index += 1) {
+    batchMaxCodeDifference = Math.max(
+      batchMaxCodeDifference,
+      Math.abs(first.rgb[index] - second.rgb[index]),
+    );
+  }
+  expect(batchMaxCodeDifference).toBe(0);
 
   await page.getByRole("button", { name: "Clear queue" }).click();
   await page.locator('input[type="file"]').setInputFiles({
@@ -110,6 +175,65 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
   await expect(
     page.getByRole("button", { name: "Export selected" }),
   ).toBeDisabled();
+});
+
+test("all built-in LUTs match optimized native RGB16 exports", async ({
+  page,
+}) => {
+  const manifest = JSON.parse(
+    await readFile(resolve("assets/luts.json"), "utf8"),
+  ) as {
+    luts: Array<{ id: string; group: string; name: string; file: string }>;
+  };
+  const nativeAlchemy = resolve("target/release/alchemy");
+
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(linearFixture);
+  await expect(page.getByLabel("Base preview")).toBeVisible({
+    timeout: 20_000,
+  });
+
+  for (const look of manifest.luts) {
+    await page
+      .getByRole("searchbox", { name: "Look" })
+      .fill(`${look.group} ${look.name}`);
+    await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
+    await page.getByRole("option", { name: look.name, exact: true }).click();
+    await expect(page.getByLabel(`${look.name} preview`)).toBeVisible();
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export selected" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe(`linear-${look.id}.tif`);
+
+    const nativeOutput = test.info().outputPath(`${look.id}.tif`);
+    await execFileAsync(nativeAlchemy, [
+      linearFixture,
+      nativeOutput,
+      "--lut",
+      resolve("vendor/V-Log-Alchemy/Luts", look.file),
+      "--ev",
+      "0",
+      "--color",
+      "never",
+    ]);
+    const browserPath = await download.path();
+    expect(browserPath).not.toBeNull();
+    const browser = decodeRgb16Tiff(await readFile(browserPath!));
+    const native = decodeRgb16Tiff(await readFile(nativeOutput));
+    expect([browser.width, browser.height]).toEqual([
+      native.width,
+      native.height,
+    ]);
+    let maxCodeDifference = 0;
+    for (let index = 0; index < browser.rgb.length; index += 1) {
+      maxCodeDifference = Math.max(
+        maxCodeDifference,
+        Math.abs(browser.rgb[index] - native.rgb[index]),
+      );
+    }
+    expect(maxCodeDifference, look.id).toBeLessThanOrEqual(1);
+  }
 });
 
 test("mobile empty state keeps import primary and defers processing controls", async ({

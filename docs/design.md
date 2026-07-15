@@ -28,7 +28,7 @@ The browser uses one Dedicated Worker. It hosts a custom, single-threaded LibRaw
 
 ## Versioned behavior
 
-`legacy-python-v1` preserves Raw Alchemy 0.4.2 migration behavior: D50 misinterpretation, Camera-Match Boost, pre-Log clipping, float64 LUT coordinates, and truncating uint16 quantization. It exists for tests and migration evidence.
+`legacy-python-v1` preserves Raw Alchemy 0.4.2 migration behavior: D50 misinterpretation, Camera-Match Boost, pre-Log clipping, float64 LUT coordinates, truncating uint16 export quantization, and the preview-only BT.709-to-sRGB display conversion. It exists for tests and migration evidence.
 
 `corrected-v2` is the product default. It uses the D65 contract, preserves negative V-Log inputs, removes the creative boost, uses f32 tetrahedral interpolation, and rounds uint16 output.
 

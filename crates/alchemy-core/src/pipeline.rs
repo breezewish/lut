@@ -1,5 +1,6 @@
 use crate::color::{
-    PROPHOTO_D65_TO_V_GAMUT, encode_v_log, multiply_legacy_matrix, multiply_matrix, render_base,
+    PROPHOTO_D65_TO_V_GAMUT, encode_v_log, legacy_bt709_to_srgb, multiply_legacy_matrix,
+    multiply_matrix, render_base,
 };
 use crate::{AlchemyError, Lut3d, Result, tiff};
 
@@ -83,7 +84,12 @@ impl ColorPipeline {
                 let target = (output_y as usize * output_width as usize + output_x as usize) * 4;
                 let linear = self.input_pixel(&pixels[source..source + 3]);
                 write_rgba(&mut base_rgba[target..target + 4], render_base(linear));
-                write_rgba(&mut lut_rgba[target..target + 4], self.render_lut(linear));
+                let lut = self.render_lut(linear);
+                let display = match self.mode {
+                    ProcessingMode::CorrectedV2 => lut,
+                    ProcessingMode::LegacyPythonV1 => lut.map(legacy_bt709_to_srgb),
+                };
+                write_rgba(&mut lut_rgba[target..target + 4], display);
             }
         }
 
@@ -208,10 +214,43 @@ fn quantize_u16(value: f32, mode: ProcessingMode) -> u16 {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+    use std::path::Path;
+
+    use ndarray::{Array3, Array4, Axis};
+    use ndarray_npy::NpzReader;
+    use serde::Deserialize;
+
     use super::*;
 
     const IDENTITY_2: &str =
         "LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n";
+    const HALF_GRAY_2: &str = "LUT_3D_SIZE 2\n0.5 0.5 0.5\n0.5 0.5 0.5\n0.5 0.5 0.5\n0.5 0.5 0.5\n0.5 0.5 0.5\n0.5 0.5 0.5\n0.5 0.5 0.5\n0.5 0.5 0.5\n";
+    const LEGACY_BASELINE: &[u8] =
+        include_bytes!("../../../baselines/legacy-python-v1/linear-all-looks-ev0.npz");
+    const RAW: &[u8] = include_bytes!("../../../tests/fixtures/linear.dng");
+    const LUT_MANIFEST: &str = include_str!("../../../assets/luts.json");
+
+    #[derive(Deserialize)]
+    struct LutManifest {
+        luts: Vec<LutAsset>,
+    }
+
+    #[derive(Deserialize)]
+    struct LutAsset {
+        id: String,
+        file: String,
+    }
+
+    #[test]
+    fn legacy_preview_converts_bt709_lut_output_to_srgb() {
+        let lut = Lut3d::parse(HALF_GRAY_2).unwrap();
+        let pipeline = ColorPipeline::new(0.0, ProcessingMode::LegacyPythonV1, lut).unwrap();
+        let preview = pipeline.render_preview(&[32_768; 3], 1, 1, 1).unwrap();
+
+        // The frozen Python preview decodes 0.5 as BT.709 and re-encodes it as sRGB.
+        assert_eq!(&preview.lut_rgba[..3], &[139, 139, 139]);
+    }
 
     #[test]
     fn exposure_is_applied_to_both_views() {
@@ -223,6 +262,20 @@ mod tests {
         let base_plus_one = plus_one.render_preview(&pixels, 1, 1, 1).unwrap();
         assert!(base_plus_one.base_rgba[1] > base_zero.base_rgba[1]);
         assert!(base_plus_one.lut_rgba[1] > base_zero.lut_rgba[1]);
+    }
+
+    #[test]
+    fn exposure_supports_both_documented_boundaries() {
+        let lut = Lut3d::parse(IDENTITY_2).unwrap();
+        let minimum = ColorPipeline::new(-8.0, ProcessingMode::CorrectedV2, lut.clone()).unwrap();
+        let maximum = ColorPipeline::new(8.0, ProcessingMode::CorrectedV2, lut).unwrap();
+        let pixels = [32_768; 3];
+        let minimum_linear = minimum.input_pixel(&pixels);
+        let maximum_linear = maximum.input_pixel(&pixels);
+
+        assert!(minimum_linear.iter().all(|channel| channel.is_finite()));
+        assert!(maximum_linear.iter().all(|channel| channel.is_finite()));
+        assert!(maximum_linear[0] > minimum_linear[0]);
     }
 
     #[test]
@@ -243,6 +296,10 @@ mod tests {
             ColorPipeline::new(f32::NAN, ProcessingMode::CorrectedV2, lut.clone()).unwrap_err(),
             AlchemyError::InvalidExposure
         );
+        assert_eq!(
+            ColorPipeline::new(8.1, ProcessingMode::CorrectedV2, lut.clone()).unwrap_err(),
+            AlchemyError::InvalidExposure
+        );
         let pipeline = ColorPipeline::new(0.0, ProcessingMode::CorrectedV2, lut).unwrap();
         assert!(matches!(
             pipeline.render_preview(&[0; 3], 2, 1, 100),
@@ -259,51 +316,33 @@ mod tests {
     }
 
     #[test]
-    fn legacy_mode_matches_frozen_python_checkpoints() {
-        use std::io::Cursor;
-
-        use ndarray::Array3;
-        use ndarray_npy::NpzReader;
-
-        const BASELINE: &[u8] =
-            include_bytes!("../../../baselines/legacy-python-v1/linear-classic-negative-ev0.npz");
-        const RAW: &[u8] = include_bytes!("../../../tests/fixtures/linear.dng");
-        const CUBE: &str = include_str!(
-            "../../../vendor/V-Log-Alchemy/Luts/Fujifilm/FLog2C_to_CLASSIC-Neg_VLog.cube"
-        );
-
-        let mut baseline = NpzReader::new(Cursor::new(BASELINE)).unwrap();
+    fn legacy_common_stages_match_frozen_python_checkpoints() {
+        let mut baseline = NpzReader::new(Cursor::new(LEGACY_BASELINE)).unwrap();
         let decoded_expected: Array3<u16> = baseline.by_name("rgb16").unwrap();
         let exposure_expected: Array3<f32> = baseline.by_name("exposure").unwrap();
         let boost_expected: Array3<f32> = baseline.by_name("boost").unwrap();
         let gamut_expected: Array3<f32> = baseline.by_name("gamut").unwrap();
         let vlog_expected: Array3<f64> = baseline.by_name("vlog").unwrap();
-        let lut_expected: Array3<f32> = baseline.by_name("lut").unwrap();
-        let final_expected: Array3<u16> = baseline.by_name("final_uint16").unwrap();
 
         let decoded = alchemy_libraw::decode(RAW, false).unwrap();
         let decoded_expected = decoded_expected.as_slice().unwrap();
-        let decode_differences: Vec<_> = decoded
+        let first_decode_difference = decoded
             .pixels
             .iter()
             .zip(decoded_expected)
-            .enumerate()
-            .filter(|(_, (actual, expected))| actual != expected)
-            .collect();
+            .position(|(actual, expected)| actual != expected);
         assert!(
-            decode_differences.is_empty(),
-            "{} decoded samples differ; first={:?}",
-            decode_differences.len(),
-            decode_differences.first()
+            first_decode_difference.is_none(),
+            "decoded RGB16 first differs at sample {first_decode_difference:?}"
         );
 
-        let lut = Lut3d::parse(CUBE).unwrap();
-        let pipeline = ColorPipeline::new(0.0, ProcessingMode::LegacyPythonV1, lut).unwrap();
         let exposure_expected = exposure_expected.as_slice().unwrap();
         let boost_expected = boost_expected.as_slice().unwrap();
         let gamut_expected = gamut_expected.as_slice().unwrap();
         let vlog_expected = vlog_expected.as_slice().unwrap();
-        let lut_expected = lut_expected.as_slice().unwrap();
+        let stage_lut = Lut3d::parse(IDENTITY_2).unwrap();
+        let stage_pipeline =
+            ColorPipeline::new(0.0, ProcessingMode::LegacyPythonV1, stage_lut).unwrap();
 
         for (pixel_index, input) in decoded.pixels.chunks_exact(3).enumerate() {
             let offset = pixel_index * 3;
@@ -318,7 +357,7 @@ mod tests {
                 &exposure_expected[offset..offset + 3],
                 1.0e-7,
             );
-            let boost = pipeline.input_pixel(input);
+            let boost = stage_pipeline.input_pixel(input);
             assert_channels_close("boost", boost, &boost_expected[offset..offset + 3], 2.0e-6);
             let gamut = multiply_legacy_matrix(boost);
             assert_channels_close("gamut", gamut, &gamut_expected[offset..offset + 3], 2.0e-6);
@@ -328,24 +367,103 @@ mod tests {
                     (f64::from(vlog[channel]) - vlog_expected[offset + channel]).abs() <= 2.0e-6
                 );
             }
-            let output = pipeline.lut.sample_legacy(vlog);
-            assert_channels_close("lut", output, &lut_expected[offset..offset + 3], 2.0e-6);
         }
+    }
 
-        let actual = pipeline
-            .render_rgb16(&decoded.pixels, decoded.width, decoded.height)
-            .unwrap();
-        let expected = final_expected.as_slice().unwrap();
-        let max_code_difference = actual
-            .iter()
-            .zip(expected)
-            .map(|(actual, expected)| actual.abs_diff(*expected))
-            .max()
-            .unwrap();
-        assert!(
-            max_code_difference <= 1,
-            "max code difference: {max_code_difference}"
-        );
+    #[test]
+    fn legacy_exports_match_frozen_python_for_all_luts() {
+        let mut baseline = NpzReader::new(Cursor::new(LEGACY_BASELINE)).unwrap();
+        let lut_expected: Array4<f32> = baseline.by_name("lut_outputs").unwrap();
+        let final_expected: Array4<u16> = baseline.by_name("final_uint16").unwrap();
+        let lut_manifest: LutManifest = serde_json::from_str(LUT_MANIFEST).unwrap();
+        let decoded = alchemy_libraw::decode(RAW, false).unwrap();
+
+        assert_eq!(lut_manifest.luts.len(), lut_expected.len_of(Axis(0)));
+        assert_eq!(lut_manifest.luts.len(), final_expected.len_of(Axis(0)));
+        let lut_root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/V-Log-Alchemy/Luts");
+
+        for (look_index, look) in lut_manifest.luts.iter().enumerate() {
+            let cube = std::fs::read_to_string(lut_root.join(&look.file)).unwrap();
+            let lut = Lut3d::parse(&cube).unwrap();
+            let pipeline = ColorPipeline::new(0.0, ProcessingMode::LegacyPythonV1, lut).unwrap();
+            let expected_lut = lut_expected.index_axis(Axis(0), look_index);
+            let expected_lut = expected_lut.as_slice().unwrap();
+
+            for (pixel_index, input) in decoded.pixels.chunks_exact(3).enumerate() {
+                let offset = pixel_index * 3;
+                let output = pipeline.render_lut(pipeline.input_pixel(input));
+                assert_channels_close(
+                    &format!("{} LUT", look.id),
+                    output,
+                    &expected_lut[offset..offset + 3],
+                    2.0e-6,
+                );
+            }
+
+            let actual = pipeline
+                .render_rgb16(&decoded.pixels, decoded.width, decoded.height)
+                .unwrap();
+            let expected = final_expected.index_axis(Axis(0), look_index);
+            let max_code_difference = actual
+                .iter()
+                .zip(expected.iter())
+                .map(|(actual, expected)| actual.abs_diff(*expected))
+                .max()
+                .unwrap();
+            assert!(
+                max_code_difference <= 1,
+                "{} export max code difference: {max_code_difference}",
+                look.id
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_previews_match_frozen_python_for_all_luts() {
+        let mut baseline = NpzReader::new(Cursor::new(LEGACY_BASELINE)).unwrap();
+        let decoded_expected: Array3<u16> = baseline.by_name("preview_rgb16").unwrap();
+        let preview_expected: Array4<f32> = baseline.by_name("preview_srgb").unwrap();
+        let lut_manifest: LutManifest = serde_json::from_str(LUT_MANIFEST).unwrap();
+        let decoded = alchemy_libraw::decode(RAW, true).unwrap();
+
+        assert_eq!(decoded.pixels, decoded_expected.as_slice().unwrap());
+        assert_eq!(lut_manifest.luts.len(), preview_expected.len_of(Axis(0)));
+        let lut_root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/V-Log-Alchemy/Luts");
+
+        for (look_index, look) in lut_manifest.luts.iter().enumerate() {
+            let cube = std::fs::read_to_string(lut_root.join(&look.file)).unwrap();
+            let lut = Lut3d::parse(&cube).unwrap();
+            let pipeline = ColorPipeline::new(0.0, ProcessingMode::LegacyPythonV1, lut).unwrap();
+            let preview = pipeline
+                .render_preview(
+                    &decoded.pixels,
+                    decoded.width,
+                    decoded.height,
+                    decoded.width.max(decoded.height),
+                )
+                .unwrap();
+            let expected = preview_expected.index_axis(Axis(0), look_index);
+            let expected = expected.as_slice().unwrap();
+            let max_preview_difference = preview
+                .lut_rgba
+                .chunks_exact(4)
+                .zip(expected.chunks_exact(3))
+                .flat_map(|(actual, expected)| {
+                    actual[..3]
+                        .iter()
+                        .zip(expected)
+                        .map(|(actual, expected)| actual.abs_diff(quantize_u8(*expected)))
+                })
+                .max()
+                .unwrap();
+            assert!(
+                max_preview_difference <= 1,
+                "{} preview max code difference: {max_preview_difference}",
+                look.id
+            );
+        }
     }
 
     fn assert_channels_close(label: &str, actual: [f32; 3], expected: &[f32], tolerance: f32) {

@@ -68,6 +68,18 @@ pub(crate) fn render_base(linear_prophoto: [f32; 3]) -> [f32; 3] {
     linear_srgb.map(|channel| srgb_oetf((channel * scale).max(0.0)))
 }
 
+pub(crate) fn legacy_bt709_to_srgb(encoded: f32) -> f32 {
+    // Raw Alchemy 0.4.2 clipped LUT output, decoded its assumed BT.709
+    // transfer, then encoded sRGB for preview. Export skipped this transform.
+    let encoded = encoded.clamp(0.0, 1.0);
+    let linear = if encoded < 0.081 {
+        encoded / 4.5
+    } else {
+        ((encoded + 0.099) / 1.099).powf(1.0 / 0.45)
+    };
+    srgb_oetf(linear)
+}
+
 fn srgb_oetf(linear: f32) -> f32 {
     if linear <= 0.003_130_8 {
         linear * 12.92
@@ -98,6 +110,30 @@ mod tests {
         let converted = multiply_matrix(&PROPHOTO_D65_TO_V_GAMUT, [0.42; 3]);
         for channel in converted {
             assert!((channel - 0.42).abs() < 2.0e-7);
+        }
+    }
+
+    #[test]
+    fn d65_matrix_handles_primaries_and_hdr_neutral() {
+        let red = multiply_matrix(&PROPHOTO_D65_TO_V_GAMUT, [1.0, 0.0, 0.0]);
+        assert!((red[0] - 1.139_612_4).abs() < f32::EPSILON);
+        assert!((red[1] - -0.023_128_307).abs() < f32::EPSILON);
+        assert!((red[2] - 0.009_522_688).abs() < f32::EPSILON);
+
+        let green = multiply_matrix(&PROPHOTO_D65_TO_V_GAMUT, [0.0, 1.0, 0.0]);
+        assert!((green[0] - -0.008_246_087).abs() < f32::EPSILON);
+        assert!((green[1] - 0.933_486_2).abs() < f32::EPSILON);
+        assert!((green[2] - 0.003_834_068).abs() < f32::EPSILON);
+
+        let blue = multiply_matrix(&PROPHOTO_D65_TO_V_GAMUT, [0.0, 0.0, 1.0]);
+        assert!((blue[0] - -0.131_366_31).abs() < f32::EPSILON);
+        assert!((blue[1] - 0.089_642_06).abs() < f32::EPSILON);
+        assert!((blue[2] - 0.986_643_25).abs() < f32::EPSILON);
+
+        let hdr_neutral = multiply_matrix(&PROPHOTO_D65_TO_V_GAMUT, [8.0; 3]);
+        for channel in hdr_neutral {
+            assert!(channel.is_finite());
+            assert!((channel - 8.0).abs() < 2.0e-6);
         }
     }
 }

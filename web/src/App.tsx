@@ -637,7 +637,11 @@ export default function App() {
             </div>
           )}
 
-          <section className="comparison" aria-label="Base and LUT comparison">
+          <section
+            className="comparison"
+            aria-label="Base and LUT comparison"
+            data-decode-count={preview?.decodeCount}
+          >
             {!selected ? (
               <div className="workspace-empty">
                 <div className="empty-icon">

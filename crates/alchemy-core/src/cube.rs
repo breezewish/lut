@@ -282,6 +282,9 @@ DOMAIN_MAX 1 1 1
             [0.5, 0.8, 0.2],
             [0.2, 0.8, 0.5],
             [0.2, 0.5, 0.8],
+            [0.5, 0.5, 0.2],
+            [0.2, 0.5, 0.5],
+            [0.5, 0.2, 0.5],
         ] {
             let actual = lut.sample(input);
             for channel in 0..3 {
@@ -296,6 +299,16 @@ DOMAIN_MAX 1 1 1
         let actual = lut.sample([-2.0, 0.4, 3.0]);
         for (actual, expected) in actual.into_iter().zip([0.0, 0.4, 1.0]) {
             assert!((actual - expected).abs() < 2.0e-7);
+        }
+    }
+
+    #[test]
+    fn accepts_scientific_notation() {
+        let source = IDENTITY_2.replacen("1 0 0", "1e0 0e0 0e0", 1);
+        let lut = Lut3d::parse(&source).unwrap();
+        let actual = lut.sample([1.0, 0.0, 0.0]);
+        for (actual, expected) in actual.into_iter().zip([1.0, 0.0, 0.0]) {
+            assert!((actual - expected).abs() < f32::EPSILON);
         }
     }
 

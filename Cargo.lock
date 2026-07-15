@@ -28,6 +28,8 @@ dependencies = [
  "alchemy-libraw",
  "ndarray",
  "ndarray-npy",
+ "serde",
+ "serde_json",
  "thiserror",
  "tiff",
  "wasm-bindgen",

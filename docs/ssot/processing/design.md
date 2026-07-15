@@ -16,6 +16,6 @@ Preview downsamples directly while reading RGB16 and allocates only two destinat
 
 ## Baseline
 
-`baselines/legacy-python-v1` locks Python 3.11, Raw Alchemy and dependency revisions, recipe hashes, array types and shapes, every checkpoint hash, and a compressed NPZ fixture. Rust reads the committed fixture directly; normal tests do not execute Python or require the original external repository.
+`baselines/legacy-python-v1` locks Python 3.11, Raw Alchemy and dependency revisions, recipe hashes, all 27 creative LUT hashes and order, array types and shapes, every checkpoint hash, and a compressed NPZ fixture. Rust reads the committed fixture directly; normal tests do not execute Python or require the original external repository.
 
-The baseline covers decode RGB16, exposure, Boost, gamut matrix, V-Log, LUT, and final uint16. Decode is exact. Float tolerances are stage-local. LUT maximum absolute error is `2e-6`; final maximum error is one code value.
+The baseline covers decode RGB16, exposure, Boost, gamut matrix, V-Log, every supported LUT, final uint16 export, and the distinct half-size preview path. Legacy preview alone performs the historical BT.709-to-sRGB display conversion after LUT output; export does not. Decode is exact. Float tolerances are stage-local. LUT maximum absolute error is `2e-6`; final export and preview maximum error is one code value.
