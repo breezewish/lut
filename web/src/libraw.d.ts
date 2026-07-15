@@ -1,10 +1,8 @@
 declare module "*libraw.js" {
-  interface ProcessedImage {
+  interface DecodedImageInfo {
     width: number;
     height: number;
-    colors: number;
-    bits: number;
-    data: Uint8Array | Uint16Array;
+    sampleCount: number;
   }
 
   interface Metadata {
@@ -22,9 +20,10 @@ declare module "*libraw.js" {
   }
 
   class LibRawInstance {
-    open(buffer: Uint8Array, settings: Record<string, unknown>): void;
-    metadata(fullOutput?: boolean): Metadata;
-    imageData(): ProcessedImage;
+    open(buffer: Uint8Array, halfSize: boolean): void;
+    metadata(): Metadata;
+    imageInfo(): DecodedImageInfo;
+    imageView(offset: number, length: number): Uint16Array;
     thumbnailData(): Thumbnail | undefined;
     delete(): void;
   }

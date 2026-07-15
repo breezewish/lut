@@ -6,10 +6,10 @@ readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly OUTPUT_DIR="$ROOT/web/src/libraw"
 readonly IMAGE="emscripten/emsdk:5.0.7"
 readonly LIBRAW_COMMIT="0029e79482c3a133d3de72ff51117ca7d0a4ff43"
-readonly WRAPPER_COMMIT="32fd36a9883a10c1632bc20073f1ea88cc60487a"
 readonly JPEG_COMMIT="4e151a4ad91001b3aa8c2ece2205c15f487ce320"
 readonly FMA_OVERRIDE_SHA256="4d17be3e69bd0995410c07181ea56f35353ee60aa47bfe2d874ff687f593a146"
-readonly BUILD_ID="libraw-${LIBRAW_COMMIT}-wrapper-${WRAPPER_COMMIT}-jpeg-${JPEG_COMMIT}-fma-${FMA_OVERRIDE_SHA256:0:12}-emcc-5.0.7-single-portable"
+readonly BROWSER_WRAPPER_SHA256="$(sha256sum "$ROOT/crates/alchemy-libraw/src/browser_wrapper.cpp" | cut -d ' ' -f 1)"
+readonly BUILD_ID="libraw-${LIBRAW_COMMIT}-wrapper-${BROWSER_WRAPPER_SHA256:0:12}-jpeg-${JPEG_COMMIT}-fma-${FMA_OVERRIDE_SHA256:0:12}-emcc-5.0.7-single-portable"
 readonly JPEG_BUILD_DIR="$OUTPUT_DIR/.libjpeg-build"
 
 [[ "$(sha256sum "$ROOT/crates/alchemy-libraw/src/postprocessing_utils.cpp" | cut -d ' ' -f 1)" == "$FMA_OVERRIDE_SHA256" ]] \
@@ -25,8 +25,6 @@ fi
 
 [[ "$(git -C "$ROOT/vendor/LibRaw" rev-parse HEAD)" == "$LIBRAW_COMMIT" ]] \
   || { echo "vendor/LibRaw is not at $LIBRAW_COMMIT" >&2; exit 1; }
-[[ "$(git -C "$ROOT/vendor/LibRaw-Wasm" rev-parse HEAD)" == "$WRAPPER_COMMIT" ]] \
-  || { echo "vendor/LibRaw-Wasm is not at $WRAPPER_COMMIT" >&2; exit 1; }
 [[ "$(git -C "$ROOT/vendor/libjpeg-turbo" rev-parse HEAD)" == "$JPEG_COMMIT" ]] \
   || { echo "vendor/libjpeg-turbo is not at $JPEG_COMMIT" >&2; exit 1; }
 
@@ -83,7 +81,7 @@ rm -rf "$JPEG_BUILD_DIR"
     -sINITIAL_MEMORY=128MB \
     "${SOURCES[@]}" \
     crates/alchemy-libraw/src/postprocessing_utils.cpp \
-    vendor/LibRaw-Wasm/libraw_wrapper.cpp \
+    crates/alchemy-libraw/src/browser_wrapper.cpp \
     web/src/libraw/.libjpeg-build/libjpeg.a \
     -o web/src/libraw/libraw.js
 

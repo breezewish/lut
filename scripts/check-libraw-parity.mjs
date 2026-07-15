@@ -27,20 +27,39 @@ try {
     { cwd: root },
   );
 
-  const [rawBytes, wasmBytes, settingsBytes, nativeBytes] = await Promise.all([
+  const [rawBytes, wasmBytes, nativeBytes] = await Promise.all([
     readFile(join(root, "tests/fixtures/linear.dng")),
     readFile(join(root, "web/src/libraw/libraw.wasm")),
-    readFile(join(root, "web/src/libraw-settings.json"), "utf8"),
     readFile(nativeOutput),
   ]);
   const module = await createLibRaw({ wasmBinary: wasmBytes });
   const raw = new module.LibRaw();
   try {
-    raw.open(new Uint8Array(rawBytes), {
-      ...JSON.parse(settingsBytes),
-      halfSize: 0,
-    });
-    const image = raw.imageData();
+    raw.open(new Uint8Array(rawBytes), false);
+    const image = raw.imageInfo();
+    const pixels = raw.imageView(0, image.sampleCount);
+    const firstPixel = raw.imageView(0, 3);
+    const lastPixel = raw.imageView(image.sampleCount - 3, 3);
+    if (
+      firstPixel.buffer !== pixels.buffer ||
+      lastPixel.buffer !== pixels.buffer
+    ) {
+      throw new Error("LibRaw RGB16 slices are copies instead of WASM views");
+    }
+    let rejectedOutOfBoundsView = false;
+    try {
+      raw.imageView(image.sampleCount, 1);
+    } catch (error) {
+      rejectedOutOfBoundsView = true;
+      if (typeof error === "object" && error !== null && "excPtr" in error) {
+        module.decrementExceptionRefcount(error);
+      }
+    }
+    if (!rejectedOutOfBoundsView) {
+      throw new Error(
+        "LibRaw accepted an RGB16 view outside the decoded image",
+      );
+    }
     const nativeWidth = nativeBytes.readUInt32LE(0);
     const nativeHeight = nativeBytes.readUInt32LE(4);
     if (image.width !== nativeWidth || image.height !== nativeHeight) {
@@ -48,14 +67,14 @@ try {
         `LibRaw dimensions differ: WASM ${image.width}x${image.height}, native ${nativeWidth}x${nativeHeight}`,
       );
     }
-    if (nativeBytes.length !== 8 + image.data.length * 2) {
+    if (nativeBytes.length !== 8 + pixels.length * 2) {
       throw new Error("Native LibRaw returned an unexpected RGB16 buffer size");
     }
-    for (let index = 0; index < image.data.length; index += 1) {
+    for (let index = 0; index < pixels.length; index += 1) {
       const nativeSample = nativeBytes.readUInt16LE(8 + index * 2);
-      if (image.data[index] !== nativeSample) {
+      if (pixels[index] !== nativeSample) {
         throw new Error(
-          `LibRaw RGB16 differs at sample ${index}: WASM ${image.data[index]}, native ${nativeSample}`,
+          `LibRaw RGB16 differs at sample ${index}: WASM ${pixels[index]}, native ${nativeSample}`,
         );
       }
     }

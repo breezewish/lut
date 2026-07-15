@@ -12,27 +12,28 @@ export interface StripTiffEncoder {
  * retain a second full-resolution RGB16 allocation during export.
  */
 export function renderTiffInStrips(
-  pixels: Uint16Array,
+  sampleCount: number,
+  read: (offset: number, length: number) => Uint16Array,
   encoder: StripTiffEncoder,
 ): Uint8Array {
   let offset = 0;
   let consumed = false;
   try {
     for (;;) {
-      const sampleCount = encoder.next_strip_samples();
-      if (sampleCount === 0) break;
-      const remaining = pixels.length - offset;
-      if (sampleCount > remaining) {
+      const requested = encoder.next_strip_samples();
+      if (requested === 0) break;
+      const remaining = sampleCount - offset;
+      if (requested > remaining) {
         throw new Error(
-          `TIFF encoder requested ${sampleCount} samples with ${remaining} remaining.`,
+          `TIFF encoder requested ${requested} samples with ${remaining} remaining.`,
         );
       }
-      encoder.write_strip(pixels.subarray(offset, offset + sampleCount));
-      offset += sampleCount;
+      encoder.write_strip(read(offset, requested));
+      offset += requested;
     }
-    if (offset !== pixels.length) {
+    if (offset !== sampleCount) {
       throw new Error(
-        `TIFF encoder consumed ${offset} of ${pixels.length} samples.`,
+        `TIFF encoder consumed ${offset} of ${sampleCount} samples.`,
       );
     }
     consumed = true;

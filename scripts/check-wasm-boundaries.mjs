@@ -1,6 +1,10 @@
 import { readFile } from "node:fs/promises";
 
-const binding = await readFile("web/src/wasm/alchemy_core.js", "utf8");
+const [binding, worker, browserWrapper] = await Promise.all([
+  readFile("web/src/wasm/alchemy_core.js", "utf8"),
+  readFile("web/src/workers/processing.worker.ts", "utf8"),
+  readFile("crates/alchemy-libraw/src/browser_wrapper.cpp", "utf8"),
+]);
 
 function methodBody(signature) {
   const start = binding.indexOf(signature);
@@ -45,4 +49,29 @@ if (binding.includes("export function render_tiff(")) {
   throw new Error("The whole-image TIFF WASM binding must not be exported.");
 }
 
-console.log("Verified row-only preview and strip-only TIFF WASM bindings.");
+if (worker.includes(".imageData(")) {
+  throw new Error(
+    "The Worker must not request a complete JavaScript RGB16 copy.",
+  );
+}
+if (!worker.includes(".imageView(")) {
+  throw new Error("The Worker no longer reads bounded LibRaw RGB16 views.");
+}
+const imageViewStart = browserWrapper.indexOf("val image_view(");
+const imageViewEnd = browserWrapper.indexOf("\nprivate:", imageViewStart);
+const imageView = browserWrapper.slice(imageViewStart, imageViewEnd);
+if (imageViewStart === -1 || imageViewEnd === -1) {
+  throw new Error("Missing browser LibRaw image_view implementation.");
+}
+if (!imageView.includes("typed_memory_view(length, pixels + offset)")) {
+  throw new Error("LibRaw image_view no longer returns the bounded WASM view.");
+}
+if (imageView.includes("new_(") || imageView.includes('call<void>("set"')) {
+  throw new Error(
+    "LibRaw image_view unexpectedly copies RGB16 into JavaScript.",
+  );
+}
+
+console.log(
+  "Verified zero-copy LibRaw views, row-only preview, and strip-only TIFF WASM bindings.",
+);

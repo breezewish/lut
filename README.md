@@ -17,7 +17,7 @@ The source CUBE files do not declare their output gamut or transfer function. RA
 
 ## Development
 
-Prerequisites are Git, Node.js 24, Rust 1.92, `wasm-pack` 0.13.1, and Docker or Podman. The container builds the pinned LibRaw fork with Emscripten 5.0.7, one thread, portable C++17 arithmetic, explicit color-matrix FMA, and no `fast-math`; the Rust color core uses WASM SIMD.
+Prerequisites are Git, Node.js 24, Rust 1.92, `wasm-pack` 0.13.1, and Docker or Podman. The container builds the pinned LibRaw fork with the minimal project-owned browser wrapper, Emscripten 5.0.7, one thread, portable C++17 arithmetic, explicit color-matrix FMA, and no `fast-math`; the Rust color core uses WASM SIMD.
 
 ```sh
 git submodule update --init --recursive

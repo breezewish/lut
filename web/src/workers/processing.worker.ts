@@ -7,7 +7,6 @@ import initAlchemy, {
 } from "../wasm/alchemy_core.js";
 import { describeProcessingError } from "../lib/errors";
 import { renderTiffInStrips } from "../lib/tiff-export";
-import libRawSettings from "../libraw-settings.json";
 import type {
   LutDefinition,
   PreviewResult,
@@ -49,7 +48,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       cached = undefined;
       const previewRaw = new module.LibRaw();
       try {
-        previewRaw.open(new Uint8Array(data.buffer), decodeSettings(true));
+        previewRaw.open(new Uint8Array(data.buffer), true);
         const metadata = previewRaw.metadata();
         const thumbnail = previewRaw.thumbnailData();
         if (thumbnail?.format === "jpeg") {
@@ -61,22 +60,13 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
           };
           context.postMessage(reply, [thumbnail.data.buffer]);
         }
-        const image = previewRaw.imageData();
-        if (
-          image.bits !== 16 ||
-          image.colors !== 3 ||
-          !(image.data instanceof Uint16Array)
-        ) {
-          throw new Error(
-            "LibRaw did not return the required 16-bit RGB image.",
-          );
-        }
+        const image = previewRaw.imageInfo();
         decodeCount += 1;
         const cube = await loadLut(data.lut);
         cached = {
           fileId: data.fileId,
           renderer: createPreviewRenderer(
-            image.data,
+            previewRaw,
             image.width,
             image.height,
             cube,
@@ -112,17 +102,11 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
     const cube = await loadLut(data.lut);
     const exportRaw = new module.LibRaw();
     try {
-      exportRaw.open(new Uint8Array(data.buffer), decodeSettings(false));
-      const image = exportRaw.imageData();
-      if (
-        image.bits !== 16 ||
-        image.colors !== 3 ||
-        !(image.data instanceof Uint16Array)
-      ) {
-        throw new Error("LibRaw did not return the required 16-bit RGB image.");
-      }
+      exportRaw.open(new Uint8Array(data.buffer), false);
+      const image = exportRaw.imageInfo();
       const tiff = renderTiffInStrips(
-        image.data,
+        image.sampleCount,
+        (offset, length) => exportRaw.imageView(offset, length),
         new TiffEncoder(image.width, image.height, data.ev, cube),
       );
       const reply: WorkerReply = {
@@ -148,7 +132,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
 }
 
 function createPreviewRenderer(
-  pixels: Uint16Array,
+  raw: InstanceType<Awaited<ReturnType<typeof createLibRaw>>["LibRaw"]>,
   width: number,
   height: number,
   cube: string,
@@ -160,7 +144,7 @@ function createPreviewRenderer(
       const sourceRow = renderer.next_source_row();
       if (sourceRow === undefined) return renderer;
       const offset = sourceRow * rowSamples;
-      renderer.write_source_row(pixels.subarray(offset, offset + rowSamples));
+      renderer.write_source_row(raw.imageView(offset, rowSamples));
     }
   } catch (error) {
     renderer.free();
@@ -183,15 +167,6 @@ function describeRuntimeError(
   } finally {
     module.decrementExceptionRefcount(error);
   }
-}
-
-function decodeSettings(halfSize: boolean): Record<string, unknown> {
-  // The wrapper applies gamma only when all six LibRaw fields are present;
-  // libraw-settings.json includes the canonical four trailing zero defaults.
-  return {
-    ...libRawSettings,
-    halfSize: Number(halfSize),
-  };
 }
 
 async function renderCached(

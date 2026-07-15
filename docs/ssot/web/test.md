@@ -8,7 +8,7 @@
 - Every built-in LUT produces browser WASM RGB16 output within one code value of the optimized native corrected-v2 export.
 - Two different RAW files export as separately named RGB16 TIFF entries in one ZIP; each decompressed image matches its independent native export within one code value, proving isolated sequential processing state.
 - Stopping a multi-file export finishes the active file, omits the remaining files from the ZIP, and reports the partial count.
-- Browser export transfers only bounded source strips into the color WASM and fails if the encoder's requested strip sizes do not consume the image exactly.
+- Browser export reads bounded zero-copy LibRaw views, transfers only those source strips into the color WASM, and fails if the encoder's requested strip sizes do not consume the image exactly.
 - A corrupt DNG reports a product-language decode error with recovery actions and cannot be exported as a successful file.
 - At mobile width, the empty-state chooser and Add RAW action are visible before any processing controls or export action.
 - The built-in LUT manifest contains only verified source files with matching SHA-256 hashes.

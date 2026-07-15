@@ -16,9 +16,13 @@ test("passes only bounded source views across the color-WASM boundary", () => {
     free: vi.fn(),
   };
 
-  expect(renderTiffInStrips(pixels, encoder)).toEqual(
-    new Uint8Array([73, 73, 42, 0]),
-  );
+  expect(
+    renderTiffInStrips(
+      pixels.length,
+      (offset, length) => pixels.subarray(offset, offset + length),
+      encoder,
+    ),
+  ).toEqual(new Uint8Array([73, 73, 42, 0]));
   expect(writes.map((strip) => strip.length)).toEqual([
     250_000, 250_000, 100_000,
   ]);
@@ -40,7 +44,7 @@ test("rejects an encoder strip contract that exceeds the source image", () => {
     free,
   };
 
-  expect(() => renderTiffInStrips(new Uint16Array(3), encoder)).toThrow(
+  expect(() => renderTiffInStrips(3, () => new Uint16Array(), encoder)).toThrow(
     "TIFF encoder requested 4 samples with 3 remaining.",
   );
   expect(free).toHaveBeenCalledOnce();
