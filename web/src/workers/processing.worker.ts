@@ -41,8 +41,9 @@ context.onmessage = ({ data }: MessageEvent<WorkerCommand>) => {
 };
 
 async function handleCommand(data: WorkerCommand): Promise<void> {
+  let module: Awaited<ReturnType<typeof createLibRaw>> | undefined;
   try {
-    const { module } = await runtime;
+    ({ module } = await runtime);
     if (data.type === "decode") {
       cached?.renderer.free();
       cached = undefined;
@@ -121,11 +122,12 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       exportRaw.delete();
     }
   } catch (error) {
-    const { module } = await runtime;
     const reply: WorkerReply = {
       requestId: data.requestId,
       ok: false,
-      error: describeRuntimeError(error, module),
+      error: module
+        ? describeRuntimeError(error, module)
+        : "The local processing engine could not start. Reload the page to retry.",
     };
     context.postMessage(reply);
   }

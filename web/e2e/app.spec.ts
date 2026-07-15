@@ -370,6 +370,33 @@ test("all built-in LUTs match optimized native RGB16 exports", async ({
   }
 });
 
+test("reports a recoverable error when the local processing engine cannot start", async ({
+  page,
+}) => {
+  await page.route("**/*.wasm*", (route) => route.abort("failed"));
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(linearFixture);
+
+  await expect(page.getByRole("alert")).toContainText(
+    "The local processing engine could not start. Reload the page to retry.",
+  );
+  await expect(page.getByText("Decoding preview…")).toHaveCount(0);
+});
+
+test("short desktop viewports can scroll to export", async ({ page }) => {
+  await page.setViewportSize({ width: 1_024, height: 600 });
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(linearFixture);
+  await expect(page.getByLabel("Base preview")).toBeVisible({
+    timeout: 20_000,
+  });
+
+  const exportButton = page.getByRole("button", { name: "Export selected" });
+  await expect(exportButton).not.toBeInViewport();
+  await page.mouse.wheel(0, 1_000);
+  await expect(exportButton).toBeInViewport();
+});
+
 test("mobile empty state keeps import primary and defers processing controls", async ({
   page,
 }) => {

@@ -18,7 +18,7 @@ The browser uses one Dedicated Worker. It hosts a custom, single-threaded LibRaw
 
 ## Invariants
 
-- Decoded input is interleaved RGB16 in explicitly named `LibRaw ProPhoto D65 Linear`.
+- Decoded input is interleaved RGB16 in explicitly named `LibRaw ProPhoto D65 Linear`. Its numerical basis is defined by pinned LibRaw's `prophoto_rgb` transform, not by assigning a D65 white point to nominal ProPhoto primaries.
 - Browser and native LibRaw builds use source revision `0029e79482c3a133d3de72ff51117ca7d0a4ff43` and libjpeg-turbo revision `4e151a4ad91001b3aa8c2ece2205c15f487ce320`. Both use Blend highlight mode, camera white balance, AAHD, 16-bit output, linear gamma, and no auto-brightening.
 - Both LibRaw builds replace one pinned post-processing source unit with an otherwise identical local copy whose color-matrix dot products use explicit fused multiply-add order. This preserves the native/Python result exactly on WASM, which has no scalar hardware FMA.
 - The canonical core is single-threaded f32 WASM SIMD and never uses `fast-math`.

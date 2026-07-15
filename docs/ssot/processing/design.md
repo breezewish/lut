@@ -2,7 +2,7 @@
 
 ## Model
 
-`ColorPipeline` is an immutable recipe containing EV, processing mode, and one parsed LUT. It accepts decoded RGB16 and exposes preview, RGB16 reference output, and TIFF output. Fixed matrices and transfer constants are checked into source rather than resolved from runtime color-space registries.
+`ColorPipeline` is an immutable recipe containing EV, processing mode, and one parsed LUT. It accepts decoded RGB16 and exposes preview, RGB16 reference output, and TIFF output. Fixed matrices and transfer constants are checked into source rather than resolved from runtime color-space registries. Corrected input matrices are derived from pinned LibRaw's actual `sRGB → ProPhoto D65` constant; the sRGB matrix is its inverse, and the V-Gamut matrix additionally uses the published V-Gamut primaries with LibRaw's explicit D65 white.
 
 The C ABI exposes only corrected-v2 TIFF rendering. It returns a status plus a Rust-owned byte buffer, with one explicit paired free function. Stable integer statuses cross the ABI; Rust error details remain in the native Rust API.
 

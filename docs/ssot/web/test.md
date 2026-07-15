@@ -10,5 +10,7 @@
 - Stopping a multi-file export finishes the active file, omits the remaining files from the ZIP, and reports the partial count.
 - Browser export reads bounded zero-copy LibRaw views, transfers only those source strips into the color WASM, and fails if the encoder's requested strip sizes do not consume the image exactly.
 - A corrupt DNG reports a product-language decode error with recovery actions and cannot be exported as a successful file.
+- Blocking WASM startup requests produces a visible reload instruction and clears the indefinite decoding state.
 - At mobile width, the empty-state chooser and Add RAW action are visible before any processing controls or export action.
+- At a short desktop height, wheel scrolling brings the selected-file export action into the viewport.
 - The built-in LUT manifest contains only verified source files with matching SHA-256 hashes.

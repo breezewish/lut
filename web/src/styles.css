@@ -51,7 +51,7 @@ body,
 
 body {
   min-height: 100vh;
-  overflow: hidden;
+  overflow: auto;
   color: var(--ink);
   background: var(--bg);
 }
@@ -908,10 +908,6 @@ input[type="range"] {
 }
 
 @media (max-width: 52rem) {
-  body {
-    overflow: auto;
-  }
-
   .topbar {
     position: sticky;
     top: 0;

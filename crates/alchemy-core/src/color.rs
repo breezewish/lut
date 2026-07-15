@@ -1,7 +1,12 @@
-pub(crate) const PROPHOTO_D65_TO_V_GAMUT: [[f32; 3]; 3] = [
-    [1.139_612_4, -0.008_246_087, -0.131_366_31],
-    [-0.023_128_307, 0.933_486_2, 0.089_642_06],
-    [0.009_522_688, 0.003_834_068, 0.986_643_25],
+// LibRaw's pinned `prophoto_rgb` constant is the actual linear sRGB-to-output
+// transform; the output basis is not nominal ProPhoto primaries merely paired
+// with a D65 white point. These matrices are frozen offline from that constant.
+// The V-Gamut transform additionally uses Panasonic's published primaries and
+// LibRaw's explicit D65 white from `src/tables/colorconst.cpp`.
+pub(crate) const LIBRAW_PROPHOTO_D65_TO_V_GAMUT: [[f32; 3]; 3] = [
+    [1.115_908_7, -0.042_472_865, -0.073_432_505],
+    [-0.028_517_72, 0.936_791_24, 0.091_724_73],
+    [0.012_854_77, -0.008_144_919, 0.995_291_2],
 ];
 
 // Raw Alchemy 0.4.2 treated LibRaw's D65 output as standard D50 ProPhoto and
@@ -25,10 +30,10 @@ pub(crate) const LEGACY_PROPHOTO_D50_TO_V_GAMUT: [[f64; 3]; 3] = [
     ],
 ];
 
-const PROPHOTO_D65_TO_SRGB: [[f32; 3]; 3] = [
-    [2.073_830_6, -0.664_746_17, -0.409_084_6],
-    [-0.225_335_4, 1.219_972_8, 0.005_362_495],
-    [-0.013_918_564, -0.139_463_26, 1.153_381_8],
+const LIBRAW_PROPHOTO_D65_TO_SRGB: [[f32; 3]; 3] = [
+    [2.034_192_6, -0.727_419_8, -0.306_765_53],
+    [-0.228_810_76, 1.231_729_3, -0.002_921_616],
+    [-0.008_564_928, -0.153_272_58, 1.161_839],
 ];
 
 pub(crate) fn multiply_matrix(matrix: &[[f32; 3]; 3], rgb: [f32; 3]) -> [f32; 3] {
@@ -51,8 +56,8 @@ pub(crate) fn encode_v_log(linear: f32) -> f32 {
     }
 }
 
-pub(crate) fn render_base(linear_prophoto: [f32; 3]) -> [f32; 3] {
-    let linear_srgb = multiply_matrix(&PROPHOTO_D65_TO_SRGB, linear_prophoto);
+pub(crate) fn render_base(linear_libraw_prophoto: [f32; 3]) -> [f32; 3] {
+    let linear_srgb = multiply_matrix(&LIBRAW_PROPHOTO_D65_TO_SRGB, linear_libraw_prophoto);
     let luminance = 0.2126f32.mul_add(
         linear_srgb[0],
         0.7152f32.mul_add(linear_srgb[1], 0.0722 * linear_srgb[2]),
@@ -107,33 +112,60 @@ mod tests {
 
     #[test]
     fn d65_neutral_axis_stays_neutral() {
-        let converted = multiply_matrix(&PROPHOTO_D65_TO_V_GAMUT, [0.42; 3]);
+        let converted = multiply_matrix(&LIBRAW_PROPHOTO_D65_TO_V_GAMUT, [0.42; 3]);
         for channel in converted {
-            assert!((channel - 0.42).abs() < 2.0e-7);
+            assert!((channel - 0.42).abs() < 2.0e-6);
         }
     }
 
     #[test]
     fn d65_matrix_handles_primaries_and_hdr_neutral() {
-        let red = multiply_matrix(&PROPHOTO_D65_TO_V_GAMUT, [1.0, 0.0, 0.0]);
-        assert!((red[0] - 1.139_612_4).abs() < f32::EPSILON);
-        assert!((red[1] - -0.023_128_307).abs() < f32::EPSILON);
-        assert!((red[2] - 0.009_522_688).abs() < f32::EPSILON);
+        let red = multiply_matrix(&LIBRAW_PROPHOTO_D65_TO_V_GAMUT, [1.0, 0.0, 0.0]);
+        assert!((red[0] - 1.115_908_7).abs() < f32::EPSILON);
+        assert!((red[1] - -0.028_517_72).abs() < f32::EPSILON);
+        assert!((red[2] - 0.012_854_77).abs() < f32::EPSILON);
 
-        let green = multiply_matrix(&PROPHOTO_D65_TO_V_GAMUT, [0.0, 1.0, 0.0]);
-        assert!((green[0] - -0.008_246_087).abs() < f32::EPSILON);
-        assert!((green[1] - 0.933_486_2).abs() < f32::EPSILON);
-        assert!((green[2] - 0.003_834_068).abs() < f32::EPSILON);
+        let green = multiply_matrix(&LIBRAW_PROPHOTO_D65_TO_V_GAMUT, [0.0, 1.0, 0.0]);
+        assert!((green[0] - -0.042_472_865).abs() < f32::EPSILON);
+        assert!((green[1] - 0.936_791_24).abs() < f32::EPSILON);
+        assert!((green[2] - -0.008_144_919).abs() < f32::EPSILON);
 
-        let blue = multiply_matrix(&PROPHOTO_D65_TO_V_GAMUT, [0.0, 0.0, 1.0]);
-        assert!((blue[0] - -0.131_366_31).abs() < f32::EPSILON);
-        assert!((blue[1] - 0.089_642_06).abs() < f32::EPSILON);
-        assert!((blue[2] - 0.986_643_25).abs() < f32::EPSILON);
+        let blue = multiply_matrix(&LIBRAW_PROPHOTO_D65_TO_V_GAMUT, [0.0, 0.0, 1.0]);
+        assert!((blue[0] - -0.073_432_505).abs() < f32::EPSILON);
+        assert!((blue[1] - 0.091_724_73).abs() < f32::EPSILON);
+        assert!((blue[2] - 0.995_291_2).abs() < f32::EPSILON);
 
-        let hdr_neutral = multiply_matrix(&PROPHOTO_D65_TO_V_GAMUT, [8.0; 3]);
+        let hdr_neutral = multiply_matrix(&LIBRAW_PROPHOTO_D65_TO_V_GAMUT, [8.0; 3]);
         for channel in hdr_neutral {
             assert!(channel.is_finite());
-            assert!((channel - 8.0).abs() < 2.0e-6);
+            assert!((channel - 8.0).abs() < 3.0e-5);
+        }
+    }
+
+    #[test]
+    fn libraw_prophoto_basis_matches_direct_srgb_decode() {
+        // Frozen from the pinned LibRaw build by decoding linear.dng once to
+        // ProPhoto D65 and once to linear sRGB with otherwise identical settings.
+        let samples: [([u16; 3], [u16; 3]); 6] = [
+            ([941, 1_567, 1_222], [399, 1_712, 1_171]),
+            ([15_676, 15_206, 15_466], [16_084, 15_097, 15_504]),
+            ([23_045, 22_026, 22_588], [23_926, 21_791, 22_670]),
+            ([35_121, 36_687, 35_822], [33_767, 37_048, 35_696]),
+            ([48_527, 50_838, 49_562], [46_529, 51_370, 49_376]),
+            ([64_592, 63_966, 64_311], [65_134, 63_821, 64_362]),
+        ];
+
+        for (prophoto, expected_srgb) in samples {
+            let normalized = prophoto.map(|channel| f32::from(channel) / 65_535.0);
+            let actual = multiply_matrix(&LIBRAW_PROPHOTO_D65_TO_SRGB, normalized);
+            for channel in 0..3 {
+                let actual_code = actual[channel] * 65_535.0;
+                let expected_code = f32::from(expected_srgb[channel]);
+                assert!(
+                    (actual_code - expected_code).abs() <= 2.0,
+                    "actual={actual_code}, expected={expected_code}",
+                );
+            }
         }
     }
 }

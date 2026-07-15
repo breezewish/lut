@@ -2,7 +2,7 @@
 
 ## Input
 
-The decoder accepts camera RAW bytes and either returns a three-channel RGB16 image or fails. Canonical settings are camera white balance, camera matrix enabled, AAHD, Blend highlight reconstruction, linear gamma, ProPhoto output, 16 bits, and no automatic brightening.
+The decoder accepts camera RAW bytes and either returns a three-channel RGB16 image or fails. Canonical settings are camera white balance, camera matrix enabled, AAHD, Blend highlight reconstruction, linear gamma, ProPhoto output, 16 bits, and no automatic brightening. `LibRaw ProPhoto D65 Linear` means the numerical output basis defined by pinned LibRaw's `prophoto_rgb` constant; it is not nominal ProPhoto primaries independently normalized to D65.
 
 ## Corrected-v2
 

@@ -1,5 +1,5 @@
 use crate::color::{
-    PROPHOTO_D65_TO_V_GAMUT, encode_v_log, legacy_bt709_to_srgb, multiply_legacy_matrix,
+    LIBRAW_PROPHOTO_D65_TO_V_GAMUT, encode_v_log, legacy_bt709_to_srgb, multiply_legacy_matrix,
     multiply_matrix, render_base,
 };
 use crate::image::{checked_pixel_count, preview_dimensions};
@@ -145,12 +145,12 @@ impl ColorPipeline {
         }
     }
 
-    fn render_lut(&self, linear_prophoto: [f32; 3]) -> [f32; 3] {
+    fn render_lut(&self, linear_libraw_prophoto: [f32; 3]) -> [f32; 3] {
         let mut linear_v_gamut = match self.mode {
             ProcessingMode::CorrectedV2 => {
-                multiply_matrix(&PROPHOTO_D65_TO_V_GAMUT, linear_prophoto)
+                multiply_matrix(&LIBRAW_PROPHOTO_D65_TO_V_GAMUT, linear_libraw_prophoto)
             }
-            ProcessingMode::LegacyPythonV1 => multiply_legacy_matrix(linear_prophoto),
+            ProcessingMode::LegacyPythonV1 => multiply_legacy_matrix(linear_libraw_prophoto),
         };
         if self.mode == ProcessingMode::LegacyPythonV1 {
             linear_v_gamut = linear_v_gamut.map(|channel| channel.max(1.0e-6));

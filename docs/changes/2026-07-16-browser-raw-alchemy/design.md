@@ -7,6 +7,7 @@ Use pinned native and Emscripten builds of the LibRaw source used by Raw Alchemy
 ## Decisions
 
 - CPU/WASM is the reference; WebGPU and browser threads are excluded.
+- Corrected color matrices use pinned LibRaw's numerical ProPhoto D65 basis rather than nominal ProPhoto primaries paired with a different white point.
 - A pinned LibRaw post-processing source override makes color-matrix FMA order explicit across native and WASM targets.
 - The project-owned browser LibRaw wrapper exposes only metadata, optional thumbnail bytes, image dimensions, and bounds-checked zero-copy RGB16 views. It releases the input RAW and intermediate decoder state once the processed image exists.
 - Preview LibRaw instances are short-lived. Rust requests only the half-size source rows that contribute to a longest-edge-1600 cache; the persistent renderer retains those sampled RGB16 pixels and releases the LibRaw image after construction.

@@ -8,9 +8,11 @@ The selected file has side-by-side Base and LUT previews. Changing EV or LUT rer
 
 Export selected downloads one TIFF. Export all processes nonfailed queue entries serially and downloads one ZIP. It reports the current file and position, can stop after the current file, continues past per-file failures, and leaves a completion or partial-success summary. A corrupt file displays product-language recovery actions, disables its selected export, and is skipped by batch export.
 
+If the local WASM processing engine cannot initialize, the active request fails with a visible reload instruction instead of remaining in a decoding state.
+
 ## Interface
 
-The workspace is flat, borderless, shadowless, dark, and responsive. Image comparison is visually dominant. Processing controls are hidden before a file is selected. The task order is edit, compare, then export in both DOM and visual flow. Every interactive target is at least 44 px. Side-by-side comparison remains until the viewport is narrower than 35rem. Reduced-motion preferences are honored.
+The workspace is flat, borderless, shadowless, dark, and responsive. Image comparison is visually dominant. Processing controls are hidden before a file is selected. The task order is edit, compare, then export in both DOM and visual flow. Every interactive target is at least 44 px. Side-by-side comparison remains until the viewport is narrower than 35rem. When the complete workspace is taller than a short viewport, the page scrolls so export remains reachable. Reduced-motion preferences are honored.
 
 ## Privacy and assumptions
 
