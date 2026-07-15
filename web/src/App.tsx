@@ -172,13 +172,21 @@ export default function App() {
       decodedFileId.current !== selected.id
     )
       return;
+    let active = true;
     const timer = window.setTimeout(() => {
       client
         .render(selected.id, ev, selectedLut)
-        .then(setPreview)
-        .catch((error: Error) => setGlobalError(error.message));
+        .then((result) => {
+          if (active) setPreview(result);
+        })
+        .catch((error: Error) => {
+          if (active) setGlobalError(error.message);
+        });
     }, 120);
-    return () => window.clearTimeout(timer);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
   }, [client, ev, selected?.id, selected?.status, selectedLut?.id]);
 
   useEffect(() => {

@@ -16,15 +16,19 @@ function methodBody(signature) {
 }
 
 const previewConstructor = methodBody(
-  "constructor(pixels, width, height, max_edge, cube)",
+  "constructor(source_width, source_height, max_edge, cube)",
 );
+const previewWrite = methodBody("write_source_row(pixels)");
 const previewRender = methodBody("render(ev)");
 const tiffWrite = methodBody("write_strip(pixels)");
 
-if (!previewConstructor.includes("passArray16ToWasm0(pixels")) {
+if (previewConstructor.includes("passArray16ToWasm0")) {
   throw new Error(
-    "Preview source is not transferred into its persistent renderer.",
+    "Preview constructor unexpectedly copies the complete RGB16 source image.",
   );
+}
+if (!previewWrite.includes("passArray16ToWasm0(pixels")) {
+  throw new Error("Preview renderer no longer receives bounded RGB16 rows.");
 }
 if (previewRender.includes("passArray16ToWasm0")) {
   throw new Error(
@@ -41,4 +45,4 @@ if (binding.includes("export function render_tiff(")) {
   throw new Error("The whole-image TIFF WASM binding must not be exported.");
 }
 
-console.log("Verified persistent preview and strip-only TIFF WASM bindings.");
+console.log("Verified row-only preview and strip-only TIFF WASM bindings.");

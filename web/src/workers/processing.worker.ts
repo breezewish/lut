@@ -75,11 +75,10 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
         const cube = await loadLut(data.lut);
         cached = {
           fileId: data.fileId,
-          renderer: new PreviewRenderer(
+          renderer: createPreviewRenderer(
             image.data,
             image.width,
             image.height,
-            1_600,
             cube,
           ),
           lutId: data.lut.id,
@@ -92,9 +91,9 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
           },
         };
       } finally {
-        // The persistent Rust renderer now owns the preview RGB16 source.
-        // Release LibRaw's RAW copy and processing state before rerenders or
-        // a full-resolution export add more pressure to the WASM heap.
+        // The persistent Rust renderer now owns only the display-sized RGB16
+        // samples. Release LibRaw's larger half-size image and processing state
+        // before rerenders or a full-resolution export add memory pressure.
         previewRaw.delete();
       }
       const result = await renderCached(data.fileId, data.ev, data.lut);
@@ -145,6 +144,27 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       error: describeRuntimeError(error, module),
     };
     context.postMessage(reply);
+  }
+}
+
+function createPreviewRenderer(
+  pixels: Uint16Array,
+  width: number,
+  height: number,
+  cube: string,
+): PreviewRenderer {
+  const renderer = new PreviewRenderer(width, height, 1_600, cube);
+  const rowSamples = width * 3;
+  try {
+    for (;;) {
+      const sourceRow = renderer.next_source_row();
+      if (sourceRow === undefined) return renderer;
+      const offset = sourceRow * rowSamples;
+      renderer.write_source_row(pixels.subarray(offset, offset + rowSamples));
+    }
+  } catch (error) {
+    renderer.free();
+    throw error;
   }
 }
 

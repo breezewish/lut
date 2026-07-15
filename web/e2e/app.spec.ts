@@ -182,11 +182,22 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
 test("batch export produces one ZIP and corrupt input fails clearly", async ({
   page,
 }) => {
-  const bytes = await readFile(lossyFixture);
+  const [linearBytes, lossyBytes] = await Promise.all([
+    readFile(linearFixture),
+    readFile(lossyFixture),
+  ]);
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles([
-    { name: "first.dng", mimeType: "image/x-adobe-dng", buffer: bytes },
-    { name: "second.dng", mimeType: "image/x-adobe-dng", buffer: bytes },
+    {
+      name: "linear.dng",
+      mimeType: "image/x-adobe-dng",
+      buffer: linearBytes,
+    },
+    {
+      name: "lossy.dng",
+      mimeType: "image/x-adobe-dng",
+      buffer: lossyBytes,
+    },
   ]);
   await expect(page.getByText("2 local files")).toBeVisible();
   await expect(page.getByLabel("Base preview")).toBeVisible({
@@ -203,24 +214,56 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
   expect(archivePath).not.toBeNull();
   const archive = unzipSync(new Uint8Array(await readFile(archivePath!)));
   expect(Object.keys(archive).sort()).toEqual([
-    "first-fuji-classic-negative.tif",
-    "second-fuji-classic-negative.tif",
+    "linear-fuji-classic-negative.tif",
+    "lossy-fuji-classic-negative.tif",
   ]);
-  const first = decodeRgb16Tiff(
-    Buffer.from(archive["first-fuji-classic-negative.tif"]),
+  const browserLinear = decodeRgb16Tiff(
+    Buffer.from(archive["linear-fuji-classic-negative.tif"]),
   );
-  const second = decodeRgb16Tiff(
-    Buffer.from(archive["second-fuji-classic-negative.tif"]),
+  const browserLossy = decodeRgb16Tiff(
+    Buffer.from(archive["lossy-fuji-classic-negative.tif"]),
   );
-  expect([first.width, first.height]).toEqual([second.width, second.height]);
-  let batchMaxCodeDifference = 0;
-  for (let index = 0; index < first.rgb.length; index += 1) {
-    batchMaxCodeDifference = Math.max(
-      batchMaxCodeDifference,
-      Math.abs(first.rgb[index] - second.rgb[index]),
+  expect([browserLinear.width, browserLinear.height]).toEqual([64, 48]);
+  expect([browserLossy.width, browserLossy.height]).toEqual([256, 168]);
+
+  const nativeLinearPath = test.info().outputPath("batch-linear-native.tif");
+  const nativeLossyPath = test.info().outputPath("batch-lossy-native.tif");
+  await Promise.all([
+    execFileAsync(resolve("target/release/alchemy"), [
+      linearFixture,
+      nativeLinearPath,
+      "--lut",
+      classicNegative,
+      "--color",
+      "never",
+    ]),
+    execFileAsync(resolve("target/release/alchemy"), [
+      lossyFixture,
+      nativeLossyPath,
+      "--lut",
+      classicNegative,
+      "--color",
+      "never",
+    ]),
+  ]);
+  const nativeLinear = decodeRgb16Tiff(await readFile(nativeLinearPath));
+  const nativeLossy = decodeRgb16Tiff(await readFile(nativeLossyPath));
+  let linearMaxCodeDifference = 0;
+  for (let index = 0; index < browserLinear.rgb.length; index += 1) {
+    linearMaxCodeDifference = Math.max(
+      linearMaxCodeDifference,
+      Math.abs(browserLinear.rgb[index] - nativeLinear.rgb[index]),
     );
   }
-  expect(batchMaxCodeDifference).toBe(0);
+  expect(linearMaxCodeDifference).toBeLessThanOrEqual(1);
+  let lossyMaxCodeDifference = 0;
+  for (let index = 0; index < browserLossy.rgb.length; index += 1) {
+    lossyMaxCodeDifference = Math.max(
+      lossyMaxCodeDifference,
+      Math.abs(browserLossy.rgb[index] - nativeLossy.rgb[index]),
+    );
+  }
+  expect(lossyMaxCodeDifference).toBeLessThanOrEqual(1);
 
   await page.getByRole("button", { name: "Clear queue" }).click();
   await page.locator('input[type="file"]').setInputFiles({
@@ -238,6 +281,34 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
   await expect(
     page.getByRole("button", { name: "Export selected" }),
   ).toBeDisabled();
+});
+
+test("batch export stops after the active file", async ({ page }) => {
+  const bytes = await readFile(lossyFixture);
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles([
+    { name: "one.dng", mimeType: "image/x-adobe-dng", buffer: bytes },
+    { name: "two.dng", mimeType: "image/x-adobe-dng", buffer: bytes },
+    { name: "three.dng", mimeType: "image/x-adobe-dng", buffer: bytes },
+  ]);
+  await expect(page.getByLabel("Base preview")).toBeVisible({
+    timeout: 20_000,
+  });
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export all" }).click();
+  await page.getByRole("button", { name: "Stop after current" }).click();
+
+  const download = await downloadPromise;
+  const archivePath = await download.path();
+  expect(archivePath).not.toBeNull();
+  const archive = unzipSync(new Uint8Array(await readFile(archivePath!)));
+  const completed = Object.keys(archive).length;
+  expect(completed).toBeGreaterThan(0);
+  expect(completed).toBeLessThan(3);
+  await expect(
+    page.getByText(`Stopped after ${completed} of 3 exports.`),
+  ).toBeVisible();
 });
 
 test("all built-in LUTs match optimized native RGB16 exports", async ({

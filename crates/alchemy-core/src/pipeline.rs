@@ -2,6 +2,7 @@ use crate::color::{
     PROPHOTO_D65_TO_V_GAMUT, encode_v_log, legacy_bt709_to_srgb, multiply_legacy_matrix,
     multiply_matrix, render_base,
 };
+use crate::image::{checked_pixel_count, preview_dimensions};
 use crate::{AlchemyError, Lut3d, Result, tiff};
 
 /// Versioned processing behavior. Corrected V2 is the canonical product mode.
@@ -64,12 +65,7 @@ impl ColorPipeline {
         max_edge: u32,
     ) -> Result<Preview> {
         validate_image(pixels, width, height)?;
-        if max_edge == 0 {
-            return Err(AlchemyError::InvalidPreviewSize);
-        }
-        let scale = (f64::from(max_edge) / f64::from(width.max(height))).min(1.0);
-        let output_width = (f64::from(width) * scale).round().max(1.0) as u32;
-        let output_height = (f64::from(height) * scale).round().max(1.0) as u32;
+        let (output_width, output_height) = preview_dimensions(width, height, max_edge)?;
         let output_pixels = checked_pixel_count(output_width, output_height)?;
         let mut base_rgba = vec![0; output_pixels * 4];
         let mut lut_rgba = vec![0; output_pixels * 4];
@@ -179,15 +175,6 @@ pub(crate) fn validate_image(pixels: &[u16], width: u32, height: u32) -> Result<
         });
     }
     Ok(())
-}
-
-fn checked_pixel_count(width: u32, height: u32) -> Result<usize> {
-    if width == 0 || height == 0 {
-        return Err(AlchemyError::EmptyImage);
-    }
-    (width as usize)
-        .checked_mul(height as usize)
-        .ok_or(AlchemyError::ImageTooLarge)
 }
 
 fn legacy_boost(rgb: [f32; 3]) -> [f32; 3] {

@@ -7,6 +7,7 @@ mod c_api;
 mod color;
 mod cube;
 mod error;
+mod image;
 mod pipeline;
 mod tiff;
 

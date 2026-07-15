@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use crate::pipeline::validate_image;
+use crate::image::PreviewSource;
 use crate::tiff::Rgb16TiffWriter;
 use crate::{AlchemyError, ColorPipeline, Lut3d, ProcessingMode};
 
@@ -35,35 +35,34 @@ impl WasmPreview {
 
 #[wasm_bindgen]
 pub struct PreviewRenderer {
-    pixels: Vec<u16>,
-    width: u32,
-    height: u32,
-    max_edge: u32,
+    source: PreviewSource,
     lut: Lut3d,
 }
 
 #[wasm_bindgen]
 impl PreviewRenderer {
+    /// Creates an empty display-sized preview source for the decoded image.
     #[wasm_bindgen(constructor)]
     pub fn new(
-        pixels: Vec<u16>,
-        width: u32,
-        height: u32,
+        source_width: u32,
+        source_height: u32,
         max_edge: u32,
         cube: &str,
     ) -> std::result::Result<Self, JsError> {
-        validate_image(&pixels, width, height).map_err(to_js_error)?;
-        if max_edge == 0 {
-            return Err(to_js_error(AlchemyError::InvalidPreviewSize));
-        }
+        let source =
+            PreviewSource::new(source_width, source_height, max_edge).map_err(to_js_error)?;
         let lut = Lut3d::parse(cube).map_err(to_js_error)?;
-        Ok(Self {
-            pixels,
-            width,
-            height,
-            max_edge,
-            lut,
-        })
+        Ok(Self { source, lut })
+    }
+
+    /// Returns the next decoded source row required by the preview.
+    pub fn next_source_row(&self) -> Option<u32> {
+        self.source.next_source_row()
+    }
+
+    /// Resamples one requested decoded RGB16 source row into the preview cache.
+    pub fn write_source_row(&mut self, pixels: &[u16]) -> std::result::Result<(), JsError> {
+        self.source.write_source_row(pixels).map_err(to_js_error)
     }
 
     pub fn set_lut(&mut self, cube: &str) -> std::result::Result<(), JsError> {
@@ -74,8 +73,14 @@ impl PreviewRenderer {
     pub fn render(&self, ev: f32) -> std::result::Result<WasmPreview, JsError> {
         let pipeline = ColorPipeline::new(ev, ProcessingMode::CorrectedV2, self.lut.clone())
             .map_err(to_js_error)?;
+        let (width, height) = self.source.dimensions();
         let preview = pipeline
-            .render_preview(&self.pixels, self.width, self.height, self.max_edge)
+            .render_preview(
+                self.source.pixels().map_err(to_js_error)?,
+                width,
+                height,
+                width.max(height),
+            )
             .map_err(to_js_error)?;
         Ok(WasmPreview {
             width: preview.width,
