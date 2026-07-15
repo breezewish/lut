@@ -80,6 +80,7 @@ export default function App() {
   });
   const decodedFileId = useRef<string | undefined>(undefined);
   const fileInput = useRef<HTMLInputElement>(null);
+  const exposureInput = useRef<HTMLInputElement>(null);
   const stopAfterCurrent = useRef(false);
 
   const selected = items.find((item) => item.id === selectedId);
@@ -179,6 +180,15 @@ export default function App() {
     }, 120);
     return () => window.clearTimeout(timer);
   }, [client, ev, selected?.id, selected?.status, selectedLut?.id]);
+
+  useEffect(() => {
+    if (
+      exposureInput.current &&
+      document.activeElement !== exposureInput.current
+    ) {
+      exposureInput.current.value = String(ev);
+    }
+  }, [ev]);
 
   const addFiles = useCallback(
     (files: File[]) => {
@@ -596,20 +606,22 @@ export default function App() {
                     <label htmlFor="exposure">Exposure</label>
                     <label className="ev-value">
                       <input
+                        ref={exposureInput}
                         aria-label="Exposure value"
                         type="number"
                         min="-4"
                         max="4"
                         step="0.1"
-                        value={ev}
-                        onChange={(event) =>
-                          setEv(
-                            Math.max(
-                              -4,
-                              Math.min(4, Number(event.target.value)),
-                            ),
-                          )
-                        }
+                        defaultValue={ev}
+                        onChange={(event) => {
+                          const value = event.currentTarget.valueAsNumber;
+                          if (Number.isFinite(value)) {
+                            setEv(Math.max(-4, Math.min(4, value)));
+                          }
+                        }}
+                        onBlur={(event) => {
+                          event.currentTarget.value = String(ev);
+                        }}
                       />
                       <span>EV</span>
                     </label>

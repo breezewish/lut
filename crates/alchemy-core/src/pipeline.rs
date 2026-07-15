@@ -304,6 +304,11 @@ mod tests {
             AlchemyError::InvalidExposure
         );
         assert_eq!(
+            ColorPipeline::new(f32::INFINITY, ProcessingMode::CorrectedV2, lut.clone())
+                .unwrap_err(),
+            AlchemyError::InvalidExposure
+        );
+        assert_eq!(
             ColorPipeline::new(8.1, ProcessingMode::CorrectedV2, lut.clone()).unwrap_err(),
             AlchemyError::InvalidExposure
         );

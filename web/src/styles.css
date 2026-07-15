@@ -1030,6 +1030,10 @@ input[type="range"] {
     justify-content: flex-start;
   }
 
+  .export-feedback:empty {
+    display: none;
+  }
+
   .error-banner,
   .undo-banner {
     align-items: stretch;

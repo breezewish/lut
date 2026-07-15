@@ -20,6 +20,8 @@ fn exports_real_dng_to_rgb16_tiff_and_json() {
         .arg(root().join("tests/fixtures/identity.cube"))
         .arg("--output")
         .arg("json")
+        .arg("--color")
+        .arg("always")
         .output()
         .unwrap();
 
@@ -28,6 +30,7 @@ fn exports_real_dng_to_rgb16_tiff_and_json() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
+    assert!(!result.stdout.contains(&0x1b));
     let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(report["status"], "ok");
     assert_eq!(report["width"], 256);
@@ -64,4 +67,57 @@ fn corrupt_raw_fails_without_creating_output() {
     let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(report["status"], "error");
     assert!(!destination.exists());
+}
+
+#[test]
+fn write_failure_is_structured_and_creates_no_output() {
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory.path().join("missing/output.tif");
+    let result = Command::new(env!("CARGO_BIN_EXE_alchemy"))
+        .arg(root().join("tests/fixtures/linear.dng"))
+        .arg(&destination)
+        .arg("--lut")
+        .arg(root().join("tests/fixtures/identity.cube"))
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(!result.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(report["status"], "error");
+    assert!(
+        report["message"]
+            .as_str()
+            .unwrap()
+            .contains("could not write")
+    );
+    assert!(!destination.exists());
+}
+
+#[test]
+fn text_color_policy_controls_ansi() {
+    let directory = tempfile::tempdir().unwrap();
+    let always = Command::new(env!("CARGO_BIN_EXE_alchemy"))
+        .arg(root().join("tests/fixtures/linear.dng"))
+        .arg(directory.path().join("always.tif"))
+        .arg("--lut")
+        .arg(root().join("tests/fixtures/identity.cube"))
+        .arg("--color")
+        .arg("always")
+        .output()
+        .unwrap();
+    assert!(always.status.success());
+    assert!(always.stdout.contains(&0x1b));
+
+    let never = Command::new(env!("CARGO_BIN_EXE_alchemy"))
+        .arg(root().join("tests/fixtures/linear.dng"))
+        .arg(directory.path().join("never.tif"))
+        .arg("--lut")
+        .arg(root().join("tests/fixtures/identity.cube"))
+        .arg("--color")
+        .arg("never")
+        .output()
+        .unwrap();
+    assert!(never.status.success());
+    assert!(!never.stdout.contains(&0x1b));
 }

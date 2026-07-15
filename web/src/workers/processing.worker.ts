@@ -18,10 +18,7 @@ import type {
 const context: DedicatedWorkerGlobalScope =
   self as unknown as DedicatedWorkerGlobalScope;
 const runtime = Promise.all([createLibRaw(), initAlchemy()]).then(
-  ([module]) => ({
-    module,
-    raw: new module.LibRaw(),
-  }),
+  ([module]) => ({ module }),
 );
 
 let cached:
@@ -46,51 +43,60 @@ context.onmessage = ({ data }: MessageEvent<WorkerCommand>) => {
 
 async function handleCommand(data: WorkerCommand): Promise<void> {
   try {
-    const { module, raw } = await runtime;
+    const { module } = await runtime;
     if (data.type === "decode") {
       cached?.renderer.free();
       cached = undefined;
-      const bytes = new Uint8Array(data.buffer);
-      raw.open(bytes, decodeSettings(true));
-      const metadata = raw.metadata();
-      const thumbnail = raw.thumbnailData();
-      if (thumbnail?.format === "jpeg") {
-        const reply: WorkerReply = {
-          requestId: data.requestId,
-          ok: true,
-          type: "thumbnail",
-          result: { fileId: data.fileId, jpeg: thumbnail.data },
+      const previewRaw = new module.LibRaw();
+      try {
+        previewRaw.open(new Uint8Array(data.buffer), decodeSettings(true));
+        const metadata = previewRaw.metadata();
+        const thumbnail = previewRaw.thumbnailData();
+        if (thumbnail?.format === "jpeg") {
+          const reply: WorkerReply = {
+            requestId: data.requestId,
+            ok: true,
+            type: "thumbnail",
+            result: { fileId: data.fileId, jpeg: thumbnail.data },
+          };
+          context.postMessage(reply, [thumbnail.data.buffer]);
+        }
+        const image = previewRaw.imageData();
+        if (
+          image.bits !== 16 ||
+          image.colors !== 3 ||
+          !(image.data instanceof Uint16Array)
+        ) {
+          throw new Error(
+            "LibRaw did not return the required 16-bit RGB image.",
+          );
+        }
+        decodeCount += 1;
+        const cube = await loadLut(data.lut);
+        cached = {
+          fileId: data.fileId,
+          renderer: new PreviewRenderer(
+            image.data,
+            image.width,
+            image.height,
+            1_600,
+            cube,
+          ),
+          lutId: data.lut.id,
+          metadata: {
+            camera: [metadata.camera_make, metadata.camera_model]
+              .filter(Boolean)
+              .join(" "),
+            width: metadata.width,
+            height: metadata.height,
+          },
         };
-        context.postMessage(reply, [thumbnail.data.buffer]);
+      } finally {
+        // The persistent Rust renderer now owns the preview RGB16 source.
+        // Release LibRaw's RAW copy and processing state before rerenders or
+        // a full-resolution export add more pressure to the WASM heap.
+        previewRaw.delete();
       }
-      const image = raw.imageData();
-      if (
-        image.bits !== 16 ||
-        image.colors !== 3 ||
-        !(image.data instanceof Uint16Array)
-      ) {
-        throw new Error("LibRaw did not return the required 16-bit RGB image.");
-      }
-      decodeCount += 1;
-      const cube = await loadLut(data.lut);
-      cached = {
-        fileId: data.fileId,
-        renderer: new PreviewRenderer(
-          image.data,
-          image.width,
-          image.height,
-          1_600,
-          cube,
-        ),
-        lutId: data.lut.id,
-        metadata: {
-          camera: [metadata.camera_make, metadata.camera_model]
-            .filter(Boolean)
-            .join(" "),
-          width: metadata.width,
-          height: metadata.height,
-        },
-      };
       const result = await renderCached(data.fileId, data.ev, data.lut);
       postPreview(data.requestId, result);
       return;

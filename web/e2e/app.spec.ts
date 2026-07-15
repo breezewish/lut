@@ -87,6 +87,24 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
     .not.toBe(baseBeforeExposure);
   await expect(comparison).toHaveAttribute("data-decode-count", "1");
 
+  const exposureValue = page.getByRole("spinbutton", {
+    name: "Exposure value",
+  });
+  await exposureValue.focus();
+  await exposureValue.press("Control+A");
+  await exposureValue.pressSequentially("-1");
+  await expect(exposureValue).toHaveValue("-1");
+  await expect
+    .poll(() =>
+      page
+        .getByLabel("Base preview")
+        .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
+    )
+    .not.toBe(baseBeforeExposure);
+  await page.getByRole("slider", { name: "Exposure" }).fill("1");
+  await expect(exposureValue).toHaveValue("1");
+  await expect(comparison).toHaveAttribute("data-decode-count", "1");
+
   const classicNegativePreview = await page
     .getByLabel("Classic Negative preview")
     .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());

@@ -1,6 +1,6 @@
 # Web End-to-End Tests
 
-- Selecting a RAW shows local camera metadata, renders Base and LUT previews, and changes EV and LUT through the persistent Rust renderer without another RAW decode or source-image transfer.
+- Selecting a RAW shows local camera metadata, renders Base and LUT previews, releases the short-lived LibRaw decoder, and changes positive or directly typed negative EV plus LUT through the persistent Rust renderer without another RAW decode or source-image transfer.
 - A real camera RAW displays its labeled embedded JPEG before the processed preview replaces it.
 - Decode, rerender, and export issue only same-origin static GET requests; no photo data is uploaded.
 - The deterministic DNG decodes to exactly the same RGB16 dimensions and samples in native and WASM LibRaw builds.
