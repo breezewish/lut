@@ -12,3 +12,4 @@ baselines/legacy-python-v1/manifest.json
 assets/luts.json
 package-lock.json
 AGENTS.md
+.codexpotter/

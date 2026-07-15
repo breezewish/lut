@@ -12,7 +12,7 @@ The workspace contains three Rust crates:
 - `alchemy-libraw`: a small safe Rust API over a pinned LibRaw C++ build.
 - `alchemy-cli`: native RAW-to-TIFF product surface.
 
-The browser uses one Dedicated Worker. It hosts a custom, single-threaded LibRaw WASM build and the `alchemy-core` WASM build. Commands are serialized. The worker caches one half-size RGB16 preview; EV and LUT changes rerun only the Rust color core. Full-resolution export decodes on demand and runs sequentially.
+The browser uses one Dedicated Worker. It hosts a custom, single-threaded LibRaw WASM build and the `alchemy-core` WASM build. Commands are serialized. The worker caches one half-size RGB16 preview; EV and LUT changes rerun only the Rust color core. Full-resolution export decodes on demand and runs sequentially. Batch TIFFs enter a pass-through ZIP incrementally, avoiding redundant compression and contiguous archive copies while retaining the final Blob chunks required by portable browser downloads.
 
 `alchemy-core/include/alchemy.h` is the stable corrected-v2 C surface. It accepts the same decoded RGB16 contract, returns an owned TIFF buffer with stable status codes, and pairs allocation with `alchemy_free_buffer`. The Rust API remains the native CLI's direct integration surface.
 

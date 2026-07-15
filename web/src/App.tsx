@@ -18,7 +18,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { zipSync } from "fflate";
+import { Zip, ZipPassThrough } from "fflate";
 
 import { PreviewCanvas } from "./components/preview-canvas";
 import { Button } from "./components/ui/button";
@@ -265,7 +265,35 @@ export default function App() {
     setGlobalError(undefined);
     setExportSummary(undefined);
     stopAfterCurrent.current = false;
-    const output: Record<string, Uint8Array> = {};
+    const single = targets.length === 1;
+    const outputNames = new Set<string>();
+    // TIFF payloads are already Deflate-compressed. Pass-through ZIP entries
+    // avoid redundant compression and a second contiguous archive buffer.
+    const archiveChunks: Uint8Array<ArrayBuffer>[] = [];
+    let archiveError: Error | undefined;
+    const archive = single
+      ? undefined
+      : new Zip((error, chunk) => {
+          if (error) archiveError = error;
+          else if (chunk) {
+            if (!(chunk.buffer instanceof ArrayBuffer)) {
+              archiveError = new Error(
+                "The ZIP encoder returned unsupported shared memory.",
+              );
+            } else {
+              archiveChunks.push(
+                new Uint8Array(
+                  chunk.buffer,
+                  chunk.byteOffset,
+                  chunk.byteLength,
+                ),
+              );
+            }
+          }
+        });
+    let singleOutput:
+      | { name: string; bytes: Uint8Array<ArrayBuffer> }
+      | undefined;
     const failed: string[] = [];
     let stopped = false;
 
@@ -277,28 +305,50 @@ export default function App() {
           fileName: item.file.name,
         });
         updateItem(item.id, { status: "exporting", error: undefined });
+        let tiff: Uint8Array | undefined;
         try {
-          const tiff = await client.export(
+          tiff = await client.export(
             item.id,
             await item.file.arrayBuffer(),
             ev,
             selectedLut,
           );
-          const base = item.file.name.replace(/\.[^.]+$/, "") || "image";
-          const stem = `${base}-${selectedLut.id}`;
-          let outputName = `${stem}.tif`;
-          let suffix = 2;
-          while (outputName in output) {
-            outputName = `${stem}-${suffix}.tif`;
-            suffix += 1;
-          }
-          output[outputName] = tiff;
-          updateItem(item.id, { status: "done" });
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);
           failed.push(item.file.name);
           updateItem(item.id, { status: "error", error: message });
+        }
+
+        if (tiff) {
+          if (!(tiff.buffer instanceof ArrayBuffer)) {
+            throw new Error(
+              "The TIFF encoder returned unsupported shared memory.",
+            );
+          }
+          const outputBytes = new Uint8Array(
+            tiff.buffer,
+            tiff.byteOffset,
+            tiff.byteLength,
+          );
+          const base = item.file.name.replace(/\.[^.]+$/, "") || "image";
+          const stem = `${base}-${selectedLut.id}`;
+          let outputName = `${stem}.tif`;
+          let suffix = 2;
+          while (outputNames.has(outputName)) {
+            outputName = `${stem}-${suffix}.tif`;
+            suffix += 1;
+          }
+          outputNames.add(outputName);
+          if (archive) {
+            const entry = new ZipPassThrough(outputName);
+            archive.add(entry);
+            entry.push(outputBytes, true);
+            if (archiveError) throw archiveError;
+          } else {
+            singleOutput = { name: outputName, bytes: outputBytes };
+          }
+          updateItem(item.id, { status: "done" });
         }
 
         if (stopAfterCurrent.current && index + 1 < eligibleTargets.length) {
@@ -307,21 +357,20 @@ export default function App() {
         }
       }
 
-      const names = Object.keys(output);
-      if (names.length > 0) {
-        const single = targets.length === 1;
-        const firstName = names[0];
-        const bytes = single
-          ? output[firstName]
-          : zipSync(output, { level: 6 });
-        const blob = new Blob([bytes.slice().buffer], {
-          type: single ? "image/tiff" : "application/zip",
-        });
+      archive?.end();
+      if (archiveError) throw archiveError;
+      if (outputNames.size > 0) {
+        const blob = new Blob(
+          singleOutput ? [singleOutput.bytes] : archiveChunks,
+          {
+            type: single ? "image/tiff" : "application/zip",
+          },
+        );
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement("a");
         anchor.href = url;
         anchor.download = single
-          ? firstName
+          ? singleOutput!.name
           : `raw-alchemy-${selectedLut.id}.zip`;
         anchor.click();
         URL.revokeObjectURL(url);
@@ -332,8 +381,8 @@ export default function App() {
       const detail = failed.length > 0 ? ` Failed: ${failed.join(", ")}.` : "";
       setExportSummary(
         stopped
-          ? `Stopped after ${names.length} of ${eligibleTargets.length} exports.${detail}`
-          : `Exported ${names.length} of ${eligibleTargets.length}.${skipped > 0 ? ` Skipped ${skipped}.` : ""}${detail}`,
+          ? `Stopped after ${outputNames.size} of ${eligibleTargets.length} exports.${detail}`
+          : `Exported ${outputNames.size} of ${eligibleTargets.length}.${skipped > 0 ? ` Skipped ${skipped}.` : ""}${detail}`,
       );
     } catch (error) {
       setGlobalError(error instanceof Error ? error.message : String(error));

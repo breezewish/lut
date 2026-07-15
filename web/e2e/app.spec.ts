@@ -9,14 +9,52 @@ import { decodeRgb16Tiff } from "./tiff";
 
 const linearFixture = resolve("tests/fixtures/linear.dng");
 const lossyFixture = resolve("vendor/LibRaw-Wasm/test/integration/lossy.dng");
+const sonyFixture = resolve("vendor/LibRaw-Wasm/example-sony.ARW");
 const classicNegative = resolve(
   "vendor/V-Log-Alchemy/Luts/Fujifilm/FLog2C_to_CLASSIC-Neg_VLog.cube",
 );
 const execFileAsync = promisify(execFile);
 
+test("shows an embedded camera JPEG before the processed preview", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(() => {
+    const observedWindow = window as Window & { cameraPreviewSeen?: boolean };
+    observedWindow.cameraPreviewSeen = false;
+    const observer = new MutationObserver(() => {
+      if (document.querySelector('img[alt="Embedded camera preview"]')) {
+        observedWindow.cameraPreviewSeen = true;
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+
+  await page.locator('input[type="file"]').setInputFiles(sonyFixture);
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            (window as Window & { cameraPreviewSeen?: boolean })
+              .cameraPreviewSeen,
+        ),
+      { timeout: 20_000 },
+    )
+    .toBe(true);
+  await expect(page.getByLabel("Base preview")).toBeVisible({
+    timeout: 30_000,
+  });
+});
+
 test("decodes, re-renders exposure, and exports a local RAW", async ({
   page,
 }) => {
+  const requests: Array<{ method: string; url: string }> = [];
+  page.on("request", (request) => {
+    requests.push({ method: request.method(), url: request.url() });
+  });
   await page.goto("/");
   await expect(
     page.getByRole("heading", { name: "Start with a camera RAW" }),
@@ -114,6 +152,13 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
     );
   }
   expect(maxCodeDifference).toBeLessThanOrEqual(1);
+
+  const applicationOrigin = new URL(page.url()).origin;
+  expect(requests.length).toBeGreaterThan(0);
+  for (const request of requests) {
+    expect(request.method).toBe("GET");
+    expect(new URL(request.url).origin).toBe(applicationOrigin);
+  }
 });
 
 test("batch export produces one ZIP and corrupt input fails clearly", async ({
