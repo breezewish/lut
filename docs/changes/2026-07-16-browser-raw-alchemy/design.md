@@ -11,6 +11,7 @@ Use pinned native and Emscripten builds of the LibRaw source used by Raw Alchemy
 - A pinned LibRaw post-processing source override makes color-matrix FMA order explicit across native and WASM targets.
 - The project-owned browser LibRaw wrapper exposes only metadata, optional thumbnail bytes, image dimensions, and bounds-checked zero-copy RGB16 views. It releases the input RAW and intermediate decoder state once the processed image exists.
 - Preview LibRaw instances are short-lived. Rust requests only the half-size source rows that contribute to a longest-edge-1600 cache; the persistent renderer retains those sampled RGB16 pixels and releases the LibRaw image after construction.
+- Main-thread preview painting reinterprets each transferred RGBA8 result as a clamped Canvas view instead of allocating another complete Base and LUT copy on every rerender.
 - Full exports are sequential; the Worker reads only bounded LibRaw views into a stateful Rust WASM encoder, and fused color processing feeds bounded RGB16 strips to the Deflate TIFF writer without a JavaScript whole-image copy or second full-size source, float, or quantized intermediate.
 - Creative LUTs remain readable CUBE files, are copied only after hash verification, and load on demand.
 - Unknown LUT output semantics remain visible and unprofiled.

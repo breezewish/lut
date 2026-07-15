@@ -41,8 +41,8 @@ export interface PreviewResult {
   fileId: string;
   width: number;
   height: number;
-  base: Uint8Array;
-  lut: Uint8Array;
+  base: Uint8Array<ArrayBuffer>;
+  lut: Uint8Array<ArrayBuffer>;
   metadata: {
     camera: string;
     width: number;

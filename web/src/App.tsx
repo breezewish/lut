@@ -542,6 +542,7 @@ export default function App() {
                 >
                   <button
                     className="queue-select"
+                    aria-current={item.id === selectedId ? "true" : undefined}
                     onClick={() => setSelectedId(item.id)}
                   >
                     <FileImage size={18} aria-hidden="true" />
@@ -709,6 +710,7 @@ export default function App() {
           <section
             className="comparison"
             aria-label="Base and LUT comparison"
+            aria-busy={selected ? selected.status === "decoding" : undefined}
             data-decode-count={preview?.decodeCount}
           >
             {!selected ? (
@@ -809,7 +811,7 @@ export default function App() {
                 </Button>
               ) : (
                 <Button
-                  variant="secondary"
+                  variant={items.length > 1 ? "secondary" : "primary"}
                   onClick={() => void exportItems([selected])}
                   disabled={
                     selected.status === "error" || exporting || !selectedLut

@@ -58,6 +58,12 @@ cargo fmt --all --check
 cargo test --workspace
 cargo test --workspace --release
 cargo clippy --workspace --all-targets -- -D warnings
+cargo build -p alchemy-core
+cc -std=c11 -Wall -Wextra -Werror \
+  -Icrates/alchemy-core/include tests/c-api-smoke.c \
+  -Ltarget/debug -lalchemy_core -lm -Wl,-rpath,"$PWD/target/debug" \
+  -o target/c-api-smoke
+target/c-api-smoke
 npm test
 npm run build
 npm run test:e2e

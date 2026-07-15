@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
 
-const [binding, worker, browserWrapper] = await Promise.all([
+const [binding, worker, browserWrapper, previewCanvas] = await Promise.all([
   readFile("web/src/wasm/alchemy_core.js", "utf8"),
   readFile("web/src/workers/processing.worker.ts", "utf8"),
   readFile("crates/alchemy-libraw/src/browser_wrapper.cpp", "utf8"),
+  readFile("web/src/components/preview-canvas.tsx", "utf8"),
 ]);
 
 function methodBody(signature) {
@@ -71,7 +72,15 @@ if (imageView.includes("new_(") || imageView.includes('call<void>("set"')) {
     "LibRaw image_view unexpectedly copies RGB16 into JavaScript.",
   );
 }
+if (
+  !previewCanvas.includes("pixels.buffer") ||
+  previewCanvas.includes("clamped.set(pixels)")
+) {
+  throw new Error(
+    "Canvas rendering must reinterpret transferred RGBA8 without another complete preview copy.",
+  );
+}
 
 console.log(
-  "Verified zero-copy LibRaw views, row-only preview, and strip-only TIFF WASM bindings.",
+  "Verified zero-copy LibRaw and Canvas views, row-only preview, and strip-only TIFF WASM bindings.",
 );

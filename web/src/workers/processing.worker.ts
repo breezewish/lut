@@ -192,14 +192,24 @@ async function renderCached(
       fileId,
       width: preview.width,
       height: preview.height,
-      base: preview.take_base_rgba(),
-      lut: preview.take_lut_rgba(),
+      base: transferablePreviewView(preview.take_base_rgba(), "Base"),
+      lut: transferablePreviewView(preview.take_lut_rgba(), "LUT"),
       metadata: cached.metadata,
       decodeCount,
     };
   } finally {
     preview.free();
   }
+}
+
+function transferablePreviewView(
+  bytes: Uint8Array,
+  label: string,
+): Uint8Array<ArrayBuffer> {
+  if (!(bytes.buffer instanceof ArrayBuffer)) {
+    throw new Error(`${label} preview returned unsupported shared memory.`);
+  }
+  return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
 async function loadLut(lut: LutDefinition): Promise<string> {

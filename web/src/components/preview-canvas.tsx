@@ -9,7 +9,7 @@ export function PreviewCanvas({
 }: {
   label: string;
   detail: string;
-  pixels?: Uint8Array;
+  pixels?: Uint8Array<ArrayBuffer>;
   width?: number;
   height?: number;
 }) {
@@ -21,8 +21,11 @@ export function PreviewCanvas({
     if (!context) return;
     canvas.current.width = width;
     canvas.current.height = height;
-    const clamped = new Uint8ClampedArray(pixels.byteLength);
-    clamped.set(pixels);
+    const clamped = new Uint8ClampedArray(
+      pixels.buffer,
+      pixels.byteOffset,
+      pixels.byteLength,
+    );
     context.putImageData(new ImageData(clamped, width, height), 0, 0);
   }, [pixels, width, height]);
 
@@ -34,7 +37,7 @@ export function PreviewCanvas({
       </figcaption>
       <div className="preview-image">
         {pixels ? (
-          <canvas ref={canvas} aria-label={`${label} preview`} />
+          <canvas ref={canvas} role="img" aria-label={`${label} preview`} />
         ) : (
           <div className="preview-placeholder" aria-hidden="true" />
         )}

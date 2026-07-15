@@ -128,9 +128,22 @@ def main() -> None:
         "schemaVersion": 2,
         "mode": "legacy-python-v1",
         "recipe": {
+            "decode": {
+                "demosaic": "AAHD",
+                "gamma": [1, 1],
+                "halfSize": {"export": False, "preview": True},
+                "highlightMode": "Blend (2)",
+                "noAutoBright": True,
+                "outputBits": 16,
+                "outputColor": "LibRaw ProPhoto D65 Linear",
+                "useCameraWhiteBalance": True,
+            },
             "exposureEv": 0.0,
+            "cameraMatch": {"saturation": 1.25, "contrast": 1.1},
             "lensCorrection": False,
             "log": "V-Log",
+            "previewOutput": "BT.709 decode then sRGB encode",
+            "exportQuantization": "clip, scale by 65535, truncate",
             "luts": [look["id"] for look in looks],
         },
         "sources": {

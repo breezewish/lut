@@ -69,7 +69,15 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
   const comparison = page.getByRole("region", {
     name: "Base and LUT comparison",
   });
+  await expect(comparison).toHaveAttribute("aria-busy", "false");
   await expect(comparison).toHaveAttribute("data-decode-count", "1");
+  await expect(page.getByRole("img", { name: "Base preview" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /linear\.dng.*Ready/ }),
+  ).toHaveAttribute("aria-current", "true");
+  await expect(
+    page.getByRole("button", { name: "Export selected" }),
+  ).toHaveClass(/button-primary/);
   const baseBeforeExposure = await page
     .getByLabel("Base preview")
     .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
@@ -203,6 +211,12 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 20_000,
   });
+  await expect(page.getByRole("button", { name: "Export all" })).toHaveClass(
+    /button-primary/,
+  );
+  await expect(
+    page.getByRole("button", { name: "Export selected" }),
+  ).toHaveClass(/button-secondary/);
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export all" }).click();

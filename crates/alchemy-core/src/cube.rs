@@ -24,8 +24,8 @@ impl Lut3d {
     /// complete, finite 3D LUT.
     pub fn parse(source: &str) -> Result<Self> {
         let mut size = None;
-        let mut domain_min = [0.0; 3];
-        let mut domain_max = [1.0; 3];
+        let mut domain_min = None;
+        let mut domain_max = None;
         let mut samples = Vec::new();
 
         for (index, raw_line) in source.lines().enumerate() {
@@ -50,10 +50,16 @@ impl Lut3d {
                     size = Some(parsed);
                 }
                 Some("DOMAIN_MIN") => {
-                    domain_min = parse_triplet(&fields, line_number, "DOMAIN_MIN")?;
+                    if domain_min.is_some() {
+                        return invalid(line_number, "DOMAIN_MIN must appear at most once");
+                    }
+                    domain_min = Some(parse_triplet(&fields, line_number, "DOMAIN_MIN")?);
                 }
                 Some("DOMAIN_MAX") => {
-                    domain_max = parse_triplet(&fields, line_number, "DOMAIN_MAX")?;
+                    if domain_max.is_some() {
+                        return invalid(line_number, "DOMAIN_MAX must appear at most once");
+                    }
+                    domain_max = Some(parse_triplet(&fields, line_number, "DOMAIN_MAX")?);
                 }
                 Some(token) if token.starts_with("LUT_") => {
                     return invalid(line_number, "only a single 3D LUT is supported");
@@ -63,6 +69,8 @@ impl Lut3d {
         }
 
         let size = size.ok_or_else(|| cube_error(0, "missing LUT_3D_SIZE"))?;
+        let domain_min = domain_min.unwrap_or([0.0; 3]);
+        let domain_max = domain_max.unwrap_or([1.0; 3]);
         for axis in 0..3 {
             if domain_max[axis] <= domain_min[axis] {
                 return invalid(0, "DOMAIN_MAX must be greater than DOMAIN_MIN");
@@ -325,6 +333,23 @@ DOMAIN_MAX 1 1 1
         let nan = IDENTITY_2.replace("1 1 1", "NaN 1 1");
         assert!(matches!(
             Lut3d::parse(&nan).unwrap_err(),
+            AlchemyError::InvalidCube { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_duplicate_domain_declarations() {
+        let duplicate_min =
+            IDENTITY_2.replacen("DOMAIN_MIN 0 0 0", "DOMAIN_MIN 0 0 0\nDOMAIN_MIN 0 0 0", 1);
+        assert!(matches!(
+            Lut3d::parse(&duplicate_min).unwrap_err(),
+            AlchemyError::InvalidCube { .. }
+        ));
+
+        let duplicate_max =
+            IDENTITY_2.replacen("DOMAIN_MAX 1 1 1", "DOMAIN_MAX 1 1 1\nDOMAIN_MAX 1 1 1", 1);
+        assert!(matches!(
+            Lut3d::parse(&duplicate_max).unwrap_err(),
             AlchemyError::InvalidCube { .. }
         ));
     }
