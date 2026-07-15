@@ -110,12 +110,7 @@ impl ColorPipeline {
     pub fn render_rgb16(&self, pixels: &[u16], width: u32, height: u32) -> Result<Vec<u16>> {
         validate_image(pixels, width, height)?;
         let mut output = Vec::with_capacity(pixels.len());
-        for input in pixels.chunks_exact(3) {
-            output.extend(
-                self.render_lut(self.input_pixel(input))
-                    .map(|value| quantize_u16(value, self.mode)),
-            );
-        }
+        self.render_rgb16_strip(pixels, &mut output);
         Ok(output)
     }
 
@@ -128,14 +123,18 @@ impl ColorPipeline {
     pub fn render_tiff(&self, pixels: &[u16], width: u32, height: u32) -> Result<Vec<u8>> {
         validate_image(pixels, width, height)?;
         tiff::encode_rgb16_strips(width, height, |range, output| {
-            for input in pixels[range].chunks_exact(3) {
-                output.extend(
-                    self.render_lut(self.input_pixel(input))
-                        .map(|value| quantize_u16(value, self.mode)),
-                );
-            }
+            self.render_rgb16_strip(&pixels[range], output);
             Ok(())
         })
+    }
+
+    pub(crate) fn render_rgb16_strip(&self, pixels: &[u16], output: &mut Vec<u16>) {
+        for input in pixels.chunks_exact(3) {
+            output.extend(
+                self.render_lut(self.input_pixel(input))
+                    .map(|value| quantize_u16(value, self.mode)),
+            );
+        }
     }
 
     fn input_pixel(&self, input: &[u16]) -> [f32; 3] {
@@ -168,7 +167,7 @@ impl ColorPipeline {
     }
 }
 
-fn validate_image(pixels: &[u16], width: u32, height: u32) -> Result<()> {
+pub(crate) fn validate_image(pixels: &[u16], width: u32, height: u32) -> Result<()> {
     let pixel_count = checked_pixel_count(width, height)?;
     let expected = pixel_count
         .checked_mul(3)

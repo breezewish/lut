@@ -12,7 +12,7 @@ Native and WASM LibRaw builds replace upstream `postprocessing_utils.cpp` with t
 
 ## Memory
 
-Preview downsamples directly while reading RGB16 and allocates only two destination RGBA8 images. TIFF rendering fuses color operations per pixel into approximately 1 MB RGB16 strips. The typed TIFF writer Deflate-compresses and writes each strip immediately, then owns offset and directory finalization. No full-size float or quantized image is created; only the decoded RGB16 source, bounded strip temporaries, and final encoded output coexist.
+Preview keeps one half-size RGB16 source and the current parsed LUT in a persistent Rust WASM renderer, downsamples directly while reading it, and allocates only two destination RGBA8 images per render. EV changes pass one scalar; LUT changes parse and replace only the LUT. Neither path resends source pixels. TIFF rendering fuses color operations per pixel into approximately 1 MB RGB16 strips. The browser uses a stateful encoder so `wasm-bindgen` copies only the current source strip rather than the complete decoded image. The typed TIFF writer Deflate-compresses and writes each strip immediately, then owns offset and directory finalization. No full-size float, quantized image, or second color-WASM source image is created; only the decoded RGB16 source, bounded strip temporaries, and final encoded output coexist.
 
 ## Baseline
 

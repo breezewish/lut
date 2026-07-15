@@ -4,7 +4,7 @@
 
 React owns queue and control state. `ProcessingClient` pairs commands with worker replies. One promise tail in the Dedicated Worker serializes decode, rerender, and export, preventing LibRaw state races and batch contamination.
 
-The worker loads each LUT on demand, verifies SHA-256 with Web Crypto, parses it in Rust, and retains only the current source. It retains one half-size decoded preview. Export receives a fresh transferable RAW buffer and performs a full decode only for that operation.
+The worker loads each LUT on demand, verifies SHA-256 with Web Crypto, and retains only the current source. It transfers one half-size decoded preview and parses the selected LUT into a persistent Rust WASM renderer. EV rerenders pass one scalar; a LUT change replaces the parsed LUT once. Export receives a fresh transferable RAW buffer and performs a full decode only for that operation. LibRaw's full-resolution RGB16 remains JS-owned; a stateful Rust WASM encoder requests and copies only the next approximately 1 MB source view, avoiding a second complete RGB16 allocation across the WASM boundary.
 
 ## Presentation
 

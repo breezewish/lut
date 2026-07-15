@@ -2,10 +2,11 @@
 
 import createLibRaw from "../libraw/libraw.js";
 import initAlchemy, {
-  render_preview,
-  render_tiff,
+  PreviewRenderer,
+  TiffEncoder,
 } from "../wasm/alchemy_core.js";
 import { describeProcessingError } from "../lib/errors";
+import { renderTiffInStrips } from "../lib/tiff-export";
 import libRawSettings from "../libraw-settings.json";
 import type {
   LutDefinition,
@@ -26,9 +27,8 @@ const runtime = Promise.all([createLibRaw(), initAlchemy()]).then(
 let cached:
   | {
       fileId: string;
-      pixels: Uint16Array;
-      width: number;
-      height: number;
+      renderer: PreviewRenderer;
+      lutId: string;
       metadata: PreviewResult["metadata"];
     }
   | undefined;
@@ -48,6 +48,8 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
   try {
     const { module, raw } = await runtime;
     if (data.type === "decode") {
+      cached?.renderer.free();
+      cached = undefined;
       const bytes = new Uint8Array(data.buffer);
       raw.open(bytes, decodeSettings(true));
       const metadata = raw.metadata();
@@ -70,11 +72,17 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
         throw new Error("LibRaw did not return the required 16-bit RGB image.");
       }
       decodeCount += 1;
+      const cube = await loadLut(data.lut);
       cached = {
         fileId: data.fileId,
-        pixels: image.data,
-        width: image.width,
-        height: image.height,
+        renderer: new PreviewRenderer(
+          image.data,
+          image.width,
+          image.height,
+          1_600,
+          cube,
+        ),
+        lutId: data.lut.id,
         metadata: {
           camera: [metadata.camera_make, metadata.camera_model]
             .filter(Boolean)
@@ -108,12 +116,9 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       ) {
         throw new Error("LibRaw did not return the required 16-bit RGB image.");
       }
-      const tiff = render_tiff(
+      const tiff = renderTiffInStrips(
         image.data,
-        image.width,
-        image.height,
-        data.ev,
-        cube,
+        new TiffEncoder(image.width, image.height, data.ev, cube),
       );
       const reply: WorkerReply = {
         requestId: data.requestId,
@@ -174,23 +179,24 @@ async function renderCached(
     );
   }
   const cube = await loadLut(lut);
-  const preview = render_preview(
-    cached.pixels,
-    cached.width,
-    cached.height,
-    ev,
-    cube,
-    1_600,
-  );
-  return {
-    fileId,
-    width: preview.width,
-    height: preview.height,
-    base: preview.base_rgba(),
-    lut: preview.lut_rgba(),
-    metadata: cached.metadata,
-    decodeCount,
-  };
+  if (cached.lutId !== lut.id) {
+    cached.renderer.set_lut(cube);
+    cached.lutId = lut.id;
+  }
+  const preview = cached.renderer.render(ev);
+  try {
+    return {
+      fileId,
+      width: preview.width,
+      height: preview.height,
+      base: preview.take_base_rgba(),
+      lut: preview.take_lut_rgba(),
+      metadata: cached.metadata,
+      decodeCount,
+    };
+  } finally {
+    preview.free();
+  }
 }
 
 async function loadLut(lut: LutDefinition): Promise<string> {

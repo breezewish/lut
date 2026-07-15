@@ -6,7 +6,7 @@
   "scripts": {
     "assets": "node scripts/prepare-assets.mjs",
     "libraw-wasm": "bash scripts/build-libraw-wasm.sh",
-    "wasm": "RUSTFLAGS='-C target-feature=+simd128' wasm-pack build crates/alchemy-core --target web --out-dir ../../web/src/wasm --release -- --features wasm",
+    "wasm": "RUSTFLAGS='-C target-feature=+simd128' wasm-pack build crates/alchemy-core --target web --out-dir ../../web/src/wasm --release -- --features wasm && node scripts/check-wasm-boundaries.mjs",
     "predev": "npm run assets && npm run libraw-wasm && npm run wasm",
     "dev": "vite",
     "build": "npm run assets && npm run libraw-wasm && npm run wasm && tsc -b && vite build",

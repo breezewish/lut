@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{AlchemyError, Result};
 
 /// A strict, immutable 3D CUBE lookup table.
@@ -9,7 +11,7 @@ pub struct Lut3d {
     size: usize,
     domain_min: [f32; 3],
     domain_max: [f32; 3],
-    samples: Vec<[f32; 3]>,
+    samples: Arc<[[f32; 3]]>,
 }
 
 impl Lut3d {
@@ -78,7 +80,7 @@ impl Lut3d {
             size,
             domain_min,
             domain_max,
-            samples,
+            samples: samples.into(),
         })
     }
 
