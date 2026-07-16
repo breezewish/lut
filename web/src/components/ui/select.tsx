@@ -14,11 +14,13 @@ export function Select({
   onValueChange,
   options,
   label,
+  disabled = false,
 }: {
   value: string;
   onValueChange: (value: string) => void;
   options: SelectOption[];
   label: string;
+  disabled?: boolean;
 }) {
   const groups = new Map<string, SelectOption[]>();
   for (const option of options) {
@@ -27,7 +29,11 @@ export function Select({
     groups.set(option.group, group);
   }
   return (
-    <SelectPrimitive.Root value={value} onValueChange={onValueChange}>
+    <SelectPrimitive.Root
+      value={value}
+      onValueChange={onValueChange}
+      disabled={disabled}
+    >
       <SelectPrimitive.Trigger className="select-trigger" aria-label={label}>
         <SelectPrimitive.Value />
         <SelectPrimitive.Icon aria-hidden="true">

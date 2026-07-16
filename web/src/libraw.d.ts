@@ -16,7 +16,7 @@ declare module "*libraw.js" {
     width: number;
     height: number;
     format: "jpeg" | "bitmap" | "unknown";
-    data: Uint8Array;
+    data: Uint8Array<ArrayBuffer>;
   }
 
   class LibRawInstance {

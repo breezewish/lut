@@ -115,9 +115,7 @@ export default function App() {
 
   useEffect(() => {
     const unsubscribe = client.onThumbnail(({ fileId, jpeg }) => {
-      const url = URL.createObjectURL(
-        new Blob([jpeg.slice().buffer], { type: "image/jpeg" }),
-      );
+      const url = URL.createObjectURL(new Blob([jpeg], { type: "image/jpeg" }));
       setCameraPreview({ fileId, url });
     });
     return unsubscribe;
@@ -198,30 +196,28 @@ export default function App() {
     }
   }, [ev]);
 
-  const addFiles = useCallback(
-    (files: File[]) => {
-      if (files.length === 0) return;
-      setGlobalError(undefined);
-      setQueueUndo(undefined);
-      setExportSummary(undefined);
-      if (!selectedId) {
-        const first = files[0];
-        setSelectedId(`${first.name}:${first.size}:${first.lastModified}`);
+  const addFiles = useCallback((files: File[]) => {
+    if (files.length === 0) return;
+    setGlobalError(undefined);
+    setQueueUndo(undefined);
+    setExportSummary(undefined);
+    const first = files[0];
+    setSelectedId(
+      (current) =>
+        current ?? `${first.name}:${first.size}:${first.lastModified}`,
+    );
+    setItems((current) => {
+      const existing = new Set(current.map((item) => item.id));
+      const additions: QueueItem[] = [];
+      for (const file of files) {
+        const id = `${file.name}:${file.size}:${file.lastModified}`;
+        if (existing.has(id)) continue;
+        existing.add(id);
+        additions.push({ id, file, status: "queued" });
       }
-      setItems((current) => {
-        const existing = new Set(current.map((item) => item.id));
-        const additions = files
-          .map((file) => ({
-            id: `${file.name}:${file.size}:${file.lastModified}`,
-            file,
-            status: "queued" as const,
-          }))
-          .filter((item) => !existing.has(item.id));
-        return [...current, ...additions];
-      });
-    },
-    [selectedId],
-  );
+      return [...current, ...additions];
+    });
+  }, []);
 
   const onFileInput = (event: ChangeEvent<HTMLInputElement>) => {
     addFiles(Array.from(event.target.files ?? []));
@@ -230,6 +226,7 @@ export default function App() {
 
   const onDrop = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
+    if (exporting) return;
     addFiles(Array.from(event.dataTransfer.files));
   };
 
@@ -391,7 +388,7 @@ export default function App() {
           ? singleOutput!.name
           : `raw-alchemy-${selectedLut.id}.zip`;
         anchor.click();
-        URL.revokeObjectURL(url);
+        window.setTimeout(() => URL.revokeObjectURL(url), 0);
       }
 
       const skippedBeforeStart = targets.length - eligibleTargets.length;
@@ -482,6 +479,7 @@ export default function App() {
           <Button
             variant="secondary"
             aria-label="Add RAW files"
+            disabled={exporting}
             onClick={() => fileInput.current?.click()}
           >
             <Plus size={17} aria-hidden="true" />
@@ -502,7 +500,12 @@ export default function App() {
       </header>
 
       <div className="app-grid">
-        <aside className="queue-panel" aria-label="RAW queue">
+        <aside
+          className="queue-panel"
+          aria-label="RAW queue"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={onDrop}
+        >
           <div className="queue-heading">
             <div className="queue-heading-copy">
               <h2>Queue</h2>
@@ -526,8 +529,6 @@ export default function App() {
               type="button"
               className="drop-zone"
               onClick={() => fileInput.current?.click()}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={onDrop}
             >
               <FolderOpen size={24} aria-hidden="true" />
               <strong>0 local files</strong>
@@ -543,6 +544,7 @@ export default function App() {
                   <button
                     className="queue-select"
                     aria-current={item.id === selectedId ? "true" : undefined}
+                    disabled={exporting}
                     onClick={() => setSelectedId(item.id)}
                   >
                     <FileImage size={18} aria-hidden="true" />
@@ -581,6 +583,7 @@ export default function App() {
             type="file"
             accept={RAW_ACCEPT}
             multiple
+            disabled={exporting}
             onChange={onFileInput}
           />
         </aside>
@@ -595,6 +598,7 @@ export default function App() {
                     id="look-search"
                     type="search"
                     value={lookQuery}
+                    disabled={exporting}
                     placeholder={`Search ${manifest?.luts.length ?? 27} looks`}
                     onChange={(event) => setLookQuery(event.target.value)}
                   />
@@ -603,6 +607,7 @@ export default function App() {
                     value={lutId}
                     onValueChange={chooseLut}
                     options={selectOptions}
+                    disabled={exporting}
                   />
                 </div>
                 <p className="lut-assumption">
@@ -622,6 +627,7 @@ export default function App() {
                         max="4"
                         step="0.1"
                         defaultValue={ev}
+                        disabled={exporting}
                         onChange={(event) => {
                           const value = event.currentTarget.valueAsNumber;
                           if (Number.isFinite(value)) {
@@ -642,13 +648,14 @@ export default function App() {
                     max="4"
                     step="0.1"
                     value={ev}
+                    disabled={exporting}
                     onChange={(event) => setEv(Number(event.target.value))}
                   />
                 </div>
                 <Button
                   variant="quiet"
                   onClick={() => setEv(0)}
-                  disabled={ev === 0}
+                  disabled={exporting || ev === 0}
                 >
                   <RotateCcw size={16} aria-hidden="true" /> Reset
                 </Button>

@@ -559,6 +559,14 @@ input[type="range"] {
   background: var(--surface-hover);
 }
 
+.look-picker input:disabled,
+.ev-value:has(input:disabled),
+.select-trigger[data-disabled],
+input[type="range"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .select-content {
   width: var(--radix-select-trigger-width);
   max-height: min(25rem, var(--radix-select-content-available-height));

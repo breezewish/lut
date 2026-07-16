@@ -35,7 +35,7 @@ public:
     params.half_size = half_size;
     params.use_camera_wb = 1;
     params.use_camera_matrix = 1;
-    params.output_color = 4; // ProPhoto primaries, D65 in LibRaw.
+    params.output_color = 4; // LibRaw's numerical ProPhoto D65 basis.
     params.output_bps = 16;
     params.no_auto_bright = 1;
     params.highlight = 2; // Blend.

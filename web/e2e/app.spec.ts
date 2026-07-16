@@ -185,6 +185,21 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
     expect(request.method).toBe("GET");
     expect(new URL(request.url).origin).toBe(applicationOrigin);
   }
+
+  const droppedBytes = Array.from(await readFile(linearFixture));
+  await page.getByLabel("RAW queue").evaluate((queue, bytes) => {
+    const transfer = new DataTransfer();
+    const file = new File([new Uint8Array(bytes)], "dropped.dng", {
+      lastModified: 1,
+      type: "image/x-adobe-dng",
+    });
+    transfer.items.add(file);
+    transfer.items.add(file);
+    queue.dispatchEvent(
+      new DragEvent("drop", { bubbles: true, dataTransfer: transfer }),
+    );
+  }, droppedBytes);
+  await expect(page.getByText("2 local files")).toBeVisible();
 });
 
 test("batch export produces one ZIP and corrupt input fails clearly", async ({
@@ -220,6 +235,20 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export all" }).click();
+  await expect(
+    page.getByRole("button", { name: "Add RAW files" }),
+  ).toBeDisabled();
+  await expect(page.getByRole("searchbox", { name: "Look" })).toBeDisabled();
+  await expect(
+    page.getByRole("combobox", { name: "Built-in V-Log look" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("spinbutton", { name: "Exposure value" }),
+  ).toBeDisabled();
+  await expect(page.getByRole("slider", { name: "Exposure" })).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: /^linear\.dng/ }),
+  ).toBeDisabled();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe(
     "raw-alchemy-fuji-classic-negative.zip",

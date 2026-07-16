@@ -53,7 +53,7 @@ export interface PreviewResult {
 
 export interface CameraPreview {
   fileId: string;
-  jpeg: Uint8Array;
+  jpeg: Uint8Array<ArrayBuffer>;
 }
 
 export type WorkerCommand =

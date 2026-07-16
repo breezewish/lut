@@ -2,11 +2,13 @@
 
 ## Local workflow
 
-The browser accepts multiple RAW files through a chooser or drag and drop. Duplicate selections are ignored by file identity. The first selected file begins decoding. A JPEG thumbnail embedded by the camera is labeled and displayed before the processed preview when available.
+The browser accepts multiple RAW files through a chooser or drag and drop, including dropping more files into a populated queue. Duplicate selections are ignored by file identity, including duplicates within one chooser or drop event. The first selected file begins decoding. A JPEG thumbnail embedded by the camera is labeled and displayed before the processed preview when available.
 
 The selected file has side-by-side Base and LUT previews. Changing EV or LUT rerenders the cached preview without decoding RAW again. Look selection supports text search and recent choices. EV supports a slider and bounded numeric entry. The queue shows textual status, camera, dimensions, removal, clear, and undo.
 
 Export selected downloads one TIFF. Export all processes nonfailed queue entries serially and downloads one ZIP. It reports the current file and position, can stop after the current file, continues past per-file failures, and leaves a completion or partial-success summary. A corrupt file displays product-language recovery actions, disables its selected export, and is skipped by batch export.
+
+Import, queue selection, EV, and LUT controls are disabled while export is active. This keeps the visible recipe and serial Worker queue stable until the export finishes or stops after the current file.
 
 If the local WASM processing engine cannot initialize, the active request fails with a visible reload instruction instead of remaining in a decoding state.
 

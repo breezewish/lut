@@ -22,7 +22,8 @@ int alchemy_libraw_decode(const std::uint8_t *bytes, std::size_t length,
   processor.imgdata.params.half_size = half_size;
   processor.imgdata.params.use_camera_wb = 1;
   processor.imgdata.params.use_camera_matrix = 1;
-  processor.imgdata.params.output_color = 4; // ProPhoto primaries, D65 in LibRaw.
+  processor.imgdata.params.output_color =
+      4; // LibRaw's numerical ProPhoto D65 basis.
   processor.imgdata.params.output_bps = 16;
   processor.imgdata.params.no_auto_bright = 1;
   processor.imgdata.params.highlight = 2; // Match Raw Alchemy's Blend mode.
