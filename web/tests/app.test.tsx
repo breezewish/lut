@@ -11,6 +11,7 @@ import App from "../src/App";
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -44,6 +45,33 @@ test("teaches the private local workflow before files are selected", async () =>
   expect(
     screen.queryByRole("region", { name: "Processing controls" }),
   ).not.toBeInTheDocument();
+});
+
+test("ignores malformed recent-look preferences", async () => {
+  localStorage.setItem("raw-alchemy-recent-luts", JSON.stringify({}));
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        version: 1,
+        contract: { outputStatus: "unverified" },
+        luts: [
+          {
+            id: "fuji-classic-negative",
+            group: "Fujifilm",
+            name: "Classic Negative",
+            file: "look.cube",
+            sha256: "00",
+          },
+        ],
+      }),
+      { status: 200 },
+    ),
+  );
+
+  render(<App />);
+  expect(
+    await screen.findByRole("heading", { name: "Start with a camera RAW" }),
+  ).toBeVisible();
 });
 
 test("deduplicates one input batch and accepts drops after the queue is populated", async () => {

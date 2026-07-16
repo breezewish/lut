@@ -26,6 +26,7 @@
 - A worker error rejects every pending processing command instead of leaving unresolved promises.
 - A LUT hash mismatch, missing LUT, and hash-valid malformed CUBE each show a specific error, stop the decoding state, disable export, and allow a later valid import.
 - Duplicate files in one chooser action are ignored, drag and drop decodes the file, remove plus undo restores it, and choosing a LUT records it as a recent look.
+- Malformed local recent-look preferences do not prevent the empty application from rendering or accepting RAW files.
 - At mobile width, the empty-state chooser and Add RAW action are visible before any processing controls or export action.
 - At a short desktop height, wheel scrolling brings the selected-file export action into the viewport.
 - The built-in LUT manifest contains only verified source files with matching SHA-256 hashes.

@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 use alchemy_core::{ColorPipeline, Lut3d, ProcessingMode};
 use clap::{Parser, ValueEnum};
-use serde::Serialize;
 
 #[derive(Debug, Parser)]
 #[command(name = "alchemy", about = "Apply a V-Log Alchemy look to a camera RAW")]
@@ -52,16 +51,6 @@ impl Color {
     }
 }
 
-#[derive(Serialize)]
-struct Success<'a> {
-    status: &'static str,
-    destination: &'a std::path::Path,
-    width: u32,
-    height: u32,
-    pipeline: &'static str,
-    libraw: &'a str,
-}
-
 fn main() {
     let args = Args::parse();
     let output = if args.json { Output::Json } else { args.output };
@@ -105,16 +94,18 @@ fn run(args: &Args, output: Output) -> Result<(), String> {
         .map_err(|error| format!("could not write {}: {error}", args.destination.display()))?;
 
     let libraw = alchemy_libraw::version();
-    let success = Success {
-        status: "ok",
-        destination: &args.destination,
-        width: decoded.width,
-        height: decoded.height,
-        pipeline: "corrected-v2",
-        libraw: &libraw,
-    };
     match output {
-        Output::Json => println!("{}", serde_json::to_string_pretty(&success).unwrap()),
+        Output::Json => println!(
+            "{}",
+            serde_json::json!({
+                "status": "ok",
+                "destination": args.destination.to_string_lossy(),
+                "width": decoded.width,
+                "height": decoded.height,
+                "pipeline": "corrected-v2",
+                "libraw": libraw,
+            })
+        ),
         Output::Text => {
             let color = args.color.enabled(std::io::stdout().is_terminal());
             let heading = if color {

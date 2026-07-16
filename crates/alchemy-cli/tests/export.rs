@@ -2,6 +2,11 @@ use std::io::Cursor;
 use std::path::PathBuf;
 use std::process::Command;
 
+#[cfg(unix)]
+use std::ffi::OsString;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
+
 use tiff::ColorType;
 use tiff::decoder::{Decoder, DecodingResult};
 
@@ -45,6 +50,32 @@ fn exports_real_dng_to_rgb16_tiff_and_json() {
         panic!("TIFF did not decode to u16 samples");
     };
     assert_eq!(pixels.len(), 256 * 168 * 3);
+}
+
+#[cfg(unix)]
+#[test]
+fn json_export_supports_non_utf8_destination_paths() {
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory
+        .path()
+        .join(OsString::from_vec(b"output-\xff.tif".to_vec()));
+    let result = Command::new(env!("CARGO_BIN_EXE_alchemy"))
+        .arg(root().join("tests/fixtures/linear.dng"))
+        .arg(&destination)
+        .arg("--lut")
+        .arg(root().join("tests/fixtures/identity.cube"))
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(report["status"], "ok");
+    assert!(destination.exists());
 }
 
 #[test]

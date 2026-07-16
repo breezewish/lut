@@ -90,9 +90,13 @@ export default function App() {
   const [lookQuery, setLookQuery] = useState("");
   const [recentLutIds, setRecentLutIds] = useState<string[]>(() => {
     try {
-      return JSON.parse(
+      const stored: unknown = JSON.parse(
         localStorage.getItem("raw-alchemy-recent-luts") ?? "[]",
-      ) as string[];
+      );
+      return Array.isArray(stored) &&
+        stored.every((value) => typeof value === "string")
+        ? stored
+        : [];
     } catch {
       return [];
     }

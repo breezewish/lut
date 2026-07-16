@@ -15,7 +15,6 @@ dependencies = [
  "alchemy-core",
  "alchemy-libraw",
  "clap",
- "serde",
  "serde_json",
  "tempfile",
  "tiff",
