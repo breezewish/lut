@@ -17,3 +17,4 @@ Use pinned native and Emscripten builds of the LibRaw source used by Raw Alchemy
 - The Worker uploads verified LUT bytes to one Rust-owned asset as ordered four-byte scalar words; Rust validates the transfer and creates preview and export work from one cached CUBE parse result.
 - Unknown LUT output semantics remain visible and unprofiled.
 - The interface follows the flat dark editing system in root `DESIGN.md`.
+- A verified `main` revision is built with one repository base path and published as an immutable GitHub Pages artifact; generated output does not live on a deployment branch.

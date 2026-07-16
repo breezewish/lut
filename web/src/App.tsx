@@ -123,7 +123,7 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    fetch("/luts/manifest.json")
+    fetch(`${import.meta.env.BASE_URL}luts/manifest.json`)
       .then((response) => {
         if (!response.ok)
           throw new Error("The built-in LUT manifest could not be loaded.");

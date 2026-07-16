@@ -34,7 +34,11 @@ Create a production bundle with:
 npm run build
 ```
 
-The resulting `dist/` directory is a static site. Serve it at the origin root over HTTPS. The single-threaded build does not require cross-origin isolation headers.
+The resulting `dist/` directory is a static site. Serve it over HTTPS. The single-threaded build does not require cross-origin isolation headers. `VITE_BASE_PATH` selects a non-root deployment path when needed.
+
+## Deployment
+
+Every successful `main` verification deploys the repository-path bundle to [GitHub Pages](https://breezewish.github.io/lut/). The workflow builds and exercises the site at `/lut/`, uploads `dist/` as the immutable Pages artifact, and publishes it through GitHub's Pages deployment API. No generated files or deployment branch are committed.
 
 ## Native CLI
 

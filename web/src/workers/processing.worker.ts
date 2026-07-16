@@ -256,7 +256,7 @@ function transferablePreviewView(
 
 async function loadLut(lut: LutDefinition): Promise<WasmLut> {
   if (cachedLut?.id === lut.id) return cachedLut.lut;
-  const response = await fetch(`/luts/${lut.file}`);
+  const response = await fetch(`${import.meta.env.BASE_URL}luts/${lut.file}`);
   if (!response.ok) throw new Error(`Could not load LUT ${lut.name}.`);
   const bytes = new Uint8Array(await response.arrayBuffer());
   const actual = sha256Hex(bytes);

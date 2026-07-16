@@ -8,6 +8,7 @@
 - Synthetic LinearRaw, real Leica DNG, and Sony ARW output decode to exactly the same RGB16 dimensions and samples in native and WASM LibRaw builds in both full-size and half-size modes.
 - Real Leica DNG and Sony ARW files render nonblank previews and export full-resolution TIFFs; browser output matches native corrected-v2 output within one code value.
 - The HTTPS production bundle imports, previews, and exports in Chromium, Firefox, and WebKit.
+- The GitHub Pages repository-path bundle loads its manifest, LUT, Worker, and WASM assets below `/lut/` and previews a DNG without root-path requests or failed responses.
 - A non-secure remote HTTP development origin imports and previews a DNG without relying on secure-context Web Crypto.
 - Every built-in LUT produces browser WASM RGB16 output within one code value of the optimized native corrected-v2 export.
 - Two different RAW files make batch export the sole primary action, lock import, queue selection, EV, and LUT controls for the operation, and export as separately named RGB16 TIFF entries in one ZIP; each decompressed image matches its independent native export within one code value, proving isolated sequential processing state.
