@@ -32,6 +32,7 @@
 - Duplicate files in one chooser action are ignored, drag and drop decodes the file, remove plus undo restores it, and choosing a LUT records it as a recent look.
 - Malformed local recent-look preferences do not prevent the empty application from rendering or accepting RAW files.
 - At mobile width, the empty-state chooser and Add RAW action are visible before any processing controls or export action.
+- Switching between Light and Dark modes updates the complete application shell and persists the chosen theme across reloads without changing preview pixels.
 - At a short desktop height, wheel scrolling brings the selected-file export action into the viewport.
 - The asset build verifies every pinned source CUBE hash, emits a compact float32 LUT with equivalent domain and samples, and publishes only generated files whose SHA-256 matches the runtime manifest.
 - Rebuilding LUT assets while the development server is running preserves the manifest and every Look URL, and reloading still completes the basic DNG preview flow.

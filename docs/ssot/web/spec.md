@@ -34,7 +34,7 @@ If the local WASM processing engine cannot initialize, the active request fails 
 
 ## Interface
 
-The workspace is flat, borderless, shadowless, dark, and responsive. Image comparison is visually dominant. Processing controls are hidden before a file is selected. The task order is edit, compare, then export in both DOM and visual flow. Every interactive target is at least 44 px. Side-by-side comparison remains until the viewport is narrower than 35rem. When the complete workspace is taller than a short viewport, the page scrolls so export remains reachable. Reduced-motion preferences are honored.
+The workspace is a full-width, full-height editing application with persistent Light and Dark modes. It is flat, borderless, shadowless, neutral, and responsive. Desktop uses a top toolbar, left file queue, dominant center comparison canvas, and right adjustment/output inspector. Processing controls are hidden before a file is selected. The task order is edit, compare, then export in both DOM and visual flow. Every action target is at least 44 px while input bodies stay compact. Side-by-side comparison remains until the viewport is narrower than 35rem. Medium layouts use a horizontal source queue; narrow layouts follow the vertical workflow of queue, adjustments, comparison, and output. Short viewports keep export reachable. Reduced-motion preferences are honored.
 
 ## Privacy and assumptions
 

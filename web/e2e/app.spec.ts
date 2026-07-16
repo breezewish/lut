@@ -735,3 +735,20 @@ test("mobile empty state keeps import primary and defers processing controls", a
   ).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Export all" })).toHaveCount(0);
 });
+
+test("workspace theme persists across reloads", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(() => {
+    localStorage.setItem("raw-alchemy-theme", "dark");
+  });
+  await page.reload();
+
+  await page.getByRole("button", { name: "Switch to light mode" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(
+    page.getByRole("button", { name: "Switch to dark mode" }),
+  ).toBeVisible();
+});

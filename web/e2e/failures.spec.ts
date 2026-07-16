@@ -133,6 +133,8 @@ test("an invalid manifest keeps an imported RAW out of the fake preview state", 
   ).toBeVisible();
   await expect(page.getByLabel("Base preview")).toHaveCount(0);
   await expect(page.getByLabel("LUT preview")).toHaveCount(0);
-  await expect(page.getByText("Queued", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /linear\.dng.*Queued/ }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Reload" })).toBeVisible();
 });

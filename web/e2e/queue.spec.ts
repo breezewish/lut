@@ -19,7 +19,9 @@ test("rapid selection keeps the preview and metadata on the latest RAW", async (
   await expect(
     page.getByRole("button", { name: /lossy\.dng.*Ready/ }),
   ).toHaveAttribute("aria-current", "true", { timeout: 30_000 });
-  await expect(page.getByText("256 × 168")).toBeVisible();
+  await expect(
+    page.getByLabel("Export controls").getByText("256 × 168"),
+  ).toBeVisible();
   await expect(page.getByLabel("Base preview")).toBeVisible();
 });
 

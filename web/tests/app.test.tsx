@@ -47,6 +47,20 @@ test("teaches the private local workflow before files are selected", async () =>
   ).not.toBeInTheDocument();
 });
 
+test("switches and persists the workspace theme", () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    () => new Promise<Response>(() => {}),
+  );
+
+  render(<App />);
+  expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+
+  fireEvent.click(screen.getByRole("button", { name: "Switch to light mode" }));
+
+  expect(document.documentElement).toHaveAttribute("data-theme", "light");
+  expect(localStorage.getItem("raw-alchemy-theme")).toBe("light");
+});
+
 test("ignores malformed recent-look preferences", async () => {
   localStorage.setItem("raw-alchemy-recent-luts", JSON.stringify({}));
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
