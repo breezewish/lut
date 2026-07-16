@@ -4,11 +4,9 @@ import createLibRaw from "../libraw/libraw.js";
 import initAlchemy, { PreviewRenderer, WasmLut } from "../wasm/alchemy_core.js";
 import { describeProcessingError } from "../lib/errors";
 import { sha256Hex } from "../lib/hash";
-import {
-  renderTiffInStrips,
-  renderTiffInWebGpuStrips,
-} from "../lib/tiff-export";
+import { renderTiffInGpuStrips, renderTiffInStrips } from "../lib/tiff-export";
 import type { RenderedTiff } from "../lib/tiff-export";
+import { OnnxColorRenderer } from "../lib/onnx-color";
 import { WebGpuColorRenderer } from "../lib/webgpu-color";
 import type {
   ExportTimings,
@@ -137,29 +135,44 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
     const workerStartedAt = performance.now();
     const lut = await loadLut(data.lut);
     const exportRaw = new module.LibRaw();
-    let gpuRenderer: WebGpuColorRenderer | undefined;
+    let gpuRenderer: WebGpuColorRenderer | OnnxColorRenderer | undefined;
     try {
       exportRaw.open(new Uint8Array(data.buffer), false);
       const image = exportRaw.imageInfo();
-      const colorBackend = data.colorBackend === "webgpu" ? "webgpu" : "cpu";
+      const colorBackend =
+        data.colorBackend === "webgpu" || data.colorBackend === "onnx"
+          ? data.colorBackend
+          : "cpu";
       let gpuTimings: Pick<
         ExportTimings,
-        "gpuUploadMs" | "gpuComputeAndReadbackMs" | "gpuValidation"
+        | "gpuInputPreparationMs"
+        | "gpuExecutionAndReadbackMs"
+        | "gpuOutputPreparationMs"
+        | "gpuValidation"
       > = {};
       let rendered: RenderedTiff;
-      if (colorBackend === "webgpu") {
-        const result = await renderTiffInWebGpuStrips(
+      if (colorBackend !== "cpu") {
+        gpuRenderer =
+          colorBackend === "webgpu"
+            ? await WebGpuColorRenderer.create(lut)
+            : await OnnxColorRenderer.create(
+                lut,
+                data.ev,
+                data.validateGpu === true,
+              );
+        const result = await renderTiffInGpuStrips(
           image.sampleCount,
           (offset, length) => exportRaw.imageView(offset, length),
           lut.create_tiff_encoder(image.width, image.height, data.ev),
-          (gpuRenderer = await WebGpuColorRenderer.create(lut)),
+          gpuRenderer,
           data.ev,
           data.validateGpu === true,
         );
         rendered = result;
         gpuTimings = {
-          gpuUploadMs: result.gpuUploadMs,
-          gpuComputeAndReadbackMs: result.gpuComputeAndReadbackMs,
+          gpuInputPreparationMs: result.gpuInputPreparationMs,
+          gpuExecutionAndReadbackMs: result.gpuExecutionAndReadbackMs,
+          gpuOutputPreparationMs: result.gpuOutputPreparationMs,
           gpuValidation: result.validation,
         };
       } else {
@@ -187,7 +200,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       };
       context.postMessage(reply, [rendered.bytes.buffer]);
     } finally {
-      gpuRenderer?.destroy();
+      await gpuRenderer?.destroy();
       exportRaw.delete();
     }
   } catch (error) {

@@ -7,14 +7,15 @@ export interface GpuLut {
   samples(): Float32Array;
 }
 
-export interface WebGpuStripTimings {
-  uploadMs: number;
-  computeAndReadbackMs: number;
+export interface GpuStripTimings {
+  inputPreparationMs: number;
+  executionAndReadbackMs: number;
+  outputPreparationMs: number;
 }
 
 export interface WebGpuStrip {
   pixels: Uint16Array<ArrayBuffer>;
-  timings: WebGpuStripTimings;
+  timings: GpuStripTimings;
 }
 
 /** Persistent WebGPU resources for the current parsed LUT. */
@@ -146,16 +147,22 @@ export class WebGpuColorRenderer {
         0,
         packedBytes,
       );
-      const computeStartedAt = performance.now();
+      const executionStartedAt = performance.now();
       this.device.queue.submit([commands.finish()]);
       await readbackBuffer.mapAsync(GPUMapMode.READ);
+      const executionAndReadbackMs = performance.now() - executionStartedAt;
+      const outputStartedAt = performance.now();
       const mapped = readbackBuffer.getMappedRange();
       const bytes = new Uint8Array(source.byteLength);
       bytes.set(new Uint8Array(mapped, 0, source.byteLength));
-      const computeAndReadbackMs = performance.now() - computeStartedAt;
+      const outputPreparationMs = performance.now() - outputStartedAt;
       return {
         pixels: new Uint16Array(bytes.buffer),
-        timings: { uploadMs, computeAndReadbackMs },
+        timings: {
+          inputPreparationMs: uploadMs,
+          executionAndReadbackMs,
+          outputPreparationMs,
+        },
       };
     } finally {
       if (readbackBuffer.mapState === "mapped") readbackBuffer.unmap();

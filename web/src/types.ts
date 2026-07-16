@@ -61,12 +61,13 @@ export interface PreviewTimings {
 
 export interface ExportTimings {
   libraw: LibRawDecodeTimings;
-  colorBackend: "cpu" | "webgpu";
+  colorBackend: "cpu" | "webgpu" | "onnx";
   colorProcessingMs: number;
   deflateMs: number;
   workerTotalMs: number;
-  gpuUploadMs?: number;
-  gpuComputeAndReadbackMs?: number;
+  gpuInputPreparationMs?: number;
+  gpuExecutionAndReadbackMs?: number;
+  gpuOutputPreparationMs?: number;
   gpuValidation?: {
     sampleCount: number;
     differingSamples: number;
@@ -128,7 +129,7 @@ export type WorkerCommand =
       buffer: ArrayBuffer;
       ev: number;
       lut: LutDefinition;
-      colorBackend?: "cpu" | "webgpu";
+      colorBackend?: "cpu" | "webgpu" | "onnx";
       validateGpu?: boolean;
     };
 

@@ -41,10 +41,10 @@ export class ProcessingClient {
   private activeRender?: RenderBatch;
   private queuedRender?: RenderBatch;
   private stoppedError?: Error;
-  private readonly colorBackend =
-    new URLSearchParams(location.search).get("colorBackend") === "webgpu"
-      ? "webgpu"
-      : "cpu";
+  private readonly colorBackend = (() => {
+    const backend = new URLSearchParams(location.search).get("colorBackend");
+    return backend === "webgpu" || backend === "onnx" ? backend : "cpu";
+  })();
   private readonly validateGpu =
     new URLSearchParams(location.search).get("validateGpu") === "1";
 

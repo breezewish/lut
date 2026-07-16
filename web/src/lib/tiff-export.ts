@@ -19,12 +19,18 @@ export interface RenderedTiff {
 }
 
 export interface GpuStripRenderer {
+  /** Preferred color batch size; TIFF compression keeps its own strip size. */
+  preferredBatchSamples?: number;
   renderStrip(
     pixels: Uint16Array,
     ev: number,
   ): Promise<{
     pixels: Uint16Array<ArrayBuffer>;
-    timings: { uploadMs: number; computeAndReadbackMs: number };
+    timings: {
+      inputPreparationMs: number;
+      executionAndReadbackMs: number;
+      outputPreparationMs: number;
+    };
   }>;
 }
 
@@ -36,9 +42,10 @@ export interface GpuValidation {
   meanAbsoluteDifference: number;
 }
 
-export interface WebGpuRenderedTiff extends RenderedTiff {
-  gpuUploadMs: number;
-  gpuComputeAndReadbackMs: number;
+export interface GpuRenderedTiff extends RenderedTiff {
+  gpuInputPreparationMs: number;
+  gpuExecutionAndReadbackMs: number;
+  gpuOutputPreparationMs: number;
   validation?: GpuValidation;
 }
 
@@ -92,21 +99,22 @@ export function renderTiffInStrips(
   }
 }
 
-/** Renders each TIFF strip on WebGPU and optionally compares every sample to CPU. */
-export async function renderTiffInWebGpuStrips(
+/** Renders bounded GPU batches and writes the original TIFF compression strips. */
+export async function renderTiffInGpuStrips(
   sampleCount: number,
   read: (offset: number, length: number) => Uint16Array,
   encoder: GpuStripTiffEncoder,
   renderer: GpuStripRenderer,
   ev: number,
   validate: boolean,
-): Promise<WebGpuRenderedTiff> {
+): Promise<GpuRenderedTiff> {
   let offset = 0;
   let consumed = false;
   let colorProcessingMs = 0;
   let deflateMs = 0;
-  let gpuUploadMs = 0;
-  let gpuComputeAndReadbackMs = 0;
+  let gpuInputPreparationMs = 0;
+  let gpuExecutionAndReadbackMs = 0;
+  let gpuOutputPreparationMs = 0;
   let differingSamples = 0;
   let samplesOverTwoCodes = 0;
   let maximumDifference = 0;
@@ -121,37 +129,62 @@ export async function renderTiffInWebGpuStrips(
           `TIFF encoder requested ${requested} samples with ${remaining} remaining.`,
         );
       }
-      const source = read(offset, requested);
+      const batchMultiplier = Math.max(
+        1,
+        Math.floor((renderer.preferredBatchSamples ?? requested) / requested),
+      );
+      const batchSamples = Math.min(remaining, requested * batchMultiplier);
+      const source = read(offset, batchSamples);
       const startedAt = performance.now();
       const rendered = await renderer.renderStrip(source, ev);
       colorProcessingMs += performance.now() - startedAt;
-      gpuUploadMs += rendered.timings.uploadMs;
-      gpuComputeAndReadbackMs += rendered.timings.computeAndReadbackMs;
-      if (validate) {
-        encoder.render_strip(source);
-        const reference = encoder.rendered_strip();
-        if (reference.length !== rendered.pixels.length) {
-          throw new Error("CPU and WebGPU strip lengths differ.");
-        }
-        for (let index = 0; index < reference.length; index += 1) {
-          const difference = Math.abs(
-            reference[index] - rendered.pixels[index],
-          );
-          absoluteDifference += difference;
-          if (difference !== 0) differingSamples += 1;
-          if (difference > MAX_GPU_RGB16_DIFFERENCE) {
-            samplesOverTwoCodes += 1;
-            throw new Error(
-              `WebGPU RGB16 differs from CPU by ${difference} codes at sample ${offset + index}.`,
-            );
-          }
-          maximumDifference = Math.max(maximumDifference, difference);
-        }
+      gpuInputPreparationMs += rendered.timings.inputPreparationMs;
+      gpuExecutionAndReadbackMs += rendered.timings.executionAndReadbackMs;
+      gpuOutputPreparationMs += rendered.timings.outputPreparationMs;
+      if (rendered.pixels.length !== batchSamples) {
+        throw new Error("GPU output length differs from its input batch.");
       }
-      const deflateStartedAt = performance.now();
-      encoder.write_rendered_strip(rendered.pixels);
-      deflateMs += performance.now() - deflateStartedAt;
-      offset += requested;
+      let batchOffset = 0;
+      while (batchOffset < batchSamples) {
+        const stripSamples = encoder.next_strip_samples();
+        if (stripSamples === 0 || stripSamples > batchSamples - batchOffset) {
+          throw new Error("TIFF strip boundaries changed within a GPU batch.");
+        }
+        const sourceStrip = source.subarray(
+          batchOffset,
+          batchOffset + stripSamples,
+        );
+        const renderedStrip = rendered.pixels.subarray(
+          batchOffset,
+          batchOffset + stripSamples,
+        );
+        if (validate) {
+          encoder.render_strip(sourceStrip);
+          const reference = encoder.rendered_strip();
+          if (reference.length !== renderedStrip.length) {
+            throw new Error("CPU and GPU strip lengths differ.");
+          }
+          for (let index = 0; index < reference.length; index += 1) {
+            const difference = Math.abs(
+              reference[index] - renderedStrip[index],
+            );
+            absoluteDifference += difference;
+            if (difference !== 0) differingSamples += 1;
+            if (difference > MAX_GPU_RGB16_DIFFERENCE) {
+              samplesOverTwoCodes += 1;
+              throw new Error(
+                `GPU RGB16 differs from CPU by ${difference} codes at sample ${offset + index}.`,
+              );
+            }
+            maximumDifference = Math.max(maximumDifference, difference);
+          }
+        }
+        const deflateStartedAt = performance.now();
+        encoder.write_rendered_strip(renderedStrip);
+        deflateMs += performance.now() - deflateStartedAt;
+        batchOffset += stripSamples;
+        offset += stripSamples;
+      }
     }
     if (offset !== sampleCount) {
       throw new Error(
@@ -166,8 +199,9 @@ export async function renderTiffInWebGpuStrips(
       bytes,
       colorProcessingMs,
       deflateMs,
-      gpuUploadMs,
-      gpuComputeAndReadbackMs,
+      gpuInputPreparationMs,
+      gpuExecutionAndReadbackMs,
+      gpuOutputPreparationMs,
       validation: validate
         ? {
             sampleCount,

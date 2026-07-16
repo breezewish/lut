@@ -7,8 +7,11 @@ const fixture = resolve(
   process.env.RAW_PERF_FIXTURE ?? "vendor/LibRaw-Wasm/example-sony.ARW",
 );
 const samples = Number(process.env.RAW_PERF_SAMPLES ?? "5");
+const requestedBackend = process.env.RAW_PERF_BACKEND;
 const colorBackend =
-  process.env.RAW_PERF_BACKEND === "webgpu" ? "webgpu" : "cpu";
+  requestedBackend === "webgpu" || requestedBackend === "onnx"
+    ? requestedBackend
+    : "cpu";
 const validateGpu = process.env.RAW_PERF_VALIDATE_GPU === "1";
 
 test("records phased production Worker performance", async ({
@@ -21,6 +24,12 @@ test("records phased production Worker performance", async ({
   test.setTimeout(10 * 60_000);
   const fixtureStat = await stat(fixture);
   const runs = [];
+  if (process.env.RAW_PERF_BROWSER_LOGS === "1") {
+    page.on("console", (message) =>
+      console.log(`[browser:${message.type()}] ${message.text()}`),
+    );
+    page.on("pageerror", (error) => console.log(`[browser:error] ${error}`));
+  }
 
   await page.goto(
     `/?colorBackend=${colorBackend}${validateGpu ? "&validateGpu=1" : ""}`,
@@ -60,8 +69,16 @@ test("records phased production Worker performance", async ({
 
     const exportStartedAt = performance.now();
     const downloadPromise = page.waitForEvent("download");
+    const exportErrorPromise = page
+      .getByRole("alert")
+      .waitFor({ state: "visible", timeout: 10 * 60_000 })
+      .then(async () => {
+        throw new Error(
+          `Browser export failed: ${await page.getByRole("alert").textContent()}`,
+        );
+      });
     await page.getByRole("button", { name: "Export selected" }).click();
-    const download = await downloadPromise;
+    const download = await Promise.race([downloadPromise, exportErrorPromise]);
     await download.path();
     const exportWallMs = performance.now() - exportStartedAt;
     const worker = await latestMarkDetail(page, "raw-alchemy:export-worker");

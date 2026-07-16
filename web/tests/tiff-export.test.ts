@@ -4,7 +4,7 @@ import {
   type GpuStripTiffEncoder,
   type StripTiffEncoder,
   renderTiffInStrips,
-  renderTiffInWebGpuStrips,
+  renderTiffInGpuStrips,
 } from "../src/lib/tiff-export";
 
 test("passes only bounded source views across the color-WASM boundary", () => {
@@ -94,30 +94,37 @@ test("keeps a full-resolution camera export on bounded source views", () => {
   expect(encoder.free).not.toHaveBeenCalled();
 });
 
-test("writes WebGPU strips and reports explicit CPU sample differences", async () => {
+test("writes GPU strips and reports explicit CPU sample differences", async () => {
   const source = new Uint16Array([10, 20, 30, 40, 50, 60]);
   const reference = new Uint16Array([100, 200, 300, 400, 500, 600]);
   const gpu = new Uint16Array([100, 201, 300, 400, 499, 600]);
   const sizes = [source.length, 0];
   const writes: Uint16Array[] = [];
   const encoder: GpuStripTiffEncoder = {
-    next_strip_samples: () => sizes.shift()!,
+    next_strip_samples: () => sizes[0],
     render_strip: vi.fn(),
     rendered_strip: () => reference,
-    write_rendered_strip: (pixels) => writes.push(pixels),
+    write_rendered_strip: (pixels) => {
+      writes.push(pixels);
+      sizes.shift();
+    },
     write_strip: vi.fn(),
     finish: () => new Uint8Array([73, 73, 42, 0]),
     free: vi.fn(),
   };
 
-  const rendered = await renderTiffInWebGpuStrips(
+  const rendered = await renderTiffInGpuStrips(
     source.length,
     (offset, length) => source.subarray(offset, offset + length),
     encoder,
     {
       renderStrip: async () => ({
         pixels: gpu,
-        timings: { uploadMs: 0.25, computeAndReadbackMs: 0.75 },
+        timings: {
+          inputPreparationMs: 0.25,
+          executionAndReadbackMs: 0.75,
+          outputPreparationMs: 0.125,
+        },
       }),
     },
     0,
@@ -127,8 +134,9 @@ test("writes WebGPU strips and reports explicit CPU sample differences", async (
   expect(writes).toEqual([gpu]);
   expect(encoder.render_strip).toHaveBeenCalledWith(source);
   expect(encoder.write_strip).not.toHaveBeenCalled();
-  expect(rendered.gpuUploadMs).toBe(0.25);
-  expect(rendered.gpuComputeAndReadbackMs).toBe(0.75);
+  expect(rendered.gpuInputPreparationMs).toBe(0.25);
+  expect(rendered.gpuExecutionAndReadbackMs).toBe(0.75);
+  expect(rendered.gpuOutputPreparationMs).toBe(0.125);
   expect(rendered.validation).toEqual({
     sampleCount: 6,
     differingSamples: 2,
@@ -139,11 +147,11 @@ test("writes WebGPU strips and reports explicit CPU sample differences", async (
   expect(encoder.free).not.toHaveBeenCalled();
 });
 
-test("rejects a WebGPU RGB16 difference above the declared two-code bound", async () => {
+test("rejects a GPU RGB16 difference above the declared two-code bound", async () => {
   const free = vi.fn();
   const sizes = [3];
   const encoder: GpuStripTiffEncoder = {
-    next_strip_samples: () => sizes.shift()!,
+    next_strip_samples: () => sizes[0],
     render_strip: vi.fn(),
     rendered_strip: () => new Uint16Array([100, 200, 300]),
     write_rendered_strip: vi.fn(),
@@ -153,14 +161,18 @@ test("rejects a WebGPU RGB16 difference above the declared two-code bound", asyn
   };
 
   await expect(
-    renderTiffInWebGpuStrips(
+    renderTiffInGpuStrips(
       3,
       () => new Uint16Array([1, 2, 3]),
       encoder,
       {
         renderStrip: async () => ({
           pixels: new Uint16Array([100, 203, 300]),
-          timings: { uploadMs: 0, computeAndReadbackMs: 0 },
+          timings: {
+            inputPreparationMs: 0,
+            executionAndReadbackMs: 0,
+            outputPreparationMs: 0,
+          },
         }),
       },
       0,
@@ -169,4 +181,49 @@ test("rejects a WebGPU RGB16 difference above the declared two-code bound", asyn
   ).rejects.toThrow("differs from CPU by 3 codes at sample 1");
   expect(encoder.write_rendered_strip).not.toHaveBeenCalled();
   expect(free).toHaveBeenCalledOnce();
+});
+
+test("batches GPU color independently from TIFF compression strips", async () => {
+  const source = new Uint16Array([1, 2, 3, 4, 5, 6]);
+  const sizes = [3, 3, 0];
+  const writes: Uint16Array[] = [];
+  const renderer = {
+    preferredBatchSamples: 6,
+    renderStrip: vi.fn(async (pixels: Uint16Array) => ({
+      pixels: new Uint16Array(pixels),
+      timings: {
+        inputPreparationMs: 0,
+        executionAndReadbackMs: 0,
+        outputPreparationMs: 0,
+      },
+    })),
+  };
+  const encoder: GpuStripTiffEncoder = {
+    next_strip_samples: () => sizes[0],
+    render_strip: vi.fn(),
+    rendered_strip: vi.fn(),
+    write_rendered_strip: (pixels) => {
+      writes.push(new Uint16Array(pixels));
+      sizes.shift();
+    },
+    write_strip: vi.fn(),
+    finish: () => new Uint8Array([73, 73, 42, 0]),
+    free: vi.fn(),
+  };
+
+  await renderTiffInGpuStrips(
+    source.length,
+    (offset, length) => source.subarray(offset, offset + length),
+    encoder,
+    renderer,
+    0,
+    false,
+  );
+
+  expect(renderer.renderStrip).toHaveBeenCalledOnce();
+  expect(renderer.renderStrip).toHaveBeenCalledWith(source, 0);
+  expect(writes).toEqual([
+    new Uint16Array([1, 2, 3]),
+    new Uint16Array([4, 5, 6]),
+  ]);
 });
