@@ -80,6 +80,17 @@ public:
   }
 
 private:
+  struct PreviewGeometry {
+    unsigned source_width;
+    unsigned source_height;
+    unsigned output_width;
+    unsigned output_height;
+    unsigned target_output_width;
+    unsigned target_output_height;
+    unsigned target_width;
+    unsigned target_height;
+  };
+
   double process_started_at_ = 0;
   double demosaic_started_at_ = 0;
   double demosaic_finished_at_ = 0;
@@ -103,6 +114,34 @@ private:
     return static_cast<std::size_t>(row) * width + col;
   }
 
+  bool preview_geometry(unsigned source_width, unsigned source_height, int flip,
+                        PreviewGeometry &geometry) const {
+    const bool transposed = (flip & 4) != 0;
+    const unsigned output_width = transposed ? source_height : source_width;
+    const unsigned output_height = transposed ? source_width : source_height;
+    const unsigned longest_edge = std::max(output_width, output_height);
+    if (longest_edge <= preview_max_edge_) {
+      return false;
+    }
+
+    const double scale = static_cast<double>(preview_max_edge_) / longest_edge;
+    const unsigned target_output_width =
+        std::max(1U, static_cast<unsigned>(std::lround(output_width * scale)));
+    const unsigned target_output_height =
+        std::max(1U, static_cast<unsigned>(std::lround(output_height * scale)));
+    geometry = {
+        source_width,
+        source_height,
+        output_width,
+        output_height,
+        target_output_width,
+        target_output_height,
+        transposed ? target_output_height : target_output_width,
+        transposed ? target_output_width : target_output_height,
+    };
+    return true;
+  }
+
   void resize_preview() {
     if (preview_max_edge_ == 0 || imgdata.image == nullptr) {
       return;
@@ -117,45 +156,34 @@ private:
       return;
     }
 
-    const unsigned source_width = sizes.width;
-    const unsigned source_height = sizes.height;
-    const bool transposed = (sizes.flip & 4) != 0;
-    const unsigned output_width = transposed ? source_height : source_width;
-    const unsigned output_height = transposed ? source_width : source_height;
-    const unsigned longest_edge = std::max(output_width, output_height);
-    if (longest_edge <= preview_max_edge_) {
+    PreviewGeometry geometry;
+    if (!preview_geometry(sizes.width, sizes.height, sizes.flip, geometry)) {
       return;
     }
 
-    const double scale = static_cast<double>(preview_max_edge_) / longest_edge;
-    const unsigned target_output_width = std::max(
-        1U, static_cast<unsigned>(std::lround(output_width * scale)));
-    const unsigned target_output_height = std::max(
-        1U, static_cast<unsigned>(std::lround(output_height * scale)));
-    const unsigned target_width =
-        transposed ? target_output_height : target_output_width;
-    const unsigned target_height =
-        transposed ? target_output_width : target_output_height;
     const std::size_t pixel_count =
-        static_cast<std::size_t>(target_width) * target_height;
+        static_cast<std::size_t>(geometry.target_width) *
+        geometry.target_height;
     auto *target = static_cast<unsigned short(*)[4]>(
         std::calloc(pixel_count, sizeof(unsigned short[4])));
     if (target == nullptr) {
       throw std::bad_alloc();
     }
 
-    for (unsigned row = 0; row < target_output_height; ++row) {
+    for (unsigned row = 0; row < geometry.target_output_height; ++row) {
       const unsigned source_row = static_cast<unsigned>(
-          static_cast<std::uint64_t>(row) * output_height /
-          target_output_height);
-      for (unsigned col = 0; col < target_output_width; ++col) {
+          static_cast<std::uint64_t>(row) * geometry.output_height /
+          geometry.target_output_height);
+      for (unsigned col = 0; col < geometry.target_output_width; ++col) {
         const unsigned source_col = static_cast<unsigned>(
-            static_cast<std::uint64_t>(col) * output_width /
-            target_output_width);
-        const std::size_t source = oriented_index(
-            source_row, source_col, source_width, source_height, sizes.flip);
-        const std::size_t destination = oriented_index(
-            row, col, target_width, target_height, sizes.flip);
+            static_cast<std::uint64_t>(col) * geometry.output_width /
+            geometry.target_output_width);
+        const std::size_t source =
+            oriented_index(source_row, source_col, geometry.source_width,
+                           geometry.source_height, sizes.flip);
+        const std::size_t destination =
+            oriented_index(row, col, geometry.target_width,
+                           geometry.target_height, sizes.flip);
         std::memcpy(target[destination], imgdata.image[source],
                     sizeof(*target));
       }
@@ -163,8 +191,96 @@ private:
 
     std::free(imgdata.image);
     imgdata.image = target;
-    sizes.width = sizes.iwidth = target_width;
-    sizes.height = sizes.iheight = target_height;
+    sizes.width = sizes.iwidth = geometry.target_width;
+    sizes.height = sizes.iheight = geometry.target_height;
+  }
+
+  void copy_bayer(unsigned short cblack[4],
+                  unsigned short *data_maximum) override {
+    auto &sizes = imgdata.sizes;
+    const auto &parameters = imgdata.params;
+    const auto &identity = imgdata.idata;
+    const auto &internal = libraw_internal_data.internal_output_params;
+    if (preview_max_edge_ == 0 || !parameters.half_size ||
+        internal.shrink != 1 || identity.filters <= 1000 ||
+        internal.fuji_width != 0 ||
+        std::abs(sizes.pixel_aspect - 1.0) > 0.005 ||
+        imgdata.rawdata.raw_image == nullptr) {
+      LibRaw::copy_bayer(cblack, data_maximum);
+      return;
+    }
+
+    const double started_at = emscripten_get_now();
+    PreviewGeometry geometry;
+    if (!preview_geometry(sizes.iwidth, sizes.iheight, sizes.flip, geometry)) {
+      LibRaw::copy_bayer(cblack, data_maximum);
+      return;
+    }
+
+    const std::size_t target_pixels =
+        static_cast<std::size_t>(geometry.target_width) *
+        geometry.target_height;
+
+    const unsigned available_height = sizes.raw_height > sizes.top_margin
+                                          ? sizes.raw_height - sizes.top_margin
+                                          : 0;
+    const unsigned available_width = sizes.raw_width > sizes.left_margin
+                                         ? sizes.raw_width - sizes.left_margin
+                                         : 0;
+    const unsigned copy_height =
+        std::min<unsigned>(sizes.height, available_height);
+    const unsigned copy_width =
+        std::min<unsigned>(sizes.width, available_width);
+    const unsigned raw_stride = sizes.raw_pitch / sizeof(unsigned short);
+    // openPreview disables exposure-specific maximum adjustment, so the
+    // caller does not consume this scan result. Export never enters this path.
+    *data_maximum = 0;
+
+    std::memset(imgdata.image, 0, target_pixels * sizeof(*imgdata.image));
+    for (unsigned row = 0; row < geometry.target_output_height; ++row) {
+      const unsigned source_output_row = static_cast<unsigned>(
+          static_cast<std::uint64_t>(row) * geometry.output_height /
+          geometry.target_output_height);
+      for (unsigned col = 0; col < geometry.target_output_width; ++col) {
+        const unsigned source_output_col = static_cast<unsigned>(
+            static_cast<std::uint64_t>(col) * geometry.output_width /
+            geometry.target_output_width);
+        const std::size_t source_index = oriented_index(
+            source_output_row, source_output_col, geometry.source_width,
+            geometry.source_height, sizes.flip);
+        const unsigned source_row = source_index / geometry.source_width;
+        const unsigned source_col = source_index % geometry.source_width;
+        const std::size_t destination =
+            oriented_index(row, col, geometry.target_width,
+                           geometry.target_height, sizes.flip);
+
+        for (unsigned raw_row = source_row * 2;
+             raw_row < std::min(copy_height, source_row * 2 + 2); ++raw_row) {
+          const auto *source =
+              imgdata.rawdata.raw_image +
+              static_cast<std::size_t>(raw_row + sizes.top_margin) *
+                  raw_stride +
+              sizes.left_margin;
+          for (unsigned raw_col = source_col * 2;
+               raw_col < std::min(copy_width, source_col * 2 + 2); ++raw_col) {
+            const int channel = fcol(raw_row, raw_col);
+            const unsigned short value = source[raw_col];
+            imgdata.image[destination][channel] =
+                value > cblack[channel] ? value - cblack[channel] : 0;
+          }
+        }
+      }
+    }
+
+    void *resized =
+        realloc(imgdata.image, target_pixels * sizeof(*imgdata.image));
+    if (resized == nullptr) {
+      throw std::bad_alloc();
+    }
+    imgdata.image = static_cast<unsigned short(*)[4]>(resized);
+    sizes.iwidth = geometry.target_width;
+    sizes.iheight = geometry.target_height;
+    preview_resize_ms_ += emscripten_get_now() - started_at;
   }
 
   static void start_demosaic(void *raw) {
@@ -175,7 +291,7 @@ private:
     }
     const double resize_started_at = emscripten_get_now();
     processor->resize_preview();
-    processor->preview_resize_ms_ = emscripten_get_now() - resize_started_at;
+    processor->preview_resize_ms_ += emscripten_get_now() - resize_started_at;
   }
 
   static void finish_demosaic(void *raw) {
@@ -241,6 +357,12 @@ public:
     params.output_color = 4; // LibRaw's numerical ProPhoto D65 basis.
     params.output_bps = 16;
     params.no_auto_bright = 1;
+    if (preview_max_edge != 0) {
+      // Preview uses the camera white level. Scanning every sensor sample only
+      // to lower that level for this particular exposure costs more than the
+      // display-sized CFA construction itself and is not part of export.
+      params.adjust_maximum_thr = 0;
+    }
     params.highlight = 2; // Blend.
     params.med_passes = 0; // Required by the phase callback contract above.
     params.gamm[0] = 1.0;

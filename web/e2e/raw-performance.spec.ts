@@ -18,6 +18,9 @@ test("records phased production Worker performance", async ({
   test.setTimeout(10 * 60_000);
   const fixtureStat = await stat(fixture);
   const runs = [];
+  let exportRun:
+    | { exportWallMs: number; worker: unknown; blob: unknown }
+    | undefined;
 
   await page.goto("/");
   for (let index = 0; index < samples; index += 1) {
@@ -39,15 +42,19 @@ test("records phased production Worker performance", async ({
     const preview = await latestMarkDetail(page, "raw-alchemy:preview-worker");
     const initial = await initialPreviewBoundaries(page);
 
-    const exportStartedAt = performance.now();
-    const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export selected" }).click();
-    const download = await downloadPromise;
-    await download.path();
-    const exportWallMs = performance.now() - exportStartedAt;
-    const worker = await latestMarkDetail(page, "raw-alchemy:export-worker");
-    const blob = await latestMarkDetail(page, "raw-alchemy:blob");
-    runs.push({ previewWallMs, initial, preview, exportWallMs, worker, blob });
+    runs.push({ previewWallMs, initial, preview });
+    if (index === samples - 1) {
+      const exportStartedAt = performance.now();
+      const downloadPromise = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Export selected" }).click();
+      const download = await downloadPromise;
+      await download.path();
+      exportRun = {
+        exportWallMs: performance.now() - exportStartedAt,
+        worker: await latestMarkDetail(page, "raw-alchemy:export-worker"),
+        blob: await latestMarkDetail(page, "raw-alchemy:blob"),
+      };
+    }
     await page
       .getByRole("button", { name: `Remove ${fixture.split("/").at(-1)}` })
       .click();
@@ -57,12 +64,13 @@ test("records phased production Worker performance", async ({
   const report = Buffer.from(
     JSON.stringify(
       {
-        schemaVersion: 2,
+        schemaVersion: 3,
         fixture,
         fixtureBytes: fixtureStat.size,
         samples,
         coldRun: runs[0],
         warmRuns: runs.slice(1),
+        exportRun,
       },
       null,
       2,
@@ -76,19 +84,20 @@ test("records phased production Worker performance", async ({
   });
 
   expect(runs[0].initial.thumbnailMs).toBeLessThan(300);
-  expect(runs[0].initial.settledPreviewMs).toBeLessThan(2_000);
+  expect(runs[0].initial.processedPreviewMs).toBeLessThan(1_200);
+  expect(runs[0].initial.settledPreviewMs).toBeLessThan(1_500);
   expect(
     percentile(
       runs.slice(1).map(({ initial }) => initial.processedPreviewMs),
       0.95,
     ),
-  ).toBeLessThan(1_000);
+  ).toBeLessThan(600);
   expect(
     percentile(
       runs.slice(1).map(({ initial }) => initial.settledPreviewMs),
       0.95,
     ),
-  ).toBeLessThan(1_500);
+  ).toBeLessThan(800);
 });
 
 async function latestMarkDetail(page: Page, name: string) {

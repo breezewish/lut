@@ -195,6 +195,11 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
   await page.getByRole("slider", { name: "Exposure" }).fill("1");
   await expect(exposureValue).toHaveValue("1");
   await expect(comparison).toHaveAttribute("data-decode-count", "1");
+  const exportSelected = page.getByRole("button", {
+    name: "Export selected",
+  });
+  await expect(exportSelected).toBeDisabled();
+  await expect(exportSelected).toBeEnabled();
 
   const classicNegativePreview = await page
     .getByLabel("Classic Negative preview")
@@ -225,7 +230,7 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
   await expect(comparison).toHaveAttribute("data-decode-count", "1");
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
+  await exportSelected.click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/fuji-classic-negative\.tif$/);
 

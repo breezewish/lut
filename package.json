@@ -20,6 +20,7 @@
     "test:pages:prepared": "VITE_BASE_PATH=/lut/ playwright test --config playwright.pages.config.ts",
     "benchmark:libraw": "npm run libraw-wasm && node scripts/benchmark-libraw-algorithms.mjs",
     "benchmark:browser": "RAW_PERF=1 PLAYWRIGHT_HTTP_PORT=${PLAYWRIGHT_HTTP_PORT:-46731} playwright test web/e2e/raw-performance.spec.ts --project=chromium",
+    "benchmark:interaction": "RAW_PERF=1 PLAYWRIGHT_HTTP_PORT=${PLAYWRIGHT_HTTP_PORT:-46731} playwright test web/e2e/preview-interaction-performance.spec.ts --project=chromium",
     "quality:preview": "node scripts/check-preview-quality.mjs",
     "check": "npm run test && npm run build && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
     "format:check": "prettier --check ."

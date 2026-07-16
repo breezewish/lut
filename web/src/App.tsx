@@ -143,6 +143,16 @@ export default function App() {
   });
   const decodedFileId = useRef<string | undefined>(undefined);
   const settledBaseRecipe = useRef<string | undefined>(undefined);
+  const nextPreviewGeneration = useRef(0);
+  const lastPaintedGeneration = useRef(0);
+  const desiredPreview = useRef<
+    | {
+        generation: number;
+        fileId: string;
+        lutId: string;
+      }
+    | undefined
+  >(undefined);
   const [renderedRecipe, setRenderedRecipe] = useState<string>();
   const fileInput = useRef<HTMLInputElement>(null);
   const exposureInput = useRef<HTMLInputElement>(null);
@@ -239,6 +249,7 @@ export default function App() {
     const decodeRecipe = previewRecipeKey(selected.id, ev, selectedLut.id);
     decodedFileId.current = undefined;
     settledBaseRecipe.current = undefined;
+    desiredPreview.current = undefined;
     setRenderedRecipe(undefined);
     setPreview(undefined);
     setCameraPreview(undefined);
@@ -295,6 +306,12 @@ export default function App() {
       return;
     const recipe = previewRecipeKey(selected.id, ev, selectedLut.id);
     if (renderedRecipe === recipe) return;
+    const generation = ++nextPreviewGeneration.current;
+    desiredPreview.current = {
+      generation,
+      fileId: selected.id,
+      lutId: selectedLut.id,
+    };
     const baseRecipe = basePreviewRecipeKey(selected.id, ev);
     const includeBase = settledBaseRecipe.current !== baseRecipe;
     let active = true;
@@ -305,8 +322,16 @@ export default function App() {
           maxEdge: INTERACTIVE_PREVIEW_MAX_EDGE,
           includeBase,
         });
+        const desired = desiredPreview.current;
+        if (
+          desired?.fileId === selected.id &&
+          desired.lutId === selectedLut.id &&
+          generation > lastPaintedGeneration.current
+        ) {
+          lastPaintedGeneration.current = generation;
+          setPreview((current) => mergePreview(current, interactive));
+        }
         if (!active) return;
-        setPreview((current) => mergePreview(current, interactive));
 
         if (includeBase) {
           await new Promise<void>((resolve) => {
@@ -334,6 +359,9 @@ export default function App() {
     void render();
     return () => {
       active = false;
+      if (desiredPreview.current?.generation === generation) {
+        desiredPreview.current = undefined;
+      }
       if (settleTimer !== undefined) window.clearTimeout(settleTimer);
     };
   }, [
