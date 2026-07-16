@@ -283,15 +283,6 @@ export default function App() {
     const includeBase = settledBaseRecipe.current !== baseRecipe;
     let active = true;
     let settleTimer: number | undefined;
-    setPreview((current) =>
-      current
-        ? {
-            ...current,
-            base: includeBase ? undefined : current.base,
-            lut: undefined,
-          }
-        : undefined,
-    );
     const render = async () => {
       try {
         const interactive = await client.render(selected.id, ev, selectedLut, {

@@ -48,6 +48,89 @@ test("shows an embedded camera JPEG before the processed preview", async ({
   });
 });
 
+test("keeps the previous canvases visible until interaction frames are ready", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const originalPostMessage = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (...args) {
+      const message = args[0] as { type?: string };
+      const state = window as Window & { delayPreviewRenders?: boolean };
+      if (state.delayPreviewRenders && message?.type === "render") {
+        window.setTimeout(() => {
+          Reflect.apply(originalPostMessage, this, args);
+        }, 300);
+        return;
+      }
+      return Reflect.apply(originalPostMessage, this, args);
+    };
+  });
+
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(linearFixture);
+  const basePreview = page.getByLabel("Base preview");
+  const lutPreview = page.getByLabel("Classic Negative preview");
+  await expect(basePreview).toBeVisible({ timeout: 20_000 });
+  await expect(lutPreview).toBeVisible();
+  const previousBase = await basePreview.evaluate((canvas: HTMLCanvasElement) =>
+    canvas.toDataURL(),
+  );
+  const previousLut = await lutPreview.evaluate((canvas: HTMLCanvasElement) =>
+    canvas.toDataURL(),
+  );
+
+  await page.evaluate(() => {
+    (window as Window & { delayPreviewRenders?: boolean }).delayPreviewRenders =
+      true;
+  });
+  await page.getByRole("slider", { name: "Exposure" }).fill("1");
+  await page.waitForTimeout(100);
+
+  expect(await basePreview.count()).toBe(1);
+  expect(await basePreview.isVisible()).toBe(true);
+  expect(await lutPreview.count()).toBe(1);
+  expect(await lutPreview.isVisible()).toBe(true);
+  expect(
+    await basePreview.evaluate((canvas: HTMLCanvasElement) =>
+      canvas.toDataURL(),
+    ),
+  ).toBe(previousBase);
+  expect(
+    await lutPreview.evaluate((canvas: HTMLCanvasElement) =>
+      canvas.toDataURL(),
+    ),
+  ).toBe(previousLut);
+  await expect
+    .poll(() =>
+      basePreview.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
+    )
+    .not.toBe(previousBase);
+
+  await expect(
+    page.getByRole("button", { name: "Export selected" }),
+  ).toHaveClass(/button-primary/);
+  const currentLut = await lutPreview.evaluate((canvas: HTMLCanvasElement) =>
+    canvas.toDataURL(),
+  );
+  await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
+  await page.getByRole("option", { name: "PROVIA", exact: true }).click();
+  await page.waitForTimeout(100);
+
+  const proviaPreview = page.getByLabel("PROVIA preview");
+  expect(await proviaPreview.count()).toBe(1);
+  expect(await proviaPreview.isVisible()).toBe(true);
+  expect(
+    await proviaPreview.evaluate((canvas: HTMLCanvasElement) =>
+      canvas.toDataURL(),
+    ),
+  ).toBe(currentLut);
+  await expect
+    .poll(() =>
+      proviaPreview.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
+    )
+    .not.toBe(currentLut);
+});
+
 test("decodes, re-renders exposure, and exports a local RAW", async ({
   page,
 }) => {

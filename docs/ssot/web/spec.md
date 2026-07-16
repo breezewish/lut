@@ -6,7 +6,7 @@ The browser accepts multiple RAW files through a chooser or drag and drop, inclu
 
 The selected file has side-by-side Base and LUT previews. Changing EV or LUT rerenders the cached preview without decoding RAW again. Continuous EV input keeps the interface responsive, discards obsolete waiting recipes, and presents the final value without a growing processing backlog. Look selection supports text search and recent choices; malformed local recent-choice data is ignored. EV supports a slider and bounded numeric entry. The queue shows textual status, camera, dimensions, removal, clear, and undo.
 
-Interactive rerenders are progressive and recipe-correct. They may temporarily reduce spatial resolution, but never approximate exposure or LUT color. The first interaction frame is longest-edge 384 and the settled comparison is longest-edge 1024. Only the current recipe may update either canvas. Export remains unavailable until that current recipe has reached the settled resolution.
+Interactive rerenders are progressive and recipe-correct. They may temporarily reduce spatial resolution, but never approximate exposure or LUT color. The previous processed comparison remains visible until the next interaction frame atomically replaces it; an EV or LUT change never clears either canvas to a blank placeholder. The first interaction frame is longest-edge 384 and the settled comparison is longest-edge 1024. Only the current recipe may update either canvas. Export remains unavailable until that current recipe has reached the settled resolution.
 
 ## Preview performance
 
