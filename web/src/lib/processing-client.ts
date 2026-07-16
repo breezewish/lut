@@ -164,9 +164,28 @@ export class ProcessingClient {
     buffer: ArrayBuffer,
     referenceRgb16?: ArrayBuffer,
   ): Promise<DemosaicBenchmarkReport> {
+    const demosaicBackend =
+      new URLSearchParams(location.search).get("demosaicBackend") ===
+      "native-wgsl"
+        ? "native-wgsl"
+        : "onnx";
+    const demosaicOutputStage =
+      new URLSearchParams(location.search).get("demosaicOutputStage") ===
+      "demosaic"
+        ? "demosaic"
+        : "identity-lut";
+    const completeExport =
+      new URLSearchParams(location.search).get("completeExport") === "1";
     const transfer = referenceRgb16 ? [buffer, referenceRgb16] : [buffer];
     const reply = await this.send(
-      { type: "benchmark-demosaic", buffer, referenceRgb16 },
+      {
+        type: "benchmark-demosaic",
+        buffer,
+        referenceRgb16,
+        demosaicBackend,
+        demosaicOutputStage,
+        completeExport,
+      },
       transfer,
     );
     if (reply.ok && reply.type === "demosaic-benchmark") return reply.result;

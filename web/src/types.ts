@@ -63,7 +63,9 @@ export interface LibRawSensorTimings {
 export interface DemosaicBenchmarkReport {
   sensor: import("./lib/onnx-demosaic").SensorImageInfo;
   sensorTimings: LibRawSensorTimings;
-  demosaic: import("./lib/onnx-demosaic").DemosaicResult;
+  demosaic:
+    | import("./lib/onnx-demosaic").DemosaicResult
+    | import("./lib/native-rcd").NativeRcdResult;
   workerTotalMs: number;
 }
 
@@ -152,6 +154,9 @@ export type WorkerCommand =
       type: "benchmark-demosaic";
       buffer: ArrayBuffer;
       referenceRgb16?: ArrayBuffer;
+      demosaicBackend: "onnx" | "native-wgsl";
+      demosaicOutputStage: "demosaic" | "identity-lut";
+      completeExport: boolean;
     };
 
 export type WorkerReply =

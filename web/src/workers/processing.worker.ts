@@ -8,6 +8,7 @@ import { renderTiffInGpuStrips, renderTiffInStrips } from "../lib/tiff-export";
 import type { RenderedTiff } from "../lib/tiff-export";
 import { OnnxColorRenderer } from "../lib/onnx-color";
 import { demosaicOnWebGpu } from "../lib/onnx-demosaic";
+import { demosaicRcdWithNativeWgsl } from "../lib/native-rcd";
 import { WebGpuColorRenderer } from "../lib/webgpu-color";
 import type {
   ExportTimings,
@@ -60,13 +61,32 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       try {
         raw.open(new Uint8Array(data.buffer), false);
         const sensor = raw.sensorInfo();
-        const demosaic = await demosaicOnWebGpu(
-          raw.sensorView(0, sensor.sampleCount),
-          sensor,
-          data.referenceRgb16
-            ? new Uint16Array(data.referenceRgb16)
-            : undefined,
-        );
+        const mosaic = raw.sensorView(0, sensor.sampleCount);
+        const reference = data.referenceRgb16
+          ? new Uint16Array(data.referenceRgb16)
+          : undefined;
+        if (data.completeExport && data.demosaicBackend !== "native-wgsl") {
+          throw new Error(
+            "Complete export is currently implemented for native WGSL only.",
+          );
+        }
+        const benchmarkEncoder = data.completeExport
+          ? (await loadBenchmarkLut()).create_tiff_encoder(
+              sensor.width,
+              sensor.height,
+              0,
+            )
+          : undefined;
+        const demosaic =
+          data.demosaicBackend === "native-wgsl"
+            ? await demosaicRcdWithNativeWgsl(
+                mosaic,
+                sensor,
+                reference,
+                data.demosaicOutputStage,
+                benchmarkEncoder,
+              )
+            : await demosaicOnWebGpu(mosaic, sensor, reference);
         const reply: WorkerReply = {
           requestId: data.requestId,
           ok: true,
@@ -340,6 +360,15 @@ async function loadLut(lut: LutDefinition): Promise<WasmLut> {
   cachedLut?.lut.free();
   cachedLut = { id: lut.id, lut: parsed };
   return parsed;
+}
+
+async function loadBenchmarkLut(): Promise<WasmLut> {
+  const response = await fetch(`${import.meta.env.BASE_URL}luts/manifest.json`);
+  if (!response.ok) throw new Error("Could not load the LUT manifest.");
+  const manifest = (await response.json()) as { luts: LutDefinition[] };
+  const lut = manifest.luts[0];
+  if (!lut) throw new Error("The LUT manifest is empty.");
+  return loadLut(lut);
 }
 
 function postPreview(requestId: number, result: PreviewResult): void {

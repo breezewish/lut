@@ -7,11 +7,16 @@ const fixture = resolve(
   process.env.DEMOSAIC_PERF_FIXTURE ?? "vendor/LibRaw-Wasm/example-sony.ARW",
 );
 const samples = Number(process.env.DEMOSAIC_PERF_SAMPLES ?? "5");
+const backend = process.env.DEMOSAIC_PERF_BACKEND ?? "onnx";
+const outputStage =
+  process.env.DEMOSAIC_PERF_OUTPUT_STAGE ??
+  (backend === "native-wgsl" ? "identity-lut" : "demosaic");
+const completeExport = process.env.DEMOSAIC_PERF_COMPLETE_EXPORT === "1";
 const reference = process.env.DEMOSAIC_PERF_REFERENCE
   ? resolve(process.env.DEMOSAIC_PERF_REFERENCE)
   : undefined;
 
-test("records LibRaw-unpack plus ONNX-WebGPU demosaic performance", async ({
+test("records LibRaw-unpack plus GPU demosaic performance", async ({
   page,
 }, testInfo) => {
   test.skip(!enabled, "Set DEMOSAIC_PERF=1 to run the GPU demosaic benchmark.");
@@ -22,7 +27,9 @@ test("records LibRaw-unpack plus ONNX-WebGPU demosaic performance", async ({
     console.log(`[browser:${message.type()}] ${message.text()}`),
   );
   page.on("pageerror", (error) => console.log(`[browser:error] ${error}`));
-  await page.goto("/?demosaicBenchmark=1");
+  await page.goto(
+    `/?demosaicBenchmark=1&demosaicBackend=${encodeURIComponent(backend)}&demosaicOutputStage=${encodeURIComponent(outputStage)}&completeExport=${completeExport ? "1" : "0"}`,
+  );
   await expect(page.locator("body")).toHaveAttribute(
     "data-benchmark-status",
     "ready",
@@ -82,6 +89,9 @@ test("records LibRaw-unpack plus ONNX-WebGPU demosaic performance", async ({
         fixture,
         fixtureBytes: fixtureStat.size,
         samples,
+        backend,
+        outputStage,
+        completeExport,
         coldRun: runs[0],
         warmRuns: runs.slice(1),
       },

@@ -34,6 +34,11 @@ def main() -> None:
     parser.add_argument("--studio-src", required=True)
     parser.add_argument("--output")
     parser.add_argument("--rgb16-output")
+    parser.add_argument(
+        "--output-stage",
+        choices=("demosaic", "identity-lut"),
+        default="demosaic",
+    )
     args = parser.parse_args()
     if not args.browser_report and not args.rgb16_output:
         parser.error("provide --browser-report, --rgb16-output, or both")
@@ -85,7 +90,14 @@ def main() -> None:
         raise RuntimeError(f"unsupported CFA pattern {pattern.shape}")
 
     if args.rgb16_output:
-        rgb16 = np.rint(np.clip(image, 0, 1) * 65535).astype("<u2")
+        reference = (
+            _identity_lut_output(image)
+            if args.output_stage == "identity-lut"
+            else np.clip(image, 0, 1)
+        )
+        rgb16 = np.floor(reference * np.float32(65535) + np.float32(0.5)).astype(
+            "<u2"
+        )
         Path(args.rgb16_output).write_bytes(rgb16.tobytes())
     if not args.browser_report:
         print(
@@ -99,6 +111,7 @@ def main() -> None:
                     "height": int(image.shape[0]),
                     "rgb16Samples": int(image.size),
                     "rgb16Output": str(Path(args.rgb16_output).resolve()),
+                    "outputStage": args.output_stage,
                 },
                 indent=2,
             )
@@ -161,6 +174,27 @@ def _provider(algorithm: str) -> str | None:
     from raw_alchemy.onnx import xtrans_demosaic
 
     return xtrans_demosaic._session_provider
+
+
+def _identity_lut_output(prophoto: np.ndarray) -> np.ndarray:
+    """Apply the POC's exposure, ProPhoto-to-V-Gamut, V-Log, and identity LUT."""
+    matrix = np.asarray(
+        [
+            [1.1159087, -0.042472865, -0.073432505],
+            [-0.02851772, 0.93679124, 0.09172473],
+            [0.01285477, -0.008144919, 0.9952912],
+        ],
+        dtype=np.float32,
+    )
+    working = np.matmul(prophoto, matrix.T)
+    encoded = np.where(
+        working < np.float32(0.01),
+        np.float32(5.6) * working + np.float32(0.125),
+        np.float32(0.241514)
+        * np.log10(working + np.float32(0.00873))
+        + np.float32(0.598206),
+    )
+    return np.clip(encoded, 0, 1)
 
 
 def summary(values: np.ndarray) -> dict[str, float]:
