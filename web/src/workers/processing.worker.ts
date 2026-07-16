@@ -29,7 +29,7 @@ let cached:
       metadata: PreviewResult["metadata"];
     }
   | undefined;
-let cachedLut: { id: string; source: string } | undefined;
+let cachedLut: { id: string; bytes: Uint8Array<ArrayBuffer> } | undefined;
 let decodeCount = 0;
 
 let tail = Promise.resolve();
@@ -45,6 +45,17 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
   let module: Awaited<ReturnType<typeof createLibRaw>> | undefined;
   try {
     ({ module } = await runtime);
+    if (data.type === "clear") {
+      cached?.renderer.free();
+      cached = undefined;
+      const reply: WorkerReply = {
+        requestId: data.requestId,
+        ok: true,
+        type: "cleared",
+      };
+      context.postMessage(reply);
+      return;
+    }
     if (data.type === "decode") {
       cached?.renderer.free();
       cached = undefined;
@@ -138,7 +149,7 @@ function createPreviewRenderer(
   raw: InstanceType<Awaited<ReturnType<typeof createLibRaw>>["LibRaw"]>,
   width: number,
   height: number,
-  cube: string,
+  cube: Uint8Array<ArrayBuffer>,
 ): PreviewRenderer {
   const renderer = new PreviewRenderer(width, height, 1_600, cube);
   const rowSamples = width * 3;
@@ -213,17 +224,16 @@ function transferablePreviewView(
   return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
-async function loadLut(lut: LutDefinition): Promise<string> {
-  if (cachedLut?.id === lut.id) return cachedLut.source;
+async function loadLut(lut: LutDefinition): Promise<Uint8Array<ArrayBuffer>> {
+  if (cachedLut?.id === lut.id) return cachedLut.bytes;
   const response = await fetch(`/luts/${lut.file}`);
   if (!response.ok) throw new Error(`Could not load LUT ${lut.name}.`);
-  const bytes = await response.arrayBuffer();
+  const bytes = new Uint8Array(await response.arrayBuffer());
   const actual = sha256Hex(bytes);
   if (actual !== lut.sha256)
     throw new Error(`LUT integrity check failed for ${lut.name}.`);
-  const source = new TextDecoder().decode(bytes);
-  cachedLut = { id: lut.id, source };
-  return source;
+  cachedLut = { id: lut.id, bytes };
+  return bytes;
 }
 
 function postPreview(requestId: number, result: PreviewResult): void {

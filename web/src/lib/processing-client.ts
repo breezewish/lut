@@ -55,6 +55,12 @@ export class ProcessingClient {
     };
   }
 
+  async clear(): Promise<void> {
+    const reply = await this.send({ type: "clear" });
+    if (reply.ok && reply.type === "cleared") return;
+    throw new Error("Worker returned an unexpected clear response.");
+  }
+
   async decode(
     fileId: string,
     buffer: ArrayBuffer,

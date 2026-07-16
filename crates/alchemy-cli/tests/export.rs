@@ -120,4 +120,28 @@ fn text_color_policy_controls_ansi() {
         .unwrap();
     assert!(never.status.success());
     assert!(!never.stdout.contains(&0x1b));
+
+    let error_always = Command::new(env!("CARGO_BIN_EXE_alchemy"))
+        .arg(directory.path().join("missing.dng"))
+        .arg(directory.path().join("error-always.tif"))
+        .arg("--lut")
+        .arg(root().join("tests/fixtures/identity.cube"))
+        .arg("--color")
+        .arg("always")
+        .output()
+        .unwrap();
+    assert!(!error_always.status.success());
+    assert!(error_always.stderr.contains(&0x1b));
+
+    let error_never = Command::new(env!("CARGO_BIN_EXE_alchemy"))
+        .arg(directory.path().join("missing.dng"))
+        .arg(directory.path().join("error-never.tif"))
+        .arg("--lut")
+        .arg(root().join("tests/fixtures/identity.cube"))
+        .arg("--color")
+        .arg("never")
+        .output()
+        .unwrap();
+    assert!(!error_never.status.success());
+    assert!(!error_never.stderr.contains(&0x1b));
 }

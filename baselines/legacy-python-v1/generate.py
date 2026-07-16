@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import subprocess
 import sys
 from pathlib import Path
 
@@ -27,6 +28,8 @@ LUT_ROOT = ROOT / "vendor/V-Log-Alchemy/Luts"
 LUT_MANIFEST = ROOT / "assets/luts.json"
 OUTPUT = Path(__file__).with_name("linear-all-looks-ev0.npz")
 MANIFEST = Path(__file__).with_name("manifest.json")
+RAW_ALCHEMY_COMMIT = "10d4f5bded68d75d4db87cfeeddec1e5fea297d5"
+V_LOG_ALCHEMY_COMMIT = "a0d9aae0dc2d2ed04631960879519a5366245877"
 
 sys.path.insert(0, str(RAW_ALCHEMY / "src"))
 from raw_alchemy import utils  # noqa: E402
@@ -34,6 +37,14 @@ from raw_alchemy import utils  # noqa: E402
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def require_commit(repository: Path, expected: str) -> None:
+    actual = subprocess.check_output(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True
+    ).strip()
+    if actual != expected:
+        raise RuntimeError(f"{repository} is at {actual}; expected {expected}")
 
 
 def decode(half_size: bool) -> np.ndarray:
@@ -76,7 +87,11 @@ def legacy_stages(
 
 
 def main() -> None:
+    require_commit(RAW_ALCHEMY, RAW_ALCHEMY_COMMIT)
+    require_commit(LUT_ROOT.parent, V_LOG_ALCHEMY_COMMIT)
     lut_manifest = json.loads(LUT_MANIFEST.read_text(encoding="utf-8"))
+    if lut_manifest["source"]["commit"] != V_LOG_ALCHEMY_COMMIT:
+        raise RuntimeError("LUT manifest source commit does not match the generator")
     looks = lut_manifest["luts"]
     matrix = colour.matrix_RGB_to_RGB(
         colour.RGB_COLOURSPACES["ProPhoto RGB"],
@@ -156,7 +171,7 @@ def main() -> None:
                 }
                 for look in looks
             ],
-            "rawAlchemyCommit": "10d4f5bded68d75d4db87cfeeddec1e5fea297d5",
+            "rawAlchemyCommit": RAW_ALCHEMY_COMMIT,
         },
         "environment": {
             "python": platform.python_version(),

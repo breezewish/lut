@@ -10,29 +10,35 @@ interface TiffComparison {
   width: number;
   height: number;
   maxCodeDifference: number;
-  maxInteriorCodeDifference: number;
-  maxBoundaryCodeDifference: number;
-  significantlyDifferentBoundaryPixels: number;
+}
+
+interface TiffLayout {
+  width: number;
+  height: number;
+  samplesPerPixel: number;
+  stripOffsets: number[];
+  stripByteCounts: number[];
 }
 
 const SHORT = 3;
 const LONG = 4;
 
 export function decodeRgb16Tiff(bytes: Buffer): TiffImage {
-  const { width, height, stripOffsets, stripByteCounts } = inspect(bytes);
+  const { width, height, samplesPerPixel, stripOffsets, stripByteCounts } =
+    readRgb16TiffLayout(bytes);
 
   const raw = Buffer.concat(
     stripOffsets.map((offset, index) =>
       inflateSync(bytes.subarray(offset, offset + stripByteCounts[index])),
     ),
   );
-  const expectedBytes = width * height * 3 * 2;
+  const expectedBytes = width * height * samplesPerPixel * 2;
   if (raw.byteLength !== expectedBytes)
     throw new Error(
       `Expected ${expectedBytes} decoded TIFF bytes, got ${raw.byteLength}.`,
     );
 
-  const rgb = new Uint16Array(width * height * 3);
+  const rgb = new Uint16Array(width * height * samplesPerPixel);
   for (let index = 0; index < rgb.length; index += 1)
     rgb[index] = raw.readUInt16LE(index * 2);
   return { width, height, rgb };
@@ -42,8 +48,8 @@ export function compareRgb16Tiffs(
   actualBytes: Buffer,
   expectedBytes: Buffer,
 ): TiffComparison {
-  const actual = inspect(actualBytes);
-  const expected = inspect(expectedBytes);
+  const actual = readRgb16TiffLayout(actualBytes);
+  const expected = readRgb16TiffLayout(expectedBytes);
   if (actual.width !== expected.width || actual.height !== expected.height) {
     throw new Error(
       `TIFF dimensions differ: ${actual.width}x${actual.height} and ${expected.width}x${expected.height}.`,
@@ -54,10 +60,7 @@ export function compareRgb16Tiffs(
   }
 
   let maxCodeDifference = 0;
-  let maxInteriorCodeDifference = 0;
-  let maxBoundaryCodeDifference = 0;
   let comparedBytes = 0;
-  const significantlyDifferentBoundaryPixels = new Set<number>();
   for (let index = 0; index < actual.stripOffsets.length; index += 1) {
     const actualStrip = inflateSync(
       actualBytes.subarray(
@@ -79,28 +82,6 @@ export function compareRgb16Tiffs(
         actualStrip.readUInt16LE(offset) - expectedStrip.readUInt16LE(offset),
       );
       maxCodeDifference = Math.max(maxCodeDifference, difference);
-      if (difference === 0) continue;
-      const sample = (comparedBytes + offset) / 2;
-      const pixel = Math.floor(sample / 3);
-      const row = Math.floor(pixel / actual.width);
-      const column = pixel % actual.width;
-      const isInterior =
-        row !== 0 &&
-        row !== actual.height - 1 &&
-        column !== 0 &&
-        column !== actual.width - 1;
-      if (isInterior) {
-        maxInteriorCodeDifference = Math.max(
-          maxInteriorCodeDifference,
-          difference,
-        );
-      } else {
-        maxBoundaryCodeDifference = Math.max(
-          maxBoundaryCodeDifference,
-          difference,
-        );
-        if (difference > 1) significantlyDifferentBoundaryPixels.add(pixel);
-      }
     }
     comparedBytes += actualStrip.length;
   }
@@ -111,14 +92,18 @@ export function compareRgb16Tiffs(
     width: actual.width,
     height: actual.height,
     maxCodeDifference,
-    maxInteriorCodeDifference,
-    maxBoundaryCodeDifference,
-    significantlyDifferentBoundaryPixels:
-      significantlyDifferentBoundaryPixels.size,
   };
 }
 
-function inspect(bytes: Buffer) {
+export function readRgb16TiffDimensions(bytes: Buffer): {
+  width: number;
+  height: number;
+} {
+  const { width, height } = readRgb16TiffLayout(bytes);
+  return { width, height };
+}
+
+function readRgb16TiffLayout(bytes: Buffer): TiffLayout {
   if (bytes.toString("ascii", 0, 2) !== "II" || bytes.readUInt16LE(2) !== 42)
     throw new Error("Expected a little-endian TIFF.");
 
@@ -140,7 +125,7 @@ function inspect(bytes: Buffer) {
     throw new Error(`Unsupported TIFF predictor ${predictor}.`);
   if (stripOffsets.length !== stripByteCounts.length)
     throw new Error("TIFF strip offsets and byte counts do not match.");
-  return { width, height, stripOffsets, stripByteCounts };
+  return { width, height, samplesPerPixel, stripOffsets, stripByteCounts };
 }
 
 function readIfd(bytes: Buffer): Map<number, number[]> {

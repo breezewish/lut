@@ -10,7 +10,7 @@ readonly JPEG_COMMIT="4e151a4ad91001b3aa8c2ece2205c15f487ce320"
 readonly FMA_OVERRIDE_SHA256="4d17be3e69bd0995410c07181ea56f35353ee60aa47bfe2d874ff687f593a146"
 readonly AAHD_MATH_SHA256="4e06458a46291439b3c3db0571fcb0a29d9d3a2ed4be75d98b9b2e46529cc7f2"
 readonly BROWSER_WRAPPER_SHA256="$(sha256sum "$ROOT/crates/alchemy-libraw/src/browser_wrapper.cpp" | cut -d ' ' -f 1)"
-readonly BUILD_ID="libraw-${LIBRAW_COMMIT}-wrapper-${BROWSER_WRAPPER_SHA256:0:12}-jpeg-${JPEG_COMMIT}-fma-${FMA_OVERRIDE_SHA256:0:12}-aahd-${AAHD_MATH_SHA256:0:12}-emcc-5.0.7-signed-char-no-contract"
+readonly BUILD_ID="libraw-${LIBRAW_COMMIT}-wrapper-${BROWSER_WRAPPER_SHA256:0:12}-jpeg-${JPEG_COMMIT}-fma-${FMA_OVERRIDE_SHA256:0:12}-aahd-${AAHD_MATH_SHA256:0:12}-emcc-5.0.7-signed-char-wrapv-no-contract"
 readonly JPEG_BUILD_DIR="$OUTPUT_DIR/.libjpeg-build"
 readonly AAHD_OBJECT="$OUTPUT_DIR/.aahd_demosaic.o"
 
@@ -18,6 +18,18 @@ readonly AAHD_OBJECT="$OUTPUT_DIR/.aahd_demosaic.o"
   || { echo "LibRaw FMA override hash does not match $FMA_OVERRIDE_SHA256" >&2; exit 1; }
 [[ "$(sha256sum "$ROOT/crates/alchemy-libraw/src/aahd_math_override.h" | cut -d ' ' -f 1)" == "$AAHD_MATH_SHA256" ]] \
   || { echo "LibRaw AAHD math override hash does not match $AAHD_MATH_SHA256" >&2; exit 1; }
+[[ "$(git -C "$ROOT/vendor/LibRaw" rev-parse HEAD)" == "$LIBRAW_COMMIT" ]] \
+  || { echo "vendor/LibRaw is not at $LIBRAW_COMMIT" >&2; exit 1; }
+git -C "$ROOT/vendor/LibRaw" diff --quiet \
+  || { echo "vendor/LibRaw has uncommitted source changes" >&2; exit 1; }
+git -C "$ROOT/vendor/LibRaw" diff --cached --quiet \
+  || { echo "vendor/LibRaw has staged source changes" >&2; exit 1; }
+[[ "$(git -C "$ROOT/vendor/libjpeg-turbo" rev-parse HEAD)" == "$JPEG_COMMIT" ]] \
+  || { echo "vendor/libjpeg-turbo is not at $JPEG_COMMIT" >&2; exit 1; }
+git -C "$ROOT/vendor/libjpeg-turbo" diff --quiet \
+  || { echo "vendor/libjpeg-turbo has uncommitted source changes" >&2; exit 1; }
+git -C "$ROOT/vendor/libjpeg-turbo" diff --cached --quiet \
+  || { echo "vendor/libjpeg-turbo has staged source changes" >&2; exit 1; }
 
 if [[ -f "$OUTPUT_DIR/.build-id" ]] \
   && [[ "$(<"$OUTPUT_DIR/.build-id")" == "$BUILD_ID" ]] \
@@ -26,11 +38,6 @@ if [[ -f "$OUTPUT_DIR/.build-id" ]] \
   echo "LibRaw WASM is current ($BUILD_ID)."
   exit 0
 fi
-
-[[ "$(git -C "$ROOT/vendor/LibRaw" rev-parse HEAD)" == "$LIBRAW_COMMIT" ]] \
-  || { echo "vendor/LibRaw is not at $LIBRAW_COMMIT" >&2; exit 1; }
-[[ "$(git -C "$ROOT/vendor/libjpeg-turbo" rev-parse HEAD)" == "$JPEG_COMMIT" ]] \
-  || { echo "vendor/libjpeg-turbo is not at $JPEG_COMMIT" >&2; exit 1; }
 
 mkdir -p "$OUTPUT_DIR"
 mapfile -d '' SOURCES < <(
@@ -71,6 +78,7 @@ rm -rf "$JPEG_BUILD_DIR"
     -std=c++17 \
     -O3 \
     -fsigned-char \
+    -fwrapv \
     -ffp-contract=off \
     -DLIBRAW_NODLL \
     -DUSE_JPEG \
@@ -90,6 +98,7 @@ rm -rf "$JPEG_BUILD_DIR"
     -std=c++17 \
     -O3 \
     -fsigned-char \
+    -fwrapv \
     -ffp-contract=off \
     -DLIBRAW_NODLL \
     -DUSE_JPEG \

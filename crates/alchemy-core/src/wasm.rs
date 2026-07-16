@@ -47,11 +47,11 @@ impl PreviewRenderer {
         source_width: u32,
         source_height: u32,
         max_edge: u32,
-        cube: &str,
+        cube: &[u8],
     ) -> std::result::Result<Self, JsError> {
         let source =
             PreviewSource::new(source_width, source_height, max_edge).map_err(to_js_error)?;
-        let lut = Lut3d::parse(cube).map_err(to_js_error)?;
+        let lut = parse_lut(cube)?;
         Ok(Self { source, lut })
     }
 
@@ -65,8 +65,8 @@ impl PreviewRenderer {
         self.source.write_source_row(pixels).map_err(to_js_error)
     }
 
-    pub fn set_lut(&mut self, cube: &str) -> std::result::Result<(), JsError> {
-        self.lut = Lut3d::parse(cube).map_err(to_js_error)?;
+    pub fn set_lut(&mut self, cube: &[u8]) -> std::result::Result<(), JsError> {
+        self.lut = parse_lut(cube)?;
         Ok(())
     }
 
@@ -101,8 +101,13 @@ pub struct TiffEncoder {
 #[wasm_bindgen]
 impl TiffEncoder {
     #[wasm_bindgen(constructor)]
-    pub fn new(width: u32, height: u32, ev: f32, cube: &str) -> std::result::Result<Self, JsError> {
-        let lut = Lut3d::parse(cube).map_err(to_js_error)?;
+    pub fn new(
+        width: u32,
+        height: u32,
+        ev: f32,
+        cube: &[u8],
+    ) -> std::result::Result<Self, JsError> {
+        let lut = parse_lut(cube)?;
         let pipeline =
             ColorPipeline::new(ev, ProcessingMode::CorrectedV2, lut).map_err(to_js_error)?;
         let writer = Rgb16TiffWriter::new(width, height).map_err(to_js_error)?;
@@ -138,4 +143,10 @@ impl TiffEncoder {
 
 fn to_js_error(error: impl std::fmt::Display) -> JsError {
     JsError::new(&error.to_string())
+}
+
+fn parse_lut(cube: &[u8]) -> std::result::Result<Lut3d, JsError> {
+    let source =
+        std::str::from_utf8(cube).map_err(|_| JsError::new("CUBE source must be valid UTF-8"))?;
+    Lut3d::parse(source).map_err(to_js_error)
 }

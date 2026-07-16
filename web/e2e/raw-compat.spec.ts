@@ -63,11 +63,7 @@ test("a real camera CFA DNG matches the native full-resolution export", async ({
     await readFile(nativeOutput),
   );
   expect([comparison.width, comparison.height]).toEqual([3_920, 2_638]);
-  expect(comparison.maxInteriorCodeDifference).toBeLessThanOrEqual(1);
-  expect(comparison.significantlyDifferentBoundaryPixels).toBeLessThanOrEqual(
-    1,
-  );
-  expect(comparison.maxBoundaryCodeDifference).toBeLessThanOrEqual(8_192);
+  expect(comparison.maxCodeDifference).toBeLessThanOrEqual(1);
 });
 
 test("a full-resolution Sony ARW export matches the native pipeline", async ({

@@ -4,7 +4,8 @@ export type QueueStatus =
   | "ready"
   | "exporting"
   | "done"
-  | "error";
+  | "decode-error"
+  | "export-error";
 
 export interface QueueItem {
   id: string;
@@ -59,6 +60,10 @@ export interface CameraPreview {
 export type WorkerCommand =
   | {
       requestId: number;
+      type: "clear";
+    }
+  | {
+      requestId: number;
       type: "decode";
       fileId: string;
       buffer: ArrayBuffer;
@@ -82,6 +87,11 @@ export type WorkerCommand =
     };
 
 export type WorkerReply =
+  | {
+      requestId: number;
+      ok: true;
+      type: "cleared";
+    }
   | {
       requestId: number;
       ok: true;

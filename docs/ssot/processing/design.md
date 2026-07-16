@@ -8,7 +8,9 @@ The C ABI exposes only corrected-v2 TIFF rendering. It returns a status plus a R
 
 Corrected processing uses f32 throughout and maps cleanly to WASM SIMD. Legacy processing has isolated f64 matrix and LUT-coordinate operations only where required to match the Python baseline.
 
-Native and WASM LibRaw builds use signed `char`, disable implicit floating-point contraction, and replace upstream `postprocessing_utils.cpp` with the pinned local copy in `alchemy-libraw`. Only the final color-matrix dot products differ: their fused operation order is explicit, so WASM reproduces the native/Python RGB16 result exactly. AAHD is compiled with a narrow project-owned math override that promotes its float gamma-table power operation to double; this removes target-libm rounding differences while leaving its existing double operation unchanged. Pinned full-size Leica AAHD output still differs at one outer-edge pixel; the parity contract isolates and bounds that upstream edge behavior while requiring the complete interior and every other corpus mode to be exact.
+Native and WASM LibRaw builds use signed `char`, define signed-integer overflow as two's-complement wrapping, disable implicit floating-point contraction, and replace upstream `postprocessing_utils.cpp` with the pinned local copy in `alchemy-libraw`. Only the final color-matrix dot products differ: their fused operation order is explicit, so WASM reproduces the native/Python RGB16 result exactly. AAHD is compiled with a narrow project-owned math override that promotes its float gamma-table power operation to double; this removes target-libm rounding differences while leaving its existing double operation unchanged. Defined wrapping is also part of the decode contract because AAHD gradient squares can overflow `int`; without it, native and WASM compilers may choose different interpolation directions.
+
+Browser LUT loading verifies SHA-256 over the fetched bytes and passes those exact bytes through the WASM bulk-array binding. Rust validates UTF-8 and parses CUBE data. The browser never materializes a second megabyte-scale LUT string or copies it into WASM one character at a time.
 
 ## Memory
 
@@ -16,6 +18,6 @@ The project-owned browser LibRaw wrapper retains one processed RGB16 allocation 
 
 ## Baseline
 
-`baselines/legacy-python-v1` locks Python 3.11, Raw Alchemy and dependency revisions, the complete decode and processing recipe, all 27 creative LUT hashes and order, array types and shapes, every checkpoint hash, and a compressed NPZ fixture. Rust reads the committed fixture directly; normal tests do not execute Python or require the original external repository.
+`baselines/legacy-python-v1` locks Python 3.11, Raw Alchemy and dependency revisions, the complete decode and processing recipe, all 27 creative LUT hashes and order, array types and shapes, every checkpoint hash, and a compressed NPZ fixture. Regeneration rejects source repositories at different commits, and normal tests verify that the committed RAW and NPZ bytes match the manifest. Rust reads the committed fixture directly; normal tests do not execute Python or require the original external repository.
 
 The baseline covers decode RGB16, exposure, Boost, gamut matrix, V-Log, every supported LUT, final uint16 export, and the distinct half-size preview path. Legacy preview alone performs the historical BT.709-to-sRGB display conversion after LUT output; export does not. Decode is exact. Float tolerances are stage-local. LUT maximum absolute error is `2e-6`; final export and preview maximum error is one code value.

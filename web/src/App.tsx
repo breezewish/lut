@@ -35,7 +35,8 @@ const STATUS_LABELS: Record<QueueItem["status"], string> = {
   ready: "Ready",
   exporting: "Exporting",
   done: "Exported",
-  error: "Failed",
+  "decode-error": "Failed",
+  "export-error": "Failed",
 };
 
 interface ExportProgress {
@@ -49,6 +50,18 @@ interface QueueUndo {
   items: QueueItem[];
   selectedId?: string;
   message: string;
+}
+
+function isDecodeFailure(item: QueueItem): boolean {
+  return item.status === "decode-error";
+}
+
+function hasUsablePreview(item: QueueItem): boolean {
+  return (
+    item.status === "ready" ||
+    item.status === "done" ||
+    item.status === "export-error"
+  );
 }
 
 export default function App() {
@@ -85,13 +98,20 @@ export default function App() {
 
   const selected = items.find((item) => item.id === selectedId);
   const selectedLut = manifest?.luts.find((lut) => lut.id === lutId);
-  const exportableItems = items.filter((item) => item.status !== "error");
+  const exportableItems = items.filter((item) => !isDecodeFailure(item));
 
   const updateItem = useCallback((id: string, patch: Partial<QueueItem>) => {
     setItems((current) =>
       current.map((item) => (item.id === id ? { ...item, ...patch } : item)),
     );
   }, []);
+
+  const releasePreview = useCallback(() => {
+    decodedFileId.current = undefined;
+    setPreview(undefined);
+    setCameraPreview(undefined);
+    void client.clear().catch((error: Error) => setGlobalError(error.message));
+  }, [client]);
 
   useEffect(() => {
     let active = true;
@@ -135,7 +155,10 @@ export default function App() {
     setPreview(undefined);
     setCameraPreview(undefined);
     setGlobalError(undefined);
-    updateItem(selected.id, { status: "decoding", error: undefined });
+    updateItem(selected.id, {
+      status: "decoding",
+      error: undefined,
+    });
 
     selected.file
       .arrayBuffer()
@@ -153,7 +176,10 @@ export default function App() {
       })
       .catch((error: Error) => {
         if (!active) return;
-        updateItem(selected.id, { status: "error", error: error.message });
+        updateItem(selected.id, {
+          status: "decode-error",
+          error: error.message,
+        });
         setGlobalError(error.message);
       });
 
@@ -166,7 +192,7 @@ export default function App() {
     if (
       !selected ||
       !selectedLut ||
-      !["ready", "done"].includes(selected.status) ||
+      !hasUsablePreview(selected) ||
       decodedFileId.current !== selected.id
     )
       return;
@@ -242,8 +268,7 @@ export default function App() {
     if (selectedId === id) {
       const next = items.find((item) => item.id !== id);
       setSelectedId(next?.id);
-      setPreview(undefined);
-      decodedFileId.current = undefined;
+      releasePreview();
     }
   };
 
@@ -255,9 +280,8 @@ export default function App() {
     });
     setItems([]);
     setSelectedId(undefined);
-    setPreview(undefined);
     setExportSummary(undefined);
-    decodedFileId.current = undefined;
+    releasePreview();
   };
 
   const restoreQueue = () => {
@@ -274,7 +298,7 @@ export default function App() {
   };
 
   const exportItems = async (targets: QueueItem[]) => {
-    const eligibleTargets = targets.filter((item) => item.status !== "error");
+    const eligibleTargets = targets.filter((item) => !isDecodeFailure(item));
     if (!selectedLut || eligibleTargets.length === 0) return;
     setExporting(true);
     setGlobalError(undefined);
@@ -319,7 +343,10 @@ export default function App() {
           total: eligibleTargets.length,
           fileName: item.file.name,
         });
-        updateItem(item.id, { status: "exporting", error: undefined });
+        updateItem(item.id, {
+          status: "exporting",
+          error: undefined,
+        });
         let tiff: Uint8Array | undefined;
         try {
           tiff = await client.export(
@@ -332,7 +359,10 @@ export default function App() {
           const message =
             error instanceof Error ? error.message : String(error);
           failed.push(item.file.name);
-          updateItem(item.id, { status: "error", error: message });
+          updateItem(item.id, {
+            status: "export-error",
+            error: message,
+          });
         }
 
         if (tiff) {
@@ -551,10 +581,12 @@ export default function App() {
                     <span className="queue-copy">
                       <strong>{item.file.name}</strong>
                       <span>
-                        {item.status === "error"
+                        {item.status === "decode-error"
                           ? "Could not decode"
-                          : item.camera ||
-                            `${(item.file.size / 1_048_576).toFixed(1)} MB`}
+                          : item.status === "export-error"
+                            ? "Export failed · retry available"
+                            : item.camera ||
+                              `${(item.file.size / 1_048_576).toFixed(1)} MB`}
                       </span>
                     </span>
                     <span className="queue-status">
@@ -667,7 +699,7 @@ export default function App() {
             <div className="error-banner" role="alert">
               <span>{globalError}</span>
               <div className="banner-actions">
-                {selected?.status === "error" && (
+                {selected && isDecodeFailure(selected) && (
                   <>
                     <Button
                       variant="secondary"
@@ -734,7 +766,7 @@ export default function App() {
                   <FolderOpen size={17} aria-hidden="true" /> Choose RAW files
                 </Button>
               </div>
-            ) : selected.status === "error" ? (
+            ) : isDecodeFailure(selected) ? (
               <div className="processing-error-state">
                 <FileImage size={30} aria-hidden="true" />
                 <h2>Preview unavailable</h2>
@@ -784,10 +816,21 @@ export default function App() {
             <section className="output-bar" aria-label="Export controls">
               <div className="selected-meta">
                 <strong>{selected.file.name}</strong>
-                <span>
-                  {selected.status === "error"
+                <span
+                  className={
+                    selected.status === "export-error"
+                      ? "selected-error"
+                      : undefined
+                  }
+                  role={
+                    selected.status === "export-error" ? "alert" : undefined
+                  }
+                >
+                  {selected.status === "decode-error"
                     ? "Unable to decode"
-                    : selected.dimensions || STATUS_LABELS[selected.status]}
+                    : selected.status === "export-error"
+                      ? selected.error
+                      : selected.dimensions || STATUS_LABELS[selected.status]}
                 </span>
               </div>
               <div className="export-feedback" aria-live="polite">
@@ -821,7 +864,7 @@ export default function App() {
                   variant={items.length > 1 ? "secondary" : "primary"}
                   onClick={() => void exportItems([selected])}
                   disabled={
-                    selected.status === "error" || exporting || !selectedLut
+                    isDecodeFailure(selected) || exporting || !selectedLut
                   }
                 >
                   Export selected

@@ -8,26 +8,36 @@ import createLibRaw from "../web/src/libraw/libraw.js";
 
 const root = resolve(import.meta.dirname, "..");
 const temporaryDirectory = await mkdtemp(join(tmpdir(), "raw-alchemy-"));
-const execFileAsync = promisify(execFile);
-const manifest = JSON.parse(
-  await readFile(join(root, "tests/fixtures/raw-manifest.json"), "utf8"),
-);
+const nativeOutput = join(temporaryDirectory, "native.rgb16");
+const fixtures = [
+  {
+    name: "linear DNG",
+    path: "tests/fixtures/linear.dng",
+    dimensions: { full: [64, 48], half: [64, 48] },
+  },
+  {
+    name: "lossy DNG",
+    path: "vendor/LibRaw-Wasm/test/integration/lossy.dng",
+    dimensions: { full: [256, 168], half: [256, 168] },
+  },
+  {
+    name: "Leica M8 DNG",
+    path: "tests/fixtures/leica-m8.dng",
+    dimensions: { full: [3920, 2638], half: [1960, 1319] },
+  },
+  {
+    name: "Sony ARW",
+    path: "vendor/LibRaw-Wasm/example-sony.ARW",
+    dimensions: { full: [6240, 4168], half: [3120, 2084] },
+  },
+];
 
 try {
   const wasmBytes = await readFile(join(root, "web/src/libraw/libraw.wasm"));
   const module = await createLibRaw({ wasmBinary: wasmBytes });
 
-  for (const fixture of manifest.fixtures) {
+  for (const fixture of fixtures) {
     for (const halfSize of [false, true]) {
-      const mode = halfSize ? "half-size" : "full-size";
-      const aahdBoundary =
-        fixture.id === "leica-m8-cfa-dng" && !halfSize
-          ? { maxDifferentPixels: 1, maxSampleDelta: 4_096 }
-          : undefined;
-      const nativeOutput = join(
-        temporaryDirectory,
-        `${fixture.id}-${mode}.rgb16`,
-      );
       const nativeArguments = [
         "run",
         "--quiet",
@@ -40,7 +50,7 @@ try {
         nativeOutput,
       ];
       if (halfSize) nativeArguments.push("--half-size");
-      await execFileAsync("cargo", nativeArguments, { cwd: root });
+      await promisify(execFile)("cargo", nativeArguments, { cwd: root });
 
       const [rawBytes, nativeBytes] = await Promise.all([
         readFile(join(root, fixture.path)),
@@ -50,12 +60,11 @@ try {
       try {
         raw.open(new Uint8Array(rawBytes), halfSize);
         const image = raw.imageInfo();
-        if (
-          !halfSize &&
-          (image.width !== fixture.width || image.height !== fixture.height)
-        ) {
+        const mode = halfSize ? "half" : "full";
+        const expected = fixture.dimensions[mode];
+        if (image.width !== expected[0] || image.height !== expected[1]) {
           throw new Error(
-            `${fixture.id} ${mode}: decoded ${image.width}x${image.height}, expected ${fixture.width}x${fixture.height}`,
+            `${fixture.name} ${mode} dimensions are ${image.width}x${image.height}, expected ${expected[0]}x${expected[1]}`,
           );
         }
 
@@ -67,7 +76,7 @@ try {
           lastPixel.buffer !== pixels.buffer
         ) {
           throw new Error(
-            `${fixture.id} ${mode}: RGB16 slices are copies instead of WASM views`,
+            `${fixture.name} RGB16 slices are copies instead of WASM views`,
           );
         }
 
@@ -86,7 +95,7 @@ try {
         }
         if (!rejectedOutOfBoundsView) {
           throw new Error(
-            `${fixture.id} ${mode}: accepted a view outside the decoded image`,
+            `${fixture.name} accepted an RGB16 view outside the decoded image`,
           );
         }
 
@@ -94,56 +103,23 @@ try {
         const nativeHeight = nativeBytes.readUInt32LE(4);
         if (image.width !== nativeWidth || image.height !== nativeHeight) {
           throw new Error(
-            `${fixture.id} ${mode}: WASM ${image.width}x${image.height} differs from native ${nativeWidth}x${nativeHeight}`,
+            `${fixture.name} dimensions differ: WASM ${image.width}x${image.height}, native ${nativeWidth}x${nativeHeight}`,
           );
         }
         if (nativeBytes.length !== 8 + pixels.length * 2) {
           throw new Error(
-            `${fixture.id} ${mode}: native RGB16 buffer has an unexpected size`,
+            `${fixture.name} native RGB16 buffer has an unexpected size`,
           );
         }
-        const differentBoundaryPixels = new Set();
-        let maxSampleDelta = 0;
         for (let index = 0; index < pixels.length; index += 1) {
           const nativeSample = nativeBytes.readUInt16LE(8 + index * 2);
-          const delta = Math.abs(pixels[index] - nativeSample);
-          if (delta === 0) continue;
-          if (!aahdBoundary) {
+          if (pixels[index] !== nativeSample) {
             throw new Error(
-              `${fixture.id} ${mode}: RGB16 differs at sample ${index}: WASM ${pixels[index]}, native ${nativeSample}`,
+              `${fixture.name} ${mode} RGB16 differs at sample ${index}: WASM ${pixels[index]}, native ${nativeSample}`,
             );
           }
-          const pixel = Math.floor(index / 3);
-          const row = Math.floor(pixel / image.width);
-          const column = pixel % image.width;
-          const isBoundary =
-            row === 0 ||
-            row === image.height - 1 ||
-            column === 0 ||
-            column === image.width - 1;
-          if (!isBoundary) {
-            throw new Error(
-              `${fixture.id} ${mode}: interior RGB16 differs at (${column}, ${row}), channel ${index % 3}`,
-            );
-          }
-          differentBoundaryPixels.add(pixel);
-          maxSampleDelta = Math.max(maxSampleDelta, delta);
         }
-        if (
-          aahdBoundary &&
-          (differentBoundaryPixels.size > aahdBoundary.maxDifferentPixels ||
-            maxSampleDelta > aahdBoundary.maxSampleDelta)
-        ) {
-          throw new Error(
-            `${fixture.id} ${mode}: ${differentBoundaryPixels.size} boundary pixels differ with maximum delta ${maxSampleDelta}`,
-          );
-        }
-        const result = aahdBoundary
-          ? `interior exact; ${differentBoundaryPixels.size} bounded AAHD edge pixel differs`
-          : "exact";
-        console.log(
-          `${fixture.id} ${mode}: native/WASM RGB16 ${result} at ${image.width}x${image.height}`,
-        );
+        console.log(`${fixture.name} ${mode} native/WASM RGB16 parity: exact`);
       } finally {
         raw.delete();
       }

@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import { unzipSync } from "fflate";
 
-import { decodeRgb16Tiff } from "./tiff";
+import { decodeRgb16Tiff, readRgb16TiffDimensions } from "./tiff";
 
 const linearFixture = resolve("tests/fixtures/linear.dng");
 const lossyFixture = resolve("vendor/LibRaw-Wasm/test/integration/lossy.dng");
@@ -205,6 +205,17 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
 test("batch export produces one ZIP and corrupt input fails clearly", async ({
   page,
 }) => {
+  await page.addInitScript(() => {
+    const read = File.prototype.arrayBuffer;
+    let readCount = 0;
+    File.prototype.arrayBuffer = async function () {
+      readCount += 1;
+      if (readCount > 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+      }
+      return read.call(this);
+    };
+  });
   const [linearBytes, lossyBytes] = await Promise.all([
     readFile(linearFixture),
     readFile(lossyFixture),
@@ -471,6 +482,48 @@ test("all built-in LUTs match optimized native RGB16 exports", async ({
   }
 });
 
+test("exports a full-resolution camera RAW within the resource budget", async ({
+  page,
+}) => {
+  test.setTimeout(45_000);
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(sonyFixture);
+  await expect(page.getByLabel("Base preview")).toBeVisible({
+    timeout: 30_000,
+  });
+  const comparison = page.getByRole("region", {
+    name: "Base and LUT comparison",
+  });
+  await expect(comparison).toHaveAttribute("data-decode-count", "1");
+
+  const startedAt = Date.now();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export selected" }).click();
+  const download = await downloadPromise;
+  const elapsed = Date.now() - startedAt;
+  const outputPath = await download.path();
+  expect(outputPath).not.toBeNull();
+  expect((await stat(outputPath!)).size).toBeGreaterThan(1_000_000);
+  expect(readRgb16TiffDimensions(await readFile(outputPath!))).toEqual({
+    width: 6_240,
+    height: 4_168,
+  });
+  expect(elapsed).toBeLessThan(30_000);
+
+  const previewBeforeRerender = await page
+    .getByLabel("Base preview")
+    .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
+  await page.getByRole("slider", { name: "Exposure" }).fill("0.5");
+  await expect
+    .poll(() =>
+      page
+        .getByLabel("Base preview")
+        .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
+    )
+    .not.toBe(previewBeforeRerender);
+  await expect(comparison).toHaveAttribute("data-decode-count", "1");
+});
+
 test("reports a recoverable error when the local processing engine cannot start", async ({
   page,
 }) => {
@@ -482,6 +535,118 @@ test("reports a recoverable error when the local processing engine cannot start"
     "The local processing engine could not start. Reload the page to retry.",
   );
   await expect(page.getByText("Decoding preview…")).toHaveCount(0);
+});
+
+test("export failures retain the preview, allow retry, and release it on removal", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const state = window as Window & {
+      exportAttempts?: number;
+      clearRequests?: number;
+    };
+    state.exportAttempts = 0;
+    state.clearRequests = 0;
+
+    class ExportFailingWorker {
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+
+      postMessage(
+        command: {
+          requestId: number;
+          type: "clear" | "decode" | "render" | "export";
+          fileId?: string;
+        },
+        _transfer?: Transferable[],
+      ) {
+        if (command.type === "clear") {
+          state.clearRequests = (state.clearRequests ?? 0) + 1;
+          this.reply({
+            requestId: command.requestId,
+            ok: true,
+            type: "cleared",
+          });
+          return;
+        }
+        if (command.type === "export") {
+          state.exportAttempts = (state.exportAttempts ?? 0) + 1;
+          this.reply({
+            requestId: command.requestId,
+            ok: false,
+            error: "TIFF encoding failed. Retry this file.",
+          });
+          return;
+        }
+        this.reply({
+          requestId: command.requestId,
+          ok: true,
+          type: "preview",
+          result: {
+            fileId: command.fileId,
+            width: 1,
+            height: 1,
+            base: new Uint8Array([32, 32, 32, 255]),
+            lut: new Uint8Array([64, 64, 64, 255]),
+            metadata: { camera: "Test Camera", width: 1, height: 1 },
+            decodeCount: 1,
+          },
+        });
+      }
+
+      terminate() {}
+
+      private reply(data: object) {
+        queueMicrotask(() =>
+          this.onmessage?.(new MessageEvent("message", { data })),
+        );
+      }
+    }
+
+    Object.defineProperty(window, "Worker", {
+      value: ExportFailingWorker,
+      configurable: true,
+    });
+  });
+
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "retry.dng",
+    mimeType: "image/x-adobe-dng",
+    buffer: Buffer.from("test RAW"),
+  });
+  await expect(page.getByLabel("Base preview")).toBeVisible();
+
+  await page.getByRole("button", { name: "Export selected" }).click();
+  await expect(page.getByText("Export failed · retry available")).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveText(
+    "TIFF encoding failed. Retry this file.",
+  );
+  await expect(page.getByLabel("Base preview")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Export selected" }),
+  ).toBeEnabled();
+
+  await page.getByRole("button", { name: "Export selected" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as Window & { exportAttempts?: number }).exportAttempts,
+      ),
+    )
+    .toBe(2);
+
+  await page.getByRole("button", { name: "Remove retry.dng" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as Window & { clearRequests?: number }).clearRequests,
+      ),
+    )
+    .toBe(1);
+  await expect(
+    page.getByRole("heading", { name: "Start with a camera RAW" }),
+  ).toBeVisible();
 });
 
 test("short desktop viewports can scroll to export", async ({ page }) => {

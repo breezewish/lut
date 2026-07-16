@@ -4,14 +4,15 @@
 - A real camera RAW displays its labeled embedded JPEG before the processed preview replaces it.
 - Decode, rerender, and export issue only same-origin static GET requests; no photo data is uploaded.
 - A populated queue accepts another drop, and duplicate files in the same drop event create only one queue entry.
-- Every manifest RAW decodes to the same RGB16 dimensions in native and WASM LibRaw builds in both full-size and half-size modes; samples match exactly except for one bounded outer-edge pixel in full-size Leica AAHD output, whose interior remains exact.
-- Real Leica DNG and Sony ARW files render nonblank previews and export full-resolution TIFFs; browser output matches native corrected-v2 output within one code value except for the same bounded Leica AAHD edge pixel.
+- Synthetic LinearRaw, real Leica DNG, and Sony ARW output decode to exactly the same RGB16 dimensions and samples in native and WASM LibRaw builds in both full-size and half-size modes.
+- Real Leica DNG and Sony ARW files render nonblank previews and export full-resolution TIFFs; browser output matches native corrected-v2 output within one code value.
 - The HTTPS production bundle imports, previews, and exports in Chromium, Firefox, and WebKit.
 - A non-secure remote HTTP development origin imports and previews a DNG without relying on secure-context Web Crypto.
 - Every built-in LUT produces browser WASM RGB16 output within one code value of the optimized native corrected-v2 export.
 - Two different RAW files make batch export the sole primary action, lock import, queue selection, EV, and LUT controls for the operation, and export as separately named RGB16 TIFF entries in one ZIP; each decompressed image matches its independent native export within one code value, proving isolated sequential processing state.
 - A rapid file-selection race leaves only the final selected file and its preview active.
 - A mixed-success batch continues past a decode that fails during export, includes both successful files, and reports the failed file.
+- A full-resolution export failure announces its concrete error, keeps the processed preview visible, remains retryable, and removing that final queue item sends a Worker clear command before returning to the empty state.
 - A valid-corrupt-valid batch exports only the two valid TIFFs, keeps their dimensions isolated, marks the corrupt file failed, continues to the later file, and reports the exact partial-success summary.
 - Stopping a multi-file export finishes the active file, omits the remaining files from the ZIP, and reports the partial count.
 - Browser export reads bounded zero-copy LibRaw views, transfers only those source strips into the color WASM, and fails if the encoder's requested strip sizes do not consume the image exactly.

@@ -27,6 +27,9 @@ const previewWrite = methodBody("write_source_row(pixels)");
 const previewRender = methodBody("render(ev)");
 const tiffWrite = methodBody("write_strip(pixels)");
 
+if (!previewConstructor.includes("passArray8ToWasm0(cube")) {
+  throw new Error("Preview constructor no longer receives verified LUT bytes.");
+}
 if (previewConstructor.includes("passArray16ToWasm0")) {
   throw new Error(
     "Preview constructor unexpectedly copies the complete RGB16 source image.",
@@ -57,6 +60,12 @@ if (worker.includes(".imageData(")) {
 }
 if (!worker.includes(".imageView(")) {
   throw new Error("The Worker no longer reads bounded LibRaw RGB16 views.");
+}
+if (
+  !worker.includes('data.type === "clear"') ||
+  !worker.includes("cached?.renderer.free()")
+) {
+  throw new Error("Removing the active RAW no longer frees its preview cache.");
 }
 const imageViewStart = browserWrapper.indexOf("val image_view(");
 const imageViewEnd = browserWrapper.indexOf("\nprivate:", imageViewStart);

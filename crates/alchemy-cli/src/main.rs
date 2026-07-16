@@ -42,6 +42,16 @@ enum Color {
     Never,
 }
 
+impl Color {
+    fn enabled(self, is_terminal: bool) -> bool {
+        match self {
+            Self::Auto => is_terminal,
+            Self::Always => true,
+            Self::Never => false,
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct Success<'a> {
     status: &'static str,
@@ -61,7 +71,14 @@ fn main() {
                 "{}",
                 serde_json::json!({ "status": "error", "message": error })
             ),
-            Output::Text => eprintln!("Could not export RAW: {error}"),
+            Output::Text => {
+                let heading = if args.color.enabled(std::io::stderr().is_terminal()) {
+                    "\x1b[31;1mCould not export RAW\x1b[0m"
+                } else {
+                    "Could not export RAW"
+                };
+                eprintln!("{heading}: {error}");
+            }
         }
         std::process::exit(1);
     }
@@ -94,11 +111,7 @@ fn run(args: &Args, output: Output) -> Result<(), String> {
     match output {
         Output::Json => println!("{}", serde_json::to_string_pretty(&success).unwrap()),
         Output::Text => {
-            let color = match args.color {
-                Color::Auto => std::io::stdout().is_terminal(),
-                Color::Always => true,
-                Color::Never => false,
-            };
+            let color = args.color.enabled(std::io::stdout().is_terminal());
             let heading = if color {
                 "\x1b[32;1mExport complete\x1b[0m"
             } else {

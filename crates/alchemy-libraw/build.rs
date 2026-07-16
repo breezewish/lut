@@ -76,6 +76,7 @@ fn configure_libraw_build(build: &mut cc::Build, libraw: &Path, jpeg: &Path) {
         .cpp(true)
         .std("c++17")
         .flag("-fsigned-char")
+        .flag("-fwrapv")
         .flag("-ffp-contract=off")
         // Decode parity is a numerical contract. Keep LibRaw's compilation
         // profile stable even when Rust tests use an unoptimized profile.

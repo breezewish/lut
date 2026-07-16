@@ -392,7 +392,8 @@ button {
   background: var(--success);
 }
 
-.status-error {
+.status-decode-error,
+.status-export-error {
   background: var(--danger);
 }
 
@@ -536,6 +537,12 @@ input[type="range"] {
 .selected-meta span {
   color: var(--muted);
   font-size: 0.75rem;
+}
+
+.selected-meta .selected-error {
+  overflow: visible;
+  color: oklch(0.82 0.06 24);
+  white-space: normal;
 }
 
 .select-trigger {
