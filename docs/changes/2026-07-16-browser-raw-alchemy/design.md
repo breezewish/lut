@@ -18,3 +18,4 @@ Use pinned native and Emscripten builds of the LibRaw source used by Raw Alchemy
 - Unknown LUT output semantics remain visible and unprofiled.
 - The interface follows the flat dark editing system in root `DESIGN.md`.
 - A verified `main` revision is built with one repository base path and published as an immutable GitHub Pages artifact; generated output does not live on a deployment branch.
+- Containerized WASM builds write mounted outputs as the invoking host user, keeping cleanup and repeated builds portable across local and GitHub runners.

@@ -13,6 +13,13 @@ readonly BROWSER_WRAPPER_SHA256="$(sha256sum "$ROOT/crates/alchemy-libraw/src/br
 readonly BUILD_ID="libraw-${LIBRAW_COMMIT}-wrapper-${BROWSER_WRAPPER_SHA256:0:12}-jpeg-${JPEG_COMMIT}-fma-${FMA_OVERRIDE_SHA256:0:12}-aahd-${AAHD_MATH_SHA256:0:12}-emcc-5.0.7-signed-char-wrapv-no-contract"
 readonly JPEG_BUILD_DIR="$OUTPUT_DIR/.libjpeg-build"
 readonly AAHD_OBJECT="$OUTPUT_DIR/.aahd_demosaic.o"
+readonly -a CONTAINER_RUN=(
+  "${CONTAINER_RUNTIME:-docker}" run --rm
+  --user "$(id -u):$(id -g)"
+  --env HOME=/tmp
+  -v "$ROOT:/workspace"
+  -w /workspace
+)
 
 [[ "$(sha256sum "$ROOT/crates/alchemy-libraw/src/postprocessing_utils.cpp" | cut -d ' ' -f 1)" == "$FMA_OVERRIDE_SHA256" ]] \
   || { echo "LibRaw FMA override hash does not match $FMA_OVERRIDE_SHA256" >&2; exit 1; }
@@ -54,9 +61,7 @@ mapfile -d '' SOURCES < <(
 
 cd "$ROOT"
 rm -rf "$JPEG_BUILD_DIR"
-"${CONTAINER_RUNTIME:-docker}" run --rm \
-  -v "$ROOT:/workspace" \
-  -w /workspace \
+"${CONTAINER_RUN[@]}" \
   "$IMAGE" \
   bash -lc \
     'emcmake cmake -S vendor/libjpeg-turbo -B web/src/libraw/.libjpeg-build \
@@ -70,9 +75,7 @@ rm -rf "$JPEG_BUILD_DIR"
       -DCMAKE_BUILD_TYPE=Release \
     && cmake --build web/src/libraw/.libjpeg-build --parallel 2'
 
-"${CONTAINER_RUNTIME:-docker}" run --rm \
-  -v "$ROOT:/workspace" \
-  -w /workspace \
+"${CONTAINER_RUN[@]}" \
   "$IMAGE" \
   em++ \
     -std=c++17 \
@@ -90,9 +93,7 @@ rm -rf "$JPEG_BUILD_DIR"
     -c vendor/LibRaw/src/demosaic/aahd_demosaic.cpp \
     -o web/src/libraw/.aahd_demosaic.o
 
-"${CONTAINER_RUNTIME:-docker}" run --rm \
-  -v "$ROOT:/workspace" \
-  -w /workspace \
+"${CONTAINER_RUN[@]}" \
   "$IMAGE" \
   em++ \
     -std=c++17 \
