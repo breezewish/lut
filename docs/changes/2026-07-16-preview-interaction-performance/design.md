@@ -46,3 +46,5 @@ The acceptance run after optimization measured 20 EV edits, 26 first-access LUTs
 | Cached LUT       |      20 |          148 ms |            288 ms |
 
 The two 65³ first-access LUTs were the slowest assets. Their load stages were 200 ms and 202 ms, and their complete settled samples were 474 ms and 479 ms. Cached LUT load p95 was below 0.1 ms. The 1024px LUT-only color stage had p95 below 162 ms. Results are stored as Playwright benchmark artifacts and are not committed build output.
+
+A fresh completion audit on the same reference fixture reproduced the gate with EV first-frame p95 59.6 ms and settled p95 428.2 ms, first-access LUT settled p95 464.6 ms, and cached LUT first-frame p95 159.7 ms. The full production E2E suite also preserved longest-edge-1024 settled previews and browser/native RGB16 export parity within one code value.
