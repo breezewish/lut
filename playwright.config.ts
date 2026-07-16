@@ -14,17 +14,17 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    {
-      name: "firefox",
-      testMatch: "browser-smoke.spec.ts",
-      use: { ...devices["Desktop Firefox"] },
-    },
     {
       name: "webkit",
       testMatch: "browser-smoke.spec.ts",
       use: { ...devices["Desktop Safari"] },
     },
+    {
+      name: "firefox",
+      testMatch: "browser-smoke.spec.ts",
+      use: { ...devices["Desktop Firefox"] },
+    },
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: [
     {

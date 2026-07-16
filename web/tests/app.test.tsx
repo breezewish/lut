@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 
 import App from "../src/App";
@@ -6,6 +12,7 @@ import App from "../src/App";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 test("teaches the private local workflow before files are selected", async () => {
@@ -56,4 +63,116 @@ test("deduplicates one input batch and accepts drops after the queue is populate
     dataTransfer: { files: [second] },
   });
   expect(screen.getByText("2 local files")).toBeVisible();
+});
+
+test("renders only after the exposure recipe changes", async () => {
+  type Command = {
+    requestId: number;
+    type: "clear" | "decode" | "render" | "export";
+    fileId?: string;
+    ev?: number;
+  };
+
+  class RecipeWorker {
+    static instance: RecipeWorker;
+    readonly commands: Command[] = [];
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: ((event: ErrorEvent) => void) | null = null;
+
+    constructor() {
+      RecipeWorker.instance = this;
+    }
+
+    postMessage(command: Command) {
+      this.commands.push(command);
+      if (command.type !== "decode" && command.type !== "render") return;
+
+      const red = command.type === "decode" ? 20 : 100 + command.ev!;
+      queueMicrotask(() =>
+        this.onmessage?.(
+          new MessageEvent("message", {
+            data: {
+              requestId: command.requestId,
+              ok: true,
+              type: "preview",
+              result: {
+                fileId: command.fileId,
+                width: 1,
+                height: 1,
+                base: new Uint8Array([red, 0, 0, 255]),
+                lut: new Uint8Array([red + 1, 0, 0, 255]),
+                metadata: { camera: "Test Camera", width: 1, height: 1 },
+                decodeCount: 1,
+              },
+            },
+          }),
+        ),
+      );
+    }
+
+    terminate() {}
+  }
+
+  const paintedRedValues: number[] = [];
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    putImageData: (image: { data: Uint8ClampedArray }) => {
+      paintedRedValues.push(image.data[0]);
+    },
+  } as unknown as CanvasRenderingContext2D);
+  vi.stubGlobal(
+    "ImageData",
+    class {
+      readonly data: Uint8ClampedArray;
+
+      constructor(data: Uint8ClampedArray) {
+        this.data = data;
+      }
+    },
+  );
+  vi.stubGlobal("Worker", RecipeWorker);
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        version: 1,
+        contract: { outputStatus: "unverified" },
+        luts: [
+          {
+            id: "fuji-classic-negative",
+            group: "Fujifilm",
+            name: "Classic Negative",
+            file: "look.cube",
+            sha256: "00",
+          },
+        ],
+      }),
+      { status: 200 },
+    ),
+  );
+
+  const { container } = render(<App />);
+  const raw = new File(["raw"], "photo.dng");
+  Object.defineProperty(raw, "arrayBuffer", {
+    value: async () => new ArrayBuffer(3),
+  });
+  fireEvent.change(container.querySelector('input[type="file"]')!, {
+    target: { files: [raw] },
+  });
+  await waitFor(() =>
+    expect(screen.getByLabelText("Base preview")).toBeVisible(),
+  );
+
+  await new Promise((resolve) => window.setTimeout(resolve, 260));
+  expect(
+    RecipeWorker.instance.commands.filter(({ type }) => type === "render"),
+  ).toEqual([]);
+
+  fireEvent.change(screen.getByRole("slider", { name: "Exposure" }), {
+    target: { value: "1" },
+  });
+  await waitFor(() =>
+    expect(
+      RecipeWorker.instance.commands.filter(({ type }) => type === "render"),
+    ).toEqual([expect.objectContaining({ type: "render", ev: 1 })]),
+  );
+  await waitFor(() => expect(paintedRedValues.slice(-2)).toEqual([101, 102]));
 });

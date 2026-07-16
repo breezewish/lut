@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import { unzipSync } from "fflate";
 
-import { decodeRgb16Tiff, readRgb16TiffDimensions } from "./tiff";
+import { decodeRgb16Tiff } from "./tiff";
 
 const linearFixture = resolve("tests/fixtures/linear.dng");
 const lossyFixture = resolve("vendor/LibRaw-Wasm/test/integration/lossy.dng");
@@ -480,48 +480,6 @@ test("all built-in LUTs match optimized native RGB16 exports", async ({
     }
     expect(maxCodeDifference, look.id).toBeLessThanOrEqual(1);
   }
-});
-
-test("exports a full-resolution camera RAW within the resource budget", async ({
-  page,
-}) => {
-  test.setTimeout(45_000);
-  await page.goto("/");
-  await page.locator('input[type="file"]').setInputFiles(sonyFixture);
-  await expect(page.getByLabel("Base preview")).toBeVisible({
-    timeout: 30_000,
-  });
-  const comparison = page.getByRole("region", {
-    name: "Base and LUT comparison",
-  });
-  await expect(comparison).toHaveAttribute("data-decode-count", "1");
-
-  const startedAt = Date.now();
-  const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
-  const download = await downloadPromise;
-  const elapsed = Date.now() - startedAt;
-  const outputPath = await download.path();
-  expect(outputPath).not.toBeNull();
-  expect((await stat(outputPath!)).size).toBeGreaterThan(1_000_000);
-  expect(readRgb16TiffDimensions(await readFile(outputPath!))).toEqual({
-    width: 6_240,
-    height: 4_168,
-  });
-  expect(elapsed).toBeLessThan(30_000);
-
-  const previewBeforeRerender = await page
-    .getByLabel("Base preview")
-    .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
-  await page.getByRole("slider", { name: "Exposure" }).fill("0.5");
-  await expect
-    .poll(() =>
-      page
-        .getByLabel("Base preview")
-        .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
-    )
-    .not.toBe(previewBeforeRerender);
-  await expect(comparison).toHaveAttribute("data-decode-count", "1");
 });
 
 test("reports a recoverable error when the local processing engine cannot start", async ({

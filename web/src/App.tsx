@@ -28,6 +28,7 @@ import type { LutManifest, PreviewResult, QueueItem } from "./types";
 
 const RAW_ACCEPT =
   ".3fr,.ari,.arw,.bay,.cap,.cr2,.cr3,.dcr,.dcs,.dng,.drf,.eip,.erf,.fff,.gpr,.iiq,.k25,.kdc,.mdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.pef,.ptx,.pxn,.r3d,.raf,.raw,.rwl,.rw2,.rwz,.sr2,.srf,.srw,.x3f";
+const PREVIEW_RENDER_DEBOUNCE_MS = 200;
 
 const STATUS_LABELS: Record<QueueItem["status"], string> = {
   queued: "Queued",
@@ -64,6 +65,10 @@ function hasUsablePreview(item: QueueItem): boolean {
   );
 }
 
+function previewRecipeKey(fileId: string, ev: number, lutId: string): string {
+  return `${fileId}\n${ev}\n${lutId}`;
+}
+
 export default function App() {
   const [client] = useState(() => new ProcessingClient());
   const [manifest, setManifest] = useState<LutManifest>();
@@ -93,6 +98,7 @@ export default function App() {
     }
   });
   const decodedFileId = useRef<string | undefined>(undefined);
+  const renderedRecipe = useRef<string | undefined>(undefined);
   const fileInput = useRef<HTMLInputElement>(null);
   const exposureInput = useRef<HTMLInputElement>(null);
   const stopAfterCurrent = useRef(false);
@@ -109,6 +115,7 @@ export default function App() {
 
   const releasePreview = useCallback(() => {
     decodedFileId.current = undefined;
+    renderedRecipe.current = undefined;
     setPreview(undefined);
     setCameraPreview(undefined);
     void client.clear().catch((error: Error) => setGlobalError(error.message));
@@ -164,7 +171,9 @@ export default function App() {
   useEffect(() => {
     if (!selected || !selectedLut) return;
     let active = true;
+    const decodeRecipe = previewRecipeKey(selected.id, ev, selectedLut.id);
     decodedFileId.current = undefined;
+    renderedRecipe.current = undefined;
     setPreview(undefined);
     setCameraPreview(undefined);
     setGlobalError(undefined);
@@ -179,6 +188,7 @@ export default function App() {
       .then((result) => {
         if (!active) return;
         decodedFileId.current = selected.id;
+        renderedRecipe.current = decodeRecipe;
         setPreview(result);
         setCameraPreview(undefined);
         updateItem(selected.id, {
@@ -209,17 +219,22 @@ export default function App() {
       decodedFileId.current !== selected.id
     )
       return;
+    const recipe = previewRecipeKey(selected.id, ev, selectedLut.id);
+    if (renderedRecipe.current === recipe) return;
     let active = true;
     const timer = window.setTimeout(() => {
       client
         .render(selected.id, ev, selectedLut)
         .then((result) => {
-          if (active) setPreview(result);
+          if (active) {
+            renderedRecipe.current = recipe;
+            setPreview(result);
+          }
         })
         .catch((error: Error) => {
           if (active) setGlobalError(error.message);
         });
-    }, 120);
+    }, PREVIEW_RENDER_DEBOUNCE_MS);
     return () => {
       active = false;
       window.clearTimeout(timer);

@@ -1,6 +1,7 @@
 # Web End-to-End Tests
 
-- Selecting a RAW shows local camera metadata, exposes the current queue item and ready comparison to assistive technology, makes selected export the only primary action, transfers only display-contributing source rows into a longest-edge-1600 cache, renders Base and LUT previews through zero-copy clamped views, releases the short-lived LibRaw decoder, and changes positive or directly typed negative EV plus LUT through the persistent Rust renderer without another RAW decode or source-image transfer.
+- Selecting a RAW shows local camera metadata, exposes the current queue item and ready comparison to assistive technology, makes selected export the only primary action, transfers only display-contributing source rows into a longest-edge-1024 cache, renders Base and LUT previews through zero-copy clamped views, releases the short-lived LibRaw decoder, and changes positive or directly typed negative EV plus LUT through the persistent Rust renderer without another RAW decode or source-image transfer.
+- Decode completion and export status changes do not repeat an unchanged preview recipe; continuous EV changes keep at most one render active and one latest recipe waiting, and the final visible preview reaches a perceptibly different result within the interaction budget.
 - A real camera RAW displays its labeled embedded JPEG before the processed preview replaces it.
 - Decode, rerender, and export issue only same-origin static GET requests; no photo data is uploaded.
 - A populated queue accepts another drop, and duplicate files in the same drop event create only one queue entry.

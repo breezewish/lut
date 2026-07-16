@@ -32,6 +32,11 @@ let cached:
 let cachedLut: { id: string; bytes: Uint8Array<ArrayBuffer> } | undefined;
 let decodeCount = 0;
 
+// The comparison panes are display previews, not export surfaces. A 1024px
+// source keeps high-DPI UI detail while bounding every interactive Base + LUT
+// rerender to 42% of the pixels used by the previous 1600px cache.
+const PREVIEW_MAX_EDGE = 1_024;
+
 let tail = Promise.resolve();
 
 context.onmessage = ({ data }: MessageEvent<WorkerCommand>) => {
@@ -151,7 +156,7 @@ function createPreviewRenderer(
   height: number,
   cube: Uint8Array<ArrayBuffer>,
 ): PreviewRenderer {
-  const renderer = new PreviewRenderer(width, height, 1_600, cube);
+  const renderer = new PreviewRenderer(width, height, PREVIEW_MAX_EDGE, cube);
   const rowSamples = width * 3;
   try {
     for (;;) {
