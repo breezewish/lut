@@ -24,8 +24,8 @@ const previewConstructor = methodBody(
   "create_preview_renderer(source_width, source_height, max_edge)",
 );
 const previewWrite = methodBody("write_source_row(pixels)");
-const lutConstructor = methodBody("constructor(cube)");
-const previewRender = methodBody("render(ev)");
+const lutConstructor = methodBody("constructor(bytes)");
+const previewRender = methodBody("render(ev, max_edge, include_base)");
 const tiffConstructor = methodBody("create_tiff_encoder(width, height, ev)");
 const tiffRender = methodBody("render_strip(pixels)");
 const tiffWrite = methodBody("write_strip()");
@@ -38,7 +38,7 @@ if (
     "Preview or TIFF construction unexpectedly copies a complete CUBE document.",
   );
 }
-if (!lutConstructor.includes("passArray8ToWasm0(cube")) {
+if (!lutConstructor.includes("passArray8ToWasm0(bytes")) {
   throw new Error("LUT construction no longer uses one byte-array binding.");
 }
 if (previewConstructor.includes("passArray16ToWasm0")) {

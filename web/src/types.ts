@@ -55,6 +55,7 @@ export interface LibRawDecodeTimings {
 export interface PreviewTimings {
   libraw: LibRawDecodeTimings;
   previewSourceMs: number;
+  lutLoadMs: number;
   previewColorMs: number;
   workerTotalMs: number;
 }
@@ -75,7 +76,7 @@ export interface PreviewResult {
   fileId: string;
   width: number;
   height: number;
-  base: Uint8Array<ArrayBuffer>;
+  base?: Uint8Array<ArrayBuffer>;
   lut: Uint8Array<ArrayBuffer>;
   metadata: {
     camera: string;
@@ -110,6 +111,8 @@ export type WorkerCommand =
       fileId: string;
       ev: number;
       lut: LutDefinition;
+      maxEdge: number;
+      includeBase: boolean;
     }
   | {
       requestId: number;

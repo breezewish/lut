@@ -182,10 +182,10 @@ test("a full-resolution Sony ARW export matches the native pipeline", async ({
 
   await expect
     .poll(async () => (await finalDifference()).meanAbsoluteDifference, {
-      timeout: 3_000,
+      timeout: 500,
     })
     .toBeGreaterThan(5);
-  expect(Date.now() - finalInputAt).toBeLessThan(3_000);
+  expect(Date.now() - finalInputAt).toBeLessThan(500);
   const finalPreview = await finalDifference();
   expect(finalPreview.average - evZero.average).toBeGreaterThan(2);
   expect(
@@ -194,7 +194,7 @@ test("a full-resolution Sony ARW export matches the native pipeline", async ({
         (window as Window & { renderCommandCount?: number })
           .renderCommandCount ?? 0,
     ),
-  ).toBeLessThanOrEqual(2);
+  ).toBeLessThanOrEqual(5);
   const maxAnimationFrameGap = await page.evaluate(
     () =>
       (window as Window & { maxAnimationFrameGap?: number })

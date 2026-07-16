@@ -72,6 +72,7 @@ function preview(fileId: string, value: number): PreviewResult {
     timings: {
       libraw: exportTimings.libraw,
       previewSourceMs: 10,
+      lutLoadMs: 0,
       previewColorMs: 11,
       workerTotalMs: 66,
     },

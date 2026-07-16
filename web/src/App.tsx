@@ -28,7 +28,9 @@ import type { LutManifest, PreviewResult, QueueItem } from "./types";
 
 const RAW_ACCEPT =
   ".3fr,.ari,.arw,.bay,.cap,.cr2,.cr3,.dcr,.dcs,.dng,.drf,.eip,.erf,.fff,.gpr,.iiq,.k25,.kdc,.mdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.pef,.ptx,.pxn,.r3d,.raf,.raw,.rwl,.rw2,.rwz,.sr2,.srf,.srw,.x3f";
-const PREVIEW_RENDER_DEBOUNCE_MS = 200;
+const INTERACTIVE_PREVIEW_MAX_EDGE = 384;
+const SETTLED_PREVIEW_MAX_EDGE = 1_024;
+const SETTLED_PREVIEW_IDLE_MS = 120;
 
 const STATUS_LABELS: Record<QueueItem["status"], string> = {
   queued: "Queued",
@@ -53,6 +55,19 @@ interface QueueUndo {
   message: string;
 }
 
+interface PreviewImage {
+  pixels: Uint8Array<ArrayBuffer>;
+  width: number;
+  height: number;
+}
+
+interface DisplayedPreview {
+  fileId: string;
+  base?: PreviewImage;
+  lut?: PreviewImage;
+  decodeCount: number;
+}
+
 function isDecodeFailure(item: QueueItem): boolean {
   return item.status === "decode-error";
 }
@@ -69,6 +84,31 @@ function previewRecipeKey(fileId: string, ev: number, lutId: string): string {
   return `${fileId}\n${ev}\n${lutId}`;
 }
 
+function basePreviewRecipeKey(fileId: string, ev: number): string {
+  return `${fileId}\n${ev}`;
+}
+
+function mergePreview(
+  current: DisplayedPreview | undefined,
+  result: PreviewResult,
+): DisplayedPreview {
+  const image = (pixels: Uint8Array<ArrayBuffer>): PreviewImage => ({
+    pixels,
+    width: result.width,
+    height: result.height,
+  });
+  return {
+    fileId: result.fileId,
+    base: result.base
+      ? image(result.base)
+      : current?.fileId === result.fileId
+        ? current.base
+        : undefined,
+    lut: image(result.lut),
+    decodeCount: result.decodeCount,
+  };
+}
+
 export default function App() {
   const [client] = useState(() => new ProcessingClient());
   const [manifest, setManifest] = useState<LutManifest>();
@@ -77,7 +117,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string>();
   const [lutId, setLutId] = useState("fuji-classic-negative");
   const [ev, setEv] = useState(0);
-  const [preview, setPreview] = useState<PreviewResult>();
+  const [preview, setPreview] = useState<DisplayedPreview>();
   const [cameraPreview, setCameraPreview] = useState<{
     fileId: string;
     url: string;
@@ -102,6 +142,7 @@ export default function App() {
     }
   });
   const decodedFileId = useRef<string | undefined>(undefined);
+  const settledBaseRecipe = useRef<string | undefined>(undefined);
   const [renderedRecipe, setRenderedRecipe] = useState<string>();
   const fileInput = useRef<HTMLInputElement>(null);
   const exposureInput = useRef<HTMLInputElement>(null);
@@ -129,6 +170,7 @@ export default function App() {
 
   const releasePreview = useCallback(() => {
     decodedFileId.current = undefined;
+    settledBaseRecipe.current = undefined;
     setRenderedRecipe(undefined);
     setPreview(undefined);
     setCameraPreview(undefined);
@@ -187,6 +229,7 @@ export default function App() {
     let active = true;
     const decodeRecipe = previewRecipeKey(selected.id, ev, selectedLut.id);
     decodedFileId.current = undefined;
+    settledBaseRecipe.current = undefined;
     setRenderedRecipe(undefined);
     setPreview(undefined);
     setCameraPreview(undefined);
@@ -202,8 +245,9 @@ export default function App() {
       .then((result) => {
         if (!active) return;
         decodedFileId.current = selected.id;
+        settledBaseRecipe.current = basePreviewRecipeKey(selected.id, ev);
         setRenderedRecipe(decodeRecipe);
-        setPreview(result);
+        setPreview(mergePreview(undefined, result));
         setCameraPreview(undefined);
         updateItem(selected.id, {
           status: "ready",
@@ -235,23 +279,55 @@ export default function App() {
       return;
     const recipe = previewRecipeKey(selected.id, ev, selectedLut.id);
     if (renderedRecipe === recipe) return;
+    const baseRecipe = basePreviewRecipeKey(selected.id, ev);
+    const includeBase = settledBaseRecipe.current !== baseRecipe;
     let active = true;
-    const timer = window.setTimeout(() => {
-      client
-        .render(selected.id, ev, selectedLut)
-        .then((result) => {
-          if (active) {
-            setRenderedRecipe(recipe);
-            setPreview(result);
+    let settleTimer: number | undefined;
+    setPreview((current) =>
+      current
+        ? {
+            ...current,
+            base: includeBase ? undefined : current.base,
+            lut: undefined,
           }
-        })
-        .catch((error: Error) => {
-          if (active) setGlobalError(error.message);
+        : undefined,
+    );
+    const render = async () => {
+      try {
+        const interactive = await client.render(selected.id, ev, selectedLut, {
+          maxEdge: INTERACTIVE_PREVIEW_MAX_EDGE,
+          includeBase,
         });
-    }, PREVIEW_RENDER_DEBOUNCE_MS);
+        if (!active) return;
+        setPreview((current) => mergePreview(current, interactive));
+
+        if (includeBase) {
+          await new Promise<void>((resolve) => {
+            settleTimer = window.setTimeout(resolve, SETTLED_PREVIEW_IDLE_MS);
+          });
+          if (!active) return;
+        }
+
+        const settled = await client.render(selected.id, ev, selectedLut, {
+          maxEdge: SETTLED_PREVIEW_MAX_EDGE,
+          includeBase,
+        });
+        if (!active) return;
+        settledBaseRecipe.current = baseRecipe;
+        setRenderedRecipe(recipe);
+        setPreview((current) => mergePreview(current, settled));
+      } catch (error) {
+        if (active) {
+          setGlobalError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
+    };
+    void render();
     return () => {
       active = false;
-      window.clearTimeout(timer);
+      if (settleTimer !== undefined) window.clearTimeout(settleTimer);
     };
   }, [
     client,
@@ -877,16 +953,16 @@ export default function App() {
                 <PreviewCanvas
                   label="Base"
                   detail="Neutral tone map · sRGB"
-                  pixels={preview?.base}
-                  width={preview?.width}
-                  height={preview?.height}
+                  pixels={preview?.base?.pixels}
+                  width={preview?.base?.width}
+                  height={preview?.base?.height}
                 />
                 <PreviewCanvas
                   label={selectedLut?.name || "LUT"}
                   detail="V-Gamut · V-Log · LUT"
-                  pixels={preview?.lut}
-                  width={preview?.width}
-                  height={preview?.height}
+                  pixels={preview?.lut?.pixels}
+                  width={preview?.lut?.width}
+                  height={preview?.lut?.height}
                 />
                 {selected.status === "decoding" && (
                   <div className="loading-label" role="status">

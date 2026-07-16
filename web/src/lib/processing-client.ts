@@ -21,8 +21,12 @@ type RenderBatch = {
   fileId: string;
   ev: number;
   lut: LutDefinition;
+  maxEdge: number;
+  includeBase: boolean;
   pending: PreviewPending;
 };
+
+type PreviewRenderOptions = Pick<RenderBatch, "maxEdge" | "includeBase">;
 
 type WorkerRequest = WorkerCommand extends infer Command
   ? Command extends { requestId: number }
@@ -107,13 +111,14 @@ export class ProcessingClient {
     fileId: string,
     ev: number,
     lut: LutDefinition,
+    options: PreviewRenderOptions = { maxEdge: 1_024, includeBase: true },
   ): Promise<PreviewResult> {
     if (this.stoppedError) return Promise.reject(this.stoppedError);
 
     return new Promise((resolve, reject) => {
       const pending = { resolve, reject };
       if (!this.activeRender) {
-        this.startRender({ fileId, ev, lut, pending });
+        this.startRender({ fileId, ev, lut, ...options, pending });
         return;
       }
 
@@ -122,7 +127,13 @@ export class ProcessingClient {
           new Error("Preview render was superseded by a newer recipe."),
         );
       }
-      this.queuedRender = { fileId, ev, lut, pending };
+      this.queuedRender = {
+        fileId,
+        ev,
+        lut,
+        ...options,
+        pending,
+      };
     });
   }
 
@@ -162,11 +173,23 @@ export class ProcessingClient {
       fileId: batch.fileId,
       ev: batch.ev,
       lut: batch.lut,
+      maxEdge: batch.maxEdge,
+      includeBase: batch.includeBase,
     })
       .then((reply) => {
         if (!reply.ok || reply.type !== "preview") {
           throw new Error("Worker returned an unexpected render response.");
         }
+        performance.mark("raw-alchemy:preview-render", {
+          detail: {
+            fileId: batch.fileId,
+            ev: batch.ev,
+            lutId: batch.lut.id,
+            maxEdge: batch.maxEdge,
+            includeBase: batch.includeBase,
+            ...reply.result.timings,
+          },
+        });
         batch.pending.resolve(reply.result);
       })
       .catch((error: unknown) => {

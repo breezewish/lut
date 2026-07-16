@@ -99,6 +99,8 @@ test("renders only after the exposure recipe changes", async () => {
     type: "clear" | "decode" | "render" | "export";
     fileId?: string;
     ev?: number;
+    maxEdge?: number;
+    includeBase?: boolean;
   };
 
   class RecipeWorker {
@@ -136,9 +138,12 @@ test("renders only after the exposure recipe changes", async () => {
               type: "preview",
               result: {
                 fileId: command.fileId,
-                width: 1,
-                height: 1,
-                base: new Uint8Array([red, 0, 0, 255]),
+                width: command.maxEdge ?? 1,
+                height: command.maxEdge ?? 1,
+                base:
+                  command.includeBase === false
+                    ? undefined
+                    : new Uint8Array([red, 0, 0, 255]),
                 lut: new Uint8Array([red + 1, 0, 0, 255]),
                 metadata: { camera: "Test Camera", width: 1, height: 1 },
                 decodeCount: 1,
@@ -218,7 +223,20 @@ test("renders only after the exposure recipe changes", async () => {
   await waitFor(() =>
     expect(
       RecipeWorker.instance.commands.filter(({ type }) => type === "render"),
-    ).toEqual([expect.objectContaining({ type: "render", ev: 1 })]),
+    ).toEqual([
+      expect.objectContaining({
+        type: "render",
+        ev: 1,
+        maxEdge: 384,
+        includeBase: true,
+      }),
+      expect.objectContaining({
+        type: "render",
+        ev: 1,
+        maxEdge: 1024,
+        includeBase: true,
+      }),
+    ]),
   );
   await waitFor(() => expect(paintedRedValues.slice(-2)).toEqual([101, 102]));
   expect(exportButton).toBeEnabled();

@@ -28,7 +28,7 @@ let cached:
       timings: PreviewResult["timings"];
     }
   | undefined;
-let cachedLut: { id: string; lut: WasmLut } | undefined;
+const cachedLuts = new Map<string, WasmLut>();
 let decodeCount = 0;
 
 // The comparison panes are display previews, not export surfaces. A 1024px
@@ -102,6 +102,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
           timings: {
             libraw,
             previewSourceMs: 0,
+            lutLoadMs: 0,
             previewColorMs: 0,
             workerTotalMs: 0,
           },
@@ -114,7 +115,13 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
         // before rerenders or a full-resolution export add memory pressure.
         previewRaw.delete();
       }
-      const result = await renderCached(data.fileId, data.ev, data.lut);
+      const result = await renderCached(
+        data.fileId,
+        data.ev,
+        data.lut,
+        PREVIEW_MAX_EDGE,
+        true,
+      );
       result.timings.workerTotalMs = performance.now() - workerStartedAt;
       postPreview(data.requestId, result);
       return;
@@ -123,7 +130,13 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
     if (data.type === "render") {
       postPreview(
         data.requestId,
-        await renderCached(data.fileId, data.ev, data.lut),
+        await renderCached(
+          data.fileId,
+          data.ev,
+          data.lut,
+          data.maxEdge,
+          data.includeBase,
+        ),
       );
       return;
     }
@@ -211,30 +224,42 @@ async function renderCached(
   fileId: string,
   ev: number,
   lut: LutDefinition,
+  maxEdge: number,
+  includeBase: boolean,
 ): Promise<PreviewResult> {
+  const workerStartedAt = performance.now();
   if (!cached || cached.fileId !== fileId) {
     throw new Error(
       "The selected RAW is not decoded. Select it again to retry.",
     );
   }
+  const lutStartedAt = performance.now();
   const parsedLut = await loadLut(lut);
+  const lutLoadMs = performance.now() - lutStartedAt;
   if (cached.lutId !== lut.id) {
     parsedLut.apply_to_renderer(cached.renderer);
     cached.lutId = lut.id;
   }
   const startedAt = performance.now();
-  const preview = cached.renderer.render(ev);
+  const preview = cached.renderer.render(ev, maxEdge, includeBase);
   const previewColorMs = performance.now() - startedAt;
   try {
     return {
       fileId,
       width: preview.width,
       height: preview.height,
-      base: transferablePreviewView(preview.take_base_rgba(), "Base"),
+      base: includeBase
+        ? transferablePreviewView(preview.take_base_rgba(), "Base")
+        : undefined,
       lut: transferablePreviewView(preview.take_lut_rgba(), "LUT"),
       metadata: cached.metadata,
       decodeCount,
-      timings: { ...cached.timings, previewColorMs },
+      timings: {
+        ...cached.timings,
+        lutLoadMs,
+        previewColorMs,
+        workerTotalMs: performance.now() - workerStartedAt,
+      },
     };
   } finally {
     preview.free();
@@ -252,7 +277,8 @@ function transferablePreviewView(
 }
 
 async function loadLut(lut: LutDefinition): Promise<WasmLut> {
-  if (cachedLut?.id === lut.id) return cachedLut.lut;
+  const cachedLut = cachedLuts.get(lut.id);
+  if (cachedLut) return cachedLut;
   const response = await fetch(`${import.meta.env.BASE_URL}luts/${lut.file}`);
   if (!response.ok) throw new Error(`Could not load LUT ${lut.name}.`);
   const bytes = new Uint8Array(await response.arrayBuffer());
@@ -260,12 +286,14 @@ async function loadLut(lut: LutDefinition): Promise<WasmLut> {
   if (actual !== lut.sha256)
     throw new Error(`LUT integrity check failed for ${lut.name}.`);
   const parsed = new WasmLut(bytes);
-  cachedLut?.lut.free();
-  cachedLut = { id: lut.id, lut: parsed };
+  cachedLuts.set(lut.id, parsed);
   return parsed;
 }
 
 function postPreview(requestId: number, result: PreviewResult): void {
   const reply: WorkerReply = { requestId, ok: true, type: "preview", result };
-  context.postMessage(reply, [result.base.buffer, result.lut.buffer]);
+  const transfer = result.base
+    ? [result.base.buffer, result.lut.buffer]
+    : [result.lut.buffer];
+  context.postMessage(reply, transfer);
 }

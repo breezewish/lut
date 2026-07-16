@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 // LibRaw's pinned `prophoto_rgb` constant is the actual linear sRGB-to-output
 // transform; the output basis is not nominal ProPhoto primaries merely paired
 // with a D65 white point. These matrices are frozen offline from that constant.
@@ -56,7 +58,7 @@ pub(crate) fn encode_v_log(linear: f32) -> f32 {
     }
 }
 
-pub(crate) fn render_base(linear_libraw_prophoto: [f32; 3]) -> [f32; 3] {
+pub(crate) fn render_base_preview(linear_libraw_prophoto: [f32; 3]) -> [u8; 3] {
     let linear_srgb = multiply_matrix(&LIBRAW_PROPHOTO_D65_TO_SRGB, linear_libraw_prophoto);
     let luminance = 0.2126f32.mul_add(
         linear_srgb[0],
@@ -70,7 +72,22 @@ pub(crate) fn render_base(linear_libraw_prophoto: [f32; 3]) -> [f32; 3] {
     } else {
         1.0
     };
-    linear_srgb.map(|channel| srgb_oetf((channel * scale).max(0.0)))
+    linear_srgb.map(|channel| srgb_preview((channel * scale).max(0.0)))
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn srgb_preview(linear: f32) -> u8 {
+    static SRGB8: OnceLock<Vec<u8>> = OnceLock::new();
+    let table = SRGB8.get_or_init(|| {
+        (0..=u16::MAX)
+            .map(|code| {
+                let encoded = srgb_oetf(f32::from(code) / 65_535.0);
+                (encoded * 255.0).round() as u8
+            })
+            .collect()
+    });
+    let index = (linear.clamp(0.0, 1.0) * 65_535.0).round() as usize;
+    table[index]
 }
 
 pub(crate) fn legacy_bt709_to_srgb(encoded: f32) -> f32 {
@@ -166,6 +183,23 @@ mod tests {
                     "actual={actual_code}, expected={expected_code}",
                 );
             }
+        }
+    }
+
+    #[test]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss
+    )]
+    fn preview_srgb_table_stays_within_one_display_code() {
+        for index in 0..1_000_000 {
+            let linear = index as f32 / 999_999.0;
+            let expected = (srgb_oetf(linear) * 255.0).round() as u8;
+            assert!(
+                srgb_preview(linear).abs_diff(expected) <= 1,
+                "linear={linear}"
+            );
         }
     }
 }

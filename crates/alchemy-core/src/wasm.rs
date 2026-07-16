@@ -1,6 +1,7 @@
 use wasm_bindgen::prelude::*;
 
 use crate::image::PreviewSource;
+use crate::pipeline::PreviewLayers;
 use crate::tiff::Rgb16TiffWriter;
 use crate::{AlchemyError, ColorPipeline, Lut3d, ProcessingMode};
 
@@ -13,12 +14,10 @@ pub struct WasmLut {
 #[wasm_bindgen]
 impl WasmLut {
     #[wasm_bindgen(constructor)]
-    /// Parses one hash-verified CUBE byte slice at the browser boundary.
-    pub fn new(cube: &[u8]) -> std::result::Result<Self, JsError> {
-        let source = std::str::from_utf8(cube)
-            .map_err(|_| JsError::new("CUBE source must be valid UTF-8"))?;
+    /// Parses one hash-verified compact LUT asset at the browser boundary.
+    pub fn new(bytes: &[u8]) -> std::result::Result<Self, JsError> {
         Ok(Self {
-            parsed: Lut3d::parse(source).map_err(to_js_error)?,
+            parsed: Lut3d::from_binary(bytes).map_err(to_js_error)?,
         })
     }
 
@@ -112,16 +111,26 @@ impl PreviewRenderer {
         self.source.write_source_row(pixels).map_err(to_js_error)
     }
 
-    pub fn render(&self, ev: f32) -> std::result::Result<WasmPreview, JsError> {
+    pub fn render(
+        &self,
+        ev: f32,
+        max_edge: u32,
+        include_base: bool,
+    ) -> std::result::Result<WasmPreview, JsError> {
         let pipeline = ColorPipeline::new(ev, ProcessingMode::CorrectedV2, self.lut.clone())
             .map_err(to_js_error)?;
         let (width, height) = self.source.dimensions();
         let preview = pipeline
-            .render_preview(
+            .render_preview_layers(
                 self.source.pixels().map_err(to_js_error)?,
                 width,
                 height,
-                width.max(height),
+                max_edge,
+                if include_base {
+                    PreviewLayers::BaseAndLut
+                } else {
+                    PreviewLayers::Lut
+                },
             )
             .map_err(to_js_error)?;
         Ok(WasmPreview {

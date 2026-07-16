@@ -14,7 +14,7 @@ test("export waits until the selected preview matches the visible recipe", async
   const lutGate = new Promise<void>((resolveGate) => {
     releaseLut = resolveGate;
   });
-  await page.route("**/*.cube", async (route) => {
+  await page.route("**/*.ralut", async (route) => {
     await lutGate;
     await route.continue();
   });
@@ -42,7 +42,7 @@ test("export waits until the selected preview matches the visible recipe", async
 test("a mismatched LUT fails explicitly and the RAW can be retried", async ({
   page,
 }) => {
-  await page.route("**/*.cube", (route) =>
+  await page.route("**/*.ralut", (route) =>
     route.fulfill({ contentType: "text/plain", body: "tampered LUT" }),
   );
   await page.goto("/");
@@ -56,7 +56,7 @@ test("a mismatched LUT fails explicitly and the RAW can be retried", async ({
   ).toBeDisabled();
   await expect(page.getByText("Decoding preview…")).toHaveCount(0);
 
-  await page.unroute("**/*.cube");
+  await page.unroute("**/*.ralut");
   await page.getByRole("button", { name: "Remove file" }).click();
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
   await expect(page.getByLabel("Base preview")).toBeVisible({
@@ -67,7 +67,7 @@ test("a mismatched LUT fails explicitly and the RAW can be retried", async ({
 test("a missing LUT fails without leaving the RAW in decoding", async ({
   page,
 }) => {
-  await page.route("**/*.cube", (route) => route.fulfill({ status: 404 }));
+  await page.route("**/*.ralut", (route) => route.fulfill({ status: 404 }));
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
 
@@ -80,12 +80,17 @@ test("a missing LUT fails without leaving the RAW in decoding", async ({
   ).toBeDisabled();
 });
 
-test("a hash-valid malformed CUBE reports its parser error", async ({
+test("a hash-valid malformed compact LUT reports its parser error", async ({
   page,
 }) => {
-  const malformed = "LUT_3D_SIZE 2\n0 0 0\n";
+  const malformed = Buffer.alloc(36);
+  malformed.write("RALUT01\0", 0, "ascii");
+  malformed.writeUInt32LE(2, 8);
+  malformed.writeFloatLE(1, 24);
+  malformed.writeFloatLE(1, 28);
+  malformed.writeFloatLE(1, 32);
   const manifest = JSON.parse(
-    await readFile(resolve("assets/luts.json"), "utf8"),
+    await readFile(resolve("web/public/luts/manifest.json"), "utf8"),
   ) as {
     luts: Array<{ id: string; sha256: string }>;
   };
@@ -94,14 +99,14 @@ test("a hash-valid malformed CUBE reports its parser error", async ({
   await page.route("**/luts/manifest.json", (route) =>
     route.fulfill({ contentType: "application/json", json: manifest }),
   );
-  await page.route("**/*.cube", (route) =>
-    route.fulfill({ contentType: "text/plain", body: malformed }),
+  await page.route("**/*.ralut", (route) =>
+    route.fulfill({ contentType: "application/octet-stream", body: malformed }),
   );
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
 
   await expect(page.getByRole("alert")).toContainText(
-    "CUBE declares 1 samples; expected 8",
+    "CUBE declares 0 samples; expected 8",
   );
   await expect(
     page.getByRole("button", { name: "Export selected" }),

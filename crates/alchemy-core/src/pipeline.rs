@@ -1,6 +1,6 @@
 use crate::color::{
     LIBRAW_PROPHOTO_D65_TO_V_GAMUT, encode_v_log, legacy_bt709_to_srgb, multiply_legacy_matrix,
-    multiply_matrix, render_base,
+    multiply_matrix, render_base_preview,
 };
 use crate::image::{checked_pixel_count, preview_dimensions};
 use crate::{AlchemyError, Lut3d, Result, tiff};
@@ -30,6 +30,13 @@ pub struct Preview {
     pub height: u32,
     pub base_rgba: Vec<u8>,
     pub lut_rgba: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(not(feature = "wasm"), allow(dead_code))]
+pub(crate) enum PreviewLayers {
+    BaseAndLut,
+    Lut,
 }
 
 impl ColorPipeline {
@@ -64,10 +71,25 @@ impl ColorPipeline {
         height: u32,
         max_edge: u32,
     ) -> Result<Preview> {
+        self.render_preview_layers(pixels, width, height, max_edge, PreviewLayers::BaseAndLut)
+    }
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub(crate) fn render_preview_layers(
+        &self,
+        pixels: &[u16],
+        width: u32,
+        height: u32,
+        max_edge: u32,
+        layers: PreviewLayers,
+    ) -> Result<Preview> {
         validate_image(pixels, width, height)?;
         let (output_width, output_height) = preview_dimensions(width, height, max_edge)?;
         let output_pixels = checked_pixel_count(output_width, output_height)?;
-        let mut base_rgba = vec![0; output_pixels * 4];
+        let mut base_rgba = match layers {
+            PreviewLayers::BaseAndLut => vec![0; output_pixels * 4],
+            PreviewLayers::Lut => Vec::new(),
+        };
         let mut lut_rgba = vec![0; output_pixels * 4];
 
         for output_y in 0..output_height {
@@ -79,7 +101,12 @@ impl ColorPipeline {
                 let source = (source_y as usize * width as usize + source_x as usize) * 3;
                 let target = (output_y as usize * output_width as usize + output_x as usize) * 4;
                 let linear = self.input_pixel(&pixels[source..source + 3]);
-                write_rgba(&mut base_rgba[target..target + 4], render_base(linear));
+                if layers == PreviewLayers::BaseAndLut {
+                    write_rgba8(
+                        &mut base_rgba[target..target + 4],
+                        render_base_preview(linear),
+                    );
+                }
                 let lut = self.render_lut(linear);
                 let display = match self.mode {
                     ProcessingMode::CorrectedV2 => lut,
@@ -189,6 +216,11 @@ fn write_rgba(output: &mut [u8], rgb: [f32; 3]) {
     for channel in 0..3 {
         output[channel] = quantize_u8(rgb[channel]);
     }
+    output[3] = 255;
+}
+
+fn write_rgba8(output: &mut [u8], rgb: [u8; 3]) {
+    output[..3].copy_from_slice(&rgb);
     output[3] = 255;
 }
 
@@ -307,6 +339,25 @@ mod tests {
             .unwrap();
         assert_eq!((preview.width, preview.height), (100, 50));
         assert_eq!(preview.base_rgba.len(), 100 * 50 * 4);
+    }
+
+    #[test]
+    fn lut_only_preview_skips_the_unchanged_base_layer() {
+        let lut = Lut3d::parse(IDENTITY_2).unwrap();
+        let pipeline = ColorPipeline::new(0.0, ProcessingMode::CorrectedV2, lut).unwrap();
+        let preview = pipeline
+            .render_preview_layers(
+                &vec![32_768; 400 * 200 * 3],
+                400,
+                200,
+                100,
+                PreviewLayers::Lut,
+            )
+            .unwrap();
+
+        assert_eq!((preview.width, preview.height), (100, 50));
+        assert!(preview.base_rgba.is_empty());
+        assert_eq!(preview.lut_rgba.len(), 100 * 50 * 4);
     }
 
     #[test]

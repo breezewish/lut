@@ -1,7 +1,7 @@
 # Web End-to-End Tests
 
 - Selecting a RAW shows local camera metadata, exposes the current queue item and ready comparison to assistive technology, makes selected export the only primary action, transfers only display-contributing source rows into a longest-edge-1024 cache, renders Base and LUT previews through zero-copy clamped views, releases the short-lived LibRaw decoder, and changes positive or directly typed negative EV plus LUT through the persistent Rust renderer without another RAW decode or source-image transfer.
-- Decode completion and export status changes do not repeat an unchanged preview recipe; continuous EV changes keep at most one render active and one latest recipe waiting, and the final visible preview reaches a perceptibly different result within the interaction budget.
+- Decode completion and export status changes do not repeat an unchanged preview recipe; continuous EV changes keep at most one render active and one latest recipe waiting, render exact-color longest-edge-384 interaction frames before a longest-edge-1024 settled frame, never paint an obsolete recipe, and enable export only after the final settled frame.
 - Selected and batch export stay disabled while the selected RAW is decoding or its visible EV/LUT recipe is waiting to render, then become available only when that exact processed preview is ready.
 - A real camera RAW displays its labeled embedded JPEG before the processed preview replaces it.
 - Decode, rerender, and export issue only same-origin static GET requests; no photo data is uploaded.
@@ -20,15 +20,16 @@
 - Stopping a multi-file export finishes the active file, omits the remaining files from the ZIP, and reports the partial count.
 - Browser export reads bounded zero-copy LibRaw views, transfers only those source strips into the color WASM, and fails if the encoder's requested strip sizes do not consume the image exactly.
 - An opt-in production Chromium benchmark records processed-preview, full LibRaw decode, color processing, Deflate, Blob, and full-export boundaries for cold and warm runs without substituting a test decoder.
+- An opt-in production Chromium benchmark measures at least 20 EV edits, every initially uncached built-in LUT, and at least 20 cached LUT changes from control input through Canvas drawing; it enforces the preview p95 budgets and records Worker LUT-load and color stages.
 - A 6240 × 4168 Sony ARW produces a nontrivial full-resolution TIFF in under 30 seconds for the export operation, and a later EV preview rerender reuses the existing preview source without another RAW decode.
 - A corrupt DNG reports a product-language decode error with recovery actions and cannot be exported as a successful file.
 - Blocking WASM startup requests produces a visible reload instruction and clears the indefinite decoding state.
 - A worker error rejects every pending processing command instead of leaving unresolved promises.
-- A LUT hash mismatch, missing LUT, and hash-valid malformed CUBE each show a specific error, stop the decoding state, disable export, and allow a later valid import.
+- A LUT hash mismatch, missing LUT, and hash-valid malformed compact LUT each show a specific error, stop the decoding state, disable export, and allow a later valid import.
 - Duplicate files in one chooser action are ignored, drag and drop decodes the file, remove plus undo restores it, and choosing a LUT records it as a recent look.
 - Malformed local recent-look preferences do not prevent the empty application from rendering or accepting RAW files.
 - At mobile width, the empty-state chooser and Add RAW action are visible before any processing controls or export action.
 - At a short desktop height, wheel scrolling brings the selected-file export action into the viewport.
-- The built-in LUT manifest contains only verified source files with matching SHA-256 hashes.
+- The asset build verifies every pinned source CUBE hash, emits a compact float32 LUT with equivalent domain and samples, and publishes only generated files whose SHA-256 matches the runtime manifest.
 - Rebuilding LUT assets while the development server is running preserves the manifest and every Look URL, and reloading still completes the basic DNG preview flow.
 - An unavailable or invalid LUT manifest keeps an imported RAW queued, exposes no processing or export controls, and shows a reloadable startup error instead of black preview canvases.

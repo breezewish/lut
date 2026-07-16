@@ -2,6 +2,9 @@ use std::sync::Arc;
 
 use crate::{AlchemyError, Result};
 
+const BINARY_MAGIC: &[u8; 8] = b"RALUT01\0";
+const BINARY_HEADER_LEN: usize = 36;
+
 /// A strict, immutable 3D CUBE lookup table.
 ///
 /// Samples are stored in the file-defined order: red changes fastest, then
@@ -84,6 +87,59 @@ impl Lut3d {
             });
         }
 
+        Ok(Self {
+            size,
+            domain_min,
+            domain_max,
+            samples: samples.into(),
+        })
+    }
+
+    /// Reads RAW Alchemy's compact little-endian LUT asset format.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AlchemyError::InvalidCube`] or
+    /// [`AlchemyError::InvalidCubeSampleCount`] when the header, declared
+    /// dimensions, domain, or sample payload is invalid.
+    pub fn from_binary(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() < BINARY_HEADER_LEN || &bytes[..8] != BINARY_MAGIC {
+            return invalid(0, "invalid binary LUT header");
+        }
+        let size = read_u32(bytes, 8) as usize;
+        if !(2..=129).contains(&size) {
+            return invalid(0, "LUT size must be within 2..=129");
+        }
+        let domain_min = core::array::from_fn(|axis| read_f32(bytes, 12 + axis * 4));
+        let domain_max = core::array::from_fn(|axis| read_f32(bytes, 24 + axis * 4));
+        for axis in 0..3 {
+            if !domain_min[axis].is_finite()
+                || !domain_max[axis].is_finite()
+                || domain_max[axis] <= domain_min[axis]
+            {
+                return invalid(0, "invalid binary LUT domain");
+            }
+        }
+
+        let sample_count = size.checked_pow(3).ok_or(AlchemyError::ImageTooLarge)?;
+        let expected_len = sample_count
+            .checked_mul(12)
+            .and_then(|payload| payload.checked_add(BINARY_HEADER_LEN))
+            .ok_or(AlchemyError::ImageTooLarge)?;
+        if bytes.len() != expected_len {
+            return Err(AlchemyError::InvalidCubeSampleCount {
+                actual: bytes.len().saturating_sub(BINARY_HEADER_LEN) / 12,
+                expected: sample_count,
+            });
+        }
+        let mut samples = Vec::with_capacity(sample_count);
+        for offset in (BINARY_HEADER_LEN..bytes.len()).step_by(12) {
+            let sample = core::array::from_fn(|channel| read_f32(bytes, offset + channel * 4));
+            if !sample.iter().all(|value| value.is_finite()) {
+                return invalid(0, "binary LUT samples must be finite");
+            }
+            samples.push(sample);
+        }
         Ok(Self {
             size,
             domain_min,
@@ -216,6 +272,14 @@ impl Lut3d {
     }
 }
 
+fn read_f32(bytes: &[u8], offset: usize) -> f32 {
+    f32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+}
+
+fn read_u32(bytes: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+}
+
 #[allow(clippy::cast_possible_truncation)]
 fn weighted_sum(vertices: [([f32; 3], f64); 4]) -> [f32; 3] {
     core::array::from_fn(|channel| {
@@ -306,6 +370,52 @@ LUT_3D_SIZE 2
                 assert!((actual[channel] - input[channel]).abs() < 2.0e-7);
             }
         }
+    }
+
+    #[test]
+    fn compact_binary_preserves_domain_and_samples() {
+        let mut bytes = Vec::from(*BINARY_MAGIC);
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        for value in [-1.0f32, -2.0, -3.0, 1.0, 2.0, 5.0] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        for sample in [
+            [0.0f32, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 1.0],
+            [0.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0],
+        ] {
+            for value in sample {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+
+        let lut = Lut3d::from_binary(&bytes).unwrap();
+        assert_eq!(lut.size(), 2);
+        let actual = lut.sample([0.0, 0.0, 1.0]);
+        for (channel, expected) in actual.into_iter().zip([0.5, 0.5, 0.5]) {
+            assert!((channel - expected).abs() < 2.0e-7);
+        }
+    }
+
+    #[test]
+    fn compact_binary_rejects_invalid_headers_and_payloads() {
+        assert!(matches!(
+            Lut3d::from_binary(b"not a LUT").unwrap_err(),
+            AlchemyError::InvalidCube { .. }
+        ));
+
+        let mut truncated = Vec::from(*BINARY_MAGIC);
+        truncated.extend_from_slice(&2u32.to_le_bytes());
+        truncated.extend_from_slice(&[0; BINARY_HEADER_LEN - 12]);
+        assert!(matches!(
+            Lut3d::from_binary(&truncated).unwrap_err(),
+            AlchemyError::InvalidCube { .. } | AlchemyError::InvalidCubeSampleCount { .. }
+        ));
     }
 
     #[test]

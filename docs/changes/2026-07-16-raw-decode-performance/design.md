@@ -64,12 +64,16 @@ immediately before and after interpolation and RGB conversion. Rust strip
 rendering and TIFF writing are separate calls, so color and Deflate are not
 inferred by subtraction. Blob time is measured on the main thread.
 
-Candidate acceptance budgets for the 6240 × 4168 Sony fixture are:
+Candidate acceptance budgets for initial decode and export of the 6240 × 4168 Sony fixture are:
 
-- Processed preview: cold p95 below 5 s and warm p95 below 3.5 s.
+- Initial processed preview: cold p95 below 5 s and warm p95 below 3.5 s.
 - Full RAW decode: cold p95 below 15 s and warm p95 below 11 s.
 - Full export: warm p95 below 30 s, with decode below 11 s, color below
   5.5 s, Deflate below 10.5 s, and Blob below 100 ms.
+
+These initial-load budgets do not define interactive EV or LUT latency. The
+stricter progressive-preview budgets are normative in
+`docs/ssot/web/spec.md`.
 
 An acceptance run requires at least 20 measured samples after one warm-up.
 The five-sample diagnosis below reports medians and observed ranges; it does
