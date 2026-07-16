@@ -2,6 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import { ProcessingClient } from "../src/lib/processing-client";
 import type {
+  ExportTimings,
   LutDefinition,
   PreviewResult,
   WorkerCommand,
@@ -14,6 +15,25 @@ const lut: LutDefinition = {
   name: "Look",
   file: "look.cube",
   sha256: "00",
+};
+
+const exportTimings: ExportTimings = {
+  libraw: {
+    quality: 12,
+    inputCopyMs: 1,
+    openMs: 2,
+    unpackMs: 3,
+    preprocessMs: 4,
+    demosaicMs: 5,
+    postprocessMs: 6,
+    colorConversionMs: 7,
+    processRemainderMs: 8,
+    rgb16Ms: 9,
+    totalMs: 45,
+  },
+  colorProcessingMs: 10,
+  deflateMs: 11,
+  workerTotalMs: 66,
 };
 
 class ControlledWorker {
@@ -49,6 +69,12 @@ function preview(fileId: string, value: number): PreviewResult {
     lut: new Uint8Array([value, value, value, 255]),
     metadata: { camera: "Test Camera", width: 1, height: 1 },
     decodeCount: 1,
+    timings: {
+      libraw: exportTimings.libraw,
+      previewSourceMs: 10,
+      previewColorMs: 11,
+      workerTotalMs: 66,
+    },
   };
 }
 
@@ -213,10 +239,11 @@ test("export rejects an unsent render instead of dispatching stale exposure", as
     type: "export",
     fileId: "one",
     tiff,
+    timings: exportTimings,
   });
 
   await expect(rendering).resolves.toMatchObject({ fileId: "one" });
-  await expect(exporting).resolves.toBe(tiff);
+  await expect(exporting).resolves.toEqual({ tiff, timings: exportTimings });
   client.dispose();
 });
 

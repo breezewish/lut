@@ -19,11 +19,31 @@ declare module "*libraw.js" {
     data: Uint8Array<ArrayBuffer>;
   }
 
+  interface DecodeTimings {
+    quality: 3 | 4 | 12;
+    inputCopyMs: number;
+    openMs: number;
+    unpackMs: number;
+    preprocessMs: number;
+    demosaicMs: number;
+    postprocessMs: number;
+    colorConversionMs: number;
+    processRemainderMs: number;
+    rgb16Ms: number;
+    totalMs: number;
+  }
+
   class LibRawInstance {
     open(buffer: Uint8Array, halfSize: boolean): void;
+    openWithQuality(
+      buffer: Uint8Array,
+      halfSize: boolean,
+      quality: 3 | 4 | 12,
+    ): void;
     metadata(): Metadata;
     imageInfo(): DecodedImageInfo;
     imageView(offset: number, length: number): Uint16Array;
+    timings(): DecodeTimings;
     thumbnailData(): Thumbnail | undefined;
     delete(): void;
   }

@@ -17,6 +17,7 @@
 - A valid-corrupt-valid batch exports only the two valid TIFFs, keeps their dimensions isolated, marks the corrupt file failed, continues to the later file, and reports the exact partial-success summary.
 - Stopping a multi-file export finishes the active file, omits the remaining files from the ZIP, and reports the partial count.
 - Browser export reads bounded zero-copy LibRaw views, transfers only those source strips into the color WASM, and fails if the encoder's requested strip sizes do not consume the image exactly.
+- An opt-in production Chromium benchmark records processed-preview, full LibRaw decode, color processing, Deflate, Blob, and full-export boundaries for cold and warm runs without substituting a test decoder.
 - A 6240 × 4168 Sony ARW produces a nontrivial full-resolution TIFF in under 30 seconds for the export operation, and a later EV preview rerender reuses the existing preview source without another RAW decode.
 - A corrupt DNG reports a product-language decode error with recovery actions and cannot be exported as a successful file.
 - Blocking WASM startup requests produces a visible reload instruction and clears the indefinite decoding state.

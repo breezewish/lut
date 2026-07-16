@@ -6,6 +6,7 @@ import { describeProcessingError } from "../lib/errors";
 import { sha256Hex } from "../lib/hash";
 import { renderTiffInStrips } from "../lib/tiff-export";
 import type {
+  LibRawDecodeTimings,
   LutDefinition,
   PreviewResult,
   WorkerCommand,
@@ -27,6 +28,7 @@ let cached:
       renderer: PreviewRenderer;
       lutId: string;
       metadata: PreviewResult["metadata"];
+      timings: PreviewResult["timings"];
     }
   | undefined;
 let cachedLut: { id: string; lut: WasmLut } | undefined;
@@ -62,6 +64,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       return;
     }
     if (data.type === "decode") {
+      const workerStartedAt = performance.now();
       cached?.renderer.free();
       cached = undefined;
       const previewRaw = new module.LibRaw();
@@ -79,8 +82,10 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
           context.postMessage(reply, [thumbnail.data.buffer]);
         }
         const image = previewRaw.imageInfo();
+        const libraw = previewRaw.timings() as LibRawDecodeTimings;
         decodeCount += 1;
         const lut = await loadLut(data.lut);
+        const previewSourceStartedAt = performance.now();
         cached = {
           fileId: data.fileId,
           renderer: createPreviewRenderer(
@@ -97,7 +102,15 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
             width: metadata.width,
             height: metadata.height,
           },
+          timings: {
+            libraw,
+            previewSourceMs: 0,
+            previewColorMs: 0,
+            workerTotalMs: 0,
+          },
         };
+        cached.timings.previewSourceMs =
+          performance.now() - previewSourceStartedAt;
       } finally {
         // The persistent Rust renderer now owns only the display-sized RGB16
         // samples. Release LibRaw's larger half-size image and processing state
@@ -105,6 +118,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
         previewRaw.delete();
       }
       const result = await renderCached(data.fileId, data.ev, data.lut);
+      result.timings.workerTotalMs = performance.now() - workerStartedAt;
       postPreview(data.requestId, result);
       return;
     }
@@ -117,24 +131,32 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       return;
     }
 
+    const workerStartedAt = performance.now();
     const lut = await loadLut(data.lut);
     const exportRaw = new module.LibRaw();
     try {
       exportRaw.open(new Uint8Array(data.buffer), false);
       const image = exportRaw.imageInfo();
-      const tiff = renderTiffInStrips(
+      const rendered = renderTiffInStrips(
         image.sampleCount,
         (offset, length) => exportRaw.imageView(offset, length),
         lut.create_tiff_encoder(image.width, image.height, data.ev),
       );
+      const timings = {
+        libraw: exportRaw.timings() as LibRawDecodeTimings,
+        colorProcessingMs: rendered.colorProcessingMs,
+        deflateMs: rendered.deflateMs,
+        workerTotalMs: performance.now() - workerStartedAt,
+      };
       const reply: WorkerReply = {
         requestId: data.requestId,
         ok: true,
         type: "export",
         fileId: data.fileId,
-        tiff,
+        tiff: rendered.bytes,
+        timings,
       };
-      context.postMessage(reply, [tiff.buffer]);
+      context.postMessage(reply, [rendered.bytes.buffer]);
     } finally {
       exportRaw.delete();
     }
@@ -203,7 +225,9 @@ async function renderCached(
     parsedLut.apply_to_renderer(cached.renderer);
     cached.lutId = lut.id;
   }
+  const startedAt = performance.now();
   const preview = cached.renderer.render(ev);
+  const previewColorMs = performance.now() - startedAt;
   try {
     return {
       fileId,
@@ -213,6 +237,7 @@ async function renderCached(
       lut: transferablePreviewView(preview.take_lut_rgba(), "LUT"),
       metadata: cached.metadata,
       decodeCount,
+      timings: { ...cached.timings, previewColorMs },
     };
   } finally {
     preview.free();

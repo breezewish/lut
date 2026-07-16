@@ -1,9 +1,16 @@
 export interface StripTiffEncoder {
   next_strip_samples(): number;
-  write_strip(pixels: Uint16Array): void;
+  render_strip(pixels: Uint16Array): void;
+  write_strip(): void;
   /** Consumes the encoder. */
   finish(): Uint8Array;
   free(): void;
+}
+
+export interface RenderedTiff {
+  bytes: Uint8Array;
+  colorProcessingMs: number;
+  deflateMs: number;
 }
 
 /**
@@ -15,9 +22,11 @@ export function renderTiffInStrips(
   sampleCount: number,
   read: (offset: number, length: number) => Uint16Array,
   encoder: StripTiffEncoder,
-): Uint8Array {
+): RenderedTiff {
   let offset = 0;
   let consumed = false;
+  let colorProcessingMs = 0;
+  let deflateMs = 0;
   try {
     for (;;) {
       const requested = encoder.next_strip_samples();
@@ -28,7 +37,12 @@ export function renderTiffInStrips(
           `TIFF encoder requested ${requested} samples with ${remaining} remaining.`,
         );
       }
-      encoder.write_strip(read(offset, requested));
+      let startedAt = performance.now();
+      encoder.render_strip(read(offset, requested));
+      colorProcessingMs += performance.now() - startedAt;
+      startedAt = performance.now();
+      encoder.write_strip();
+      deflateMs += performance.now() - startedAt;
       offset += requested;
     }
     if (offset !== sampleCount) {
@@ -36,8 +50,12 @@ export function renderTiffInStrips(
         `TIFF encoder consumed ${offset} of ${sampleCount} samples.`,
       );
     }
+    const startedAt = performance.now();
+    // `finish` consumes the WASM encoder even when it returns an error.
     consumed = true;
-    return encoder.finish();
+    const bytes = encoder.finish();
+    deflateMs += performance.now() - startedAt;
+    return { bytes, colorProcessingMs, deflateMs };
   } finally {
     if (!consumed) encoder.free();
   }

@@ -38,6 +38,39 @@ export interface LutManifest {
   luts: LutDefinition[];
 }
 
+export interface LibRawDecodeTimings {
+  quality: 3 | 4 | 12;
+  inputCopyMs: number;
+  openMs: number;
+  unpackMs: number;
+  preprocessMs: number;
+  demosaicMs: number;
+  postprocessMs: number;
+  colorConversionMs: number;
+  processRemainderMs: number;
+  rgb16Ms: number;
+  totalMs: number;
+}
+
+export interface PreviewTimings {
+  libraw: LibRawDecodeTimings;
+  previewSourceMs: number;
+  previewColorMs: number;
+  workerTotalMs: number;
+}
+
+export interface ExportTimings {
+  libraw: LibRawDecodeTimings;
+  colorProcessingMs: number;
+  deflateMs: number;
+  workerTotalMs: number;
+}
+
+export interface ExportResult {
+  tiff: Uint8Array;
+  timings: ExportTimings;
+}
+
 export interface PreviewResult {
   fileId: string;
   width: number;
@@ -50,6 +83,7 @@ export interface PreviewResult {
     height: number;
   };
   decodeCount: number;
+  timings: PreviewTimings;
 }
 
 export interface CameraPreview {
@@ -110,6 +144,7 @@ export type WorkerReply =
       type: "export";
       fileId: string;
       tiff: Uint8Array;
+      timings: ExportTimings;
     }
   | {
       requestId: number;

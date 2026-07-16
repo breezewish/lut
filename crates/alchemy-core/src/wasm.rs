@@ -211,7 +211,7 @@ impl TiffEncoder {
         self.writer.next_strip_samples()
     }
 
-    pub fn write_strip(&mut self, pixels: &[u16]) -> std::result::Result<(), JsError> {
+    pub fn render_strip(&mut self, pixels: &[u16]) -> std::result::Result<(), JsError> {
         let expected = self.writer.next_strip_samples();
         if pixels.len() != expected {
             return Err(to_js_error(AlchemyError::InvalidPixelCount {
@@ -222,7 +222,20 @@ impl TiffEncoder {
         self.output.clear();
         self.output.reserve(expected);
         self.pipeline.render_rgb16_strip(pixels, &mut self.output);
-        self.writer.write_strip(&self.output).map_err(to_js_error)
+        Ok(())
+    }
+
+    pub fn write_strip(&mut self) -> std::result::Result<(), JsError> {
+        let expected = self.writer.next_strip_samples();
+        if self.output.len() != expected {
+            return Err(to_js_error(AlchemyError::InvalidPixelCount {
+                actual: self.output.len(),
+                expected,
+            }));
+        }
+        self.writer.write_strip(&self.output).map_err(to_js_error)?;
+        self.output.clear();
+        Ok(())
     }
 
     pub fn finish(self) -> std::result::Result<Vec<u8>, JsError> {

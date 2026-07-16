@@ -27,7 +27,8 @@ const lutWrite = methodBody("write_word(offset, word, length)");
 const previewWrite = methodBody("write_source_row(pixels)");
 const previewRender = methodBody("render(ev)");
 const tiffConstructor = methodBody("create_tiff_encoder(width, height, ev)");
-const tiffWrite = methodBody("write_strip(pixels)");
+const tiffRender = methodBody("render_strip(pixels)");
+const tiffWrite = methodBody("write_strip()");
 
 if (lutWrite.includes("passArray8ToWasm0")) {
   throw new Error(
@@ -58,8 +59,13 @@ if (previewRender.includes("passArray16ToWasm0")) {
 if (previewRender.includes("passStringToWasm0")) {
   throw new Error("Preview EV rerender unexpectedly reparses the current LUT.");
 }
-if (!tiffWrite.includes("passArray16ToWasm0(pixels")) {
-  throw new Error("TIFF strip writer no longer receives bounded RGB16 views.");
+if (!tiffRender.includes("passArray16ToWasm0(pixels")) {
+  throw new Error(
+    "TIFF strip renderer no longer receives bounded RGB16 views.",
+  );
+}
+if (tiffWrite.includes("passArray16ToWasm0")) {
+  throw new Error("TIFF Deflate unexpectedly copies another RGB16 strip.");
 }
 if (binding.includes("export function render_tiff(")) {
   throw new Error("The whole-image TIFF WASM binding must not be exported.");

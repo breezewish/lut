@@ -377,12 +377,16 @@ export default function App() {
         });
         let tiff: Uint8Array | undefined;
         try {
-          tiff = await client.export(
+          const exported = await client.export(
             item.id,
             await item.file.arrayBuffer(),
             ev,
             selectedLut,
           );
+          tiff = exported.tiff;
+          performance.mark("raw-alchemy:export-worker", {
+            detail: exported.timings,
+          });
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);
@@ -433,12 +437,19 @@ export default function App() {
       archive?.end();
       if (archiveError) throw archiveError;
       if (outputNames.size > 0) {
+        const blobStartedAt = performance.now();
         const blob = new Blob(
           singleOutput ? [singleOutput.bytes] : archiveChunks,
           {
             type: single ? "image/tiff" : "application/zip",
           },
         );
+        performance.mark("raw-alchemy:blob", {
+          detail: {
+            durationMs: performance.now() - blobStartedAt,
+            byteLength: blob.size,
+          },
+        });
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement("a");
         anchor.href = url;

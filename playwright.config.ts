@@ -1,5 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const httpPort = Number(process.env.PLAYWRIGHT_HTTP_PORT ?? "42731");
+const httpsPort = httpPort + 1;
+
 export default defineConfig({
   testDir: "web/e2e",
   timeout: 30_000,
@@ -9,7 +12,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: "list",
   use: {
-    baseURL: "https://127.0.0.1:42732",
+    baseURL: `https://127.0.0.1:${httpsPort}`,
     ignoreHTTPSErrors: true,
     trace: "retain-on-failure",
   },
@@ -28,15 +31,14 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "npx vite preview --host 0.0.0.0 --port 42731 --strictPort",
-      url: "http://127.0.0.1:42731",
+      command: `npx vite preview --host 0.0.0.0 --port ${httpPort} --strictPort`,
+      url: `http://127.0.0.1:${httpPort}`,
       reuseExistingServer: false,
       timeout: 120_000,
     },
     {
-      command:
-        "VITE_HTTPS=1 npx vite preview --host 127.0.0.1 --port 42732 --strictPort",
-      url: "https://127.0.0.1:42732",
+      command: `VITE_HTTPS=1 npx vite preview --host 127.0.0.1 --port ${httpsPort} --strictPort`,
+      url: `https://127.0.0.1:${httpsPort}`,
       ignoreHTTPSErrors: true,
       reuseExistingServer: false,
       timeout: 120_000,

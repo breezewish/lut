@@ -11,7 +11,8 @@ test("passes only bounded source views across the color-WASM boundary", () => {
   const nextSizes = [250_000, 250_000, 100_000, 0];
   const encoder: StripTiffEncoder = {
     next_strip_samples: () => nextSizes.shift()!,
-    write_strip: (strip) => writes.push(strip),
+    render_strip: (strip) => writes.push(strip),
+    write_strip: vi.fn(),
     finish: () => new Uint8Array([73, 73, 42, 0]),
     free: vi.fn(),
   };
@@ -22,10 +23,11 @@ test("passes only bounded source views across the color-WASM boundary", () => {
       (offset, length) => pixels.subarray(offset, offset + length),
       encoder,
     ),
-  ).toEqual(new Uint8Array([73, 73, 42, 0]));
+  ).toMatchObject({ bytes: new Uint8Array([73, 73, 42, 0]) });
   expect(writes.map((strip) => strip.length)).toEqual([
     250_000, 250_000, 100_000,
   ]);
+  expect(encoder.write_strip).toHaveBeenCalledTimes(3);
   expect(
     writes.every(
       (strip) =>
@@ -39,6 +41,7 @@ test("rejects an encoder strip contract that exceeds the source image", () => {
   const free = vi.fn();
   const encoder: StripTiffEncoder = {
     next_strip_samples: () => 4,
+    render_strip: vi.fn(),
     write_strip: vi.fn(),
     finish: vi.fn(),
     free,
@@ -56,11 +59,15 @@ test("keeps a full-resolution camera export on bounded source views", () => {
   let offset = 0;
   let largestView = 0;
   let viewCount = 0;
+  let renderedLength = 0;
   const encoder: StripTiffEncoder = {
     next_strip_samples: () =>
       Math.min(stripSamples, Math.max(0, sampleCount - offset)),
-    write_strip: (strip) => {
-      offset += strip.length;
+    render_strip: (strip) => {
+      renderedLength = strip.length;
+    },
+    write_strip: () => {
+      offset += renderedLength;
     },
     finish: () => new Uint8Array([73, 73, 42, 0]),
     free: vi.fn(),

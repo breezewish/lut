@@ -1,5 +1,6 @@
 import type {
   CameraPreview,
+  ExportResult,
   LutDefinition,
   PreviewResult,
   WorkerCommand,
@@ -93,7 +94,12 @@ export class ProcessingClient {
     const reply = await this.send({ type: "decode", fileId, buffer, ev, lut }, [
       buffer,
     ]);
-    if (reply.ok && reply.type === "preview") return reply.result;
+    if (reply.ok && reply.type === "preview") {
+      performance.mark("raw-alchemy:preview-worker", {
+        detail: reply.result.timings,
+      });
+      return reply.result;
+    }
     throw new Error("Worker returned an unexpected decode response.");
   }
 
@@ -125,14 +131,16 @@ export class ProcessingClient {
     buffer: ArrayBuffer,
     ev: number,
     lut: LutDefinition,
-  ): Promise<Uint8Array> {
+  ): Promise<ExportResult> {
     this.rejectQueuedRender(
       new Error("Preview render was superseded by full-resolution export."),
     );
     const reply = await this.send({ type: "export", fileId, buffer, ev, lut }, [
       buffer,
     ]);
-    if (reply.ok && reply.type === "export") return reply.tiff;
+    if (reply.ok && reply.type === "export") {
+      return { tiff: reply.tiff, timings: reply.timings };
+    }
     throw new Error("Worker returned an unexpected export response.");
   }
 
