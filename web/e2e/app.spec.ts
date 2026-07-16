@@ -607,7 +607,7 @@ test("export failures retain the preview, allow retry, and release it on removal
   ).toBeVisible();
 });
 
-test("short desktop viewports can scroll to export", async ({ page }) => {
+test("short desktop viewports keep export in view", async ({ page }) => {
   await page.setViewportSize({ width: 1_024, height: 600 });
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
@@ -616,8 +616,6 @@ test("short desktop viewports can scroll to export", async ({ page }) => {
   });
 
   const exportButton = page.getByRole("button", { name: "Export selected" });
-  await expect(exportButton).not.toBeInViewport();
-  await page.mouse.wheel(0, 1_000);
   await expect(exportButton).toBeInViewport();
 });
 

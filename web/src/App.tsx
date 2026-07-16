@@ -687,7 +687,7 @@ export default function App() {
                     type="search"
                     value={lookQuery}
                     disabled={exporting}
-                    placeholder={`Search ${manifest?.luts.length ?? 27} looks`}
+                    placeholder={`Filter ${manifest?.luts.length ?? 27} looks`}
                     onChange={(event) => setLookQuery(event.target.value)}
                   />
                   <Select

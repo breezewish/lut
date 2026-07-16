@@ -92,7 +92,12 @@ fn run(args: &Args, output: Output) -> Result<(), String> {
     let lut = Lut3d::parse(&cube).map_err(|error| error.to_string())?;
     let pipeline = ColorPipeline::new(args.ev, ProcessingMode::CorrectedV2, lut)
         .map_err(|error| error.to_string())?;
-    let decoded = alchemy_libraw::decode(&input, false)?;
+    let decoded = alchemy_libraw::decode(&input, false).map_err(|_| {
+        format!(
+            "could not decode {}: the file may be damaged or its camera format may not be supported yet",
+            args.input.display()
+        )
+    })?;
     let tiff = pipeline
         .render_tiff(&decoded.pixels, decoded.width, decoded.height)
         .map_err(|error| error.to_string())?;

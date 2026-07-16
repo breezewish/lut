@@ -28,16 +28,28 @@ typedef struct AlchemyRenderResult {
   AlchemyBuffer buffer;
 } AlchemyRenderResult;
 
+/* Encodes one linear V-Gamut value with Panasonic's piecewise V-Log curve. */
 float alchemy_encode_v_log(float linear);
 
+/*
+ * Renders one corrected-v2 16-bit RGB TIFF.
+ *
+ * pixels contains width * height * 3 interleaved RGB16 samples in the pinned
+ * LibRaw ProPhoto D65 Linear basis. ev must be finite and within [-8, 8].
+ * cube contains one UTF-8 3D CUBE document.
+ * On success, the caller owns result.buffer and must release it exactly once
+ * with alchemy_free_buffer. On failure, result.buffer is all zeroes.
+ */
 AlchemyRenderResult alchemy_render_tiff_v2(const uint16_t *pixels,
                                             size_t pixel_len, uint32_t width,
                                             uint32_t height, float ev,
                                             const uint8_t *cube,
                                             size_t cube_len);
 
+/* Releases an unchanged, non-null buffer returned by alchemy_render_tiff_v2. */
 void alchemy_free_buffer(AlchemyBuffer buffer);
 
+/* Returns a process-lifetime English description for a stable status code. */
 const char *alchemy_status_message(int status);
 
 #ifdef __cplusplus

@@ -914,11 +914,15 @@ input[type="range"]:disabled {
 
   .lut-control {
     width: auto;
-    flex: 1 1 24rem;
+    flex: 1 1 21rem;
   }
 
   .exposure-actions {
-    flex: 1 1 20rem;
+    flex: 1 1 17rem;
+  }
+
+  .exposure-control {
+    width: min(13rem, 28vw);
   }
 }
 
@@ -971,17 +975,6 @@ input[type="range"]:disabled {
 
   .workspace {
     min-height: 38rem;
-  }
-
-  .control-bar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .lut-control,
-  .exposure-actions {
-    width: 100%;
-    flex: none;
   }
 
   .preview-image {

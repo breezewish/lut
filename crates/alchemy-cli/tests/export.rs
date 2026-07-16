@@ -55,7 +55,7 @@ fn corrupt_raw_fails_without_creating_output() {
     std::fs::write(&source, b"not a raw file").unwrap();
 
     let result = Command::new(env!("CARGO_BIN_EXE_alchemy"))
-        .arg(source)
+        .arg(&source)
         .arg(&destination)
         .arg("--lut")
         .arg(root().join("tests/fixtures/identity.cube"))
@@ -66,6 +66,14 @@ fn corrupt_raw_fails_without_creating_output() {
     assert!(!result.status.success());
     let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(report["status"], "error");
+    assert_eq!(
+        report["message"],
+        format!(
+            "could not decode {}: the file may be damaged or its camera format may not be supported yet",
+            source.display()
+        )
+    );
+    assert!(!result.stdout.windows(6).any(|window| window == b"LibRaw"));
     assert!(!destination.exists());
 }
 
