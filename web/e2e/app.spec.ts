@@ -124,7 +124,10 @@ test("keeps the previous canvases visible until interaction frames are ready", a
 
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
-  const basePreview = page.getByLabel("Base preview");
+  const basePreview = page.getByRole("img", {
+    name: "Base preview",
+    exact: true,
+  });
   const lutPreview = page.getByLabel("Classic Negative preview");
   await expect(basePreview).toBeVisible({ timeout: 20_000 });
   await expect(lutPreview).toBeVisible();
@@ -174,6 +177,7 @@ test("keeps the previous canvases visible until interaction frames are ready", a
   const currentLut = await lutPreview.evaluate((canvas: HTMLCanvasElement) =>
     canvas.toDataURL(),
   );
+  await page.getByRole("button", { name: /Browse all/ }).click();
   await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
   await page.getByRole("option", { name: "PROVIA", exact: true }).click();
   await page.waitForTimeout(100);
@@ -208,7 +212,9 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
   ).toBeVisible();
 
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
-  await expect(page.getByText("Base", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("figure", { name: /Base Neutral tone map/ }),
+  ).toBeVisible();
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 20_000,
   });
@@ -267,6 +273,7 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
   const classicNegativePreview = await page
     .getByLabel("Classic Negative preview")
     .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
+  await page.getByRole("button", { name: /Browse all/ }).click();
   await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
   await page.getByRole("option", { name: "PROVIA", exact: true }).click();
   await expect(page.getByLabel("PROVIA preview")).toBeVisible();
@@ -394,6 +401,8 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
   await expect(
     page.getByRole("button", { name: "Export selected" }),
   ).toHaveClass(/button-secondary/);
+
+  await page.getByRole("button", { name: /Browse all/ }).click();
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export all" }).click();
@@ -600,6 +609,7 @@ test("all built-in LUTs match optimized native RGB16 exports", async ({
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 20_000,
   });
+  await page.getByRole("button", { name: /Browse all/ }).click();
 
   for (const look of manifest.luts) {
     await page
@@ -797,6 +807,135 @@ test("mobile empty state keeps import primary and defers processing controls", a
     page.getByRole("region", { name: "Processing controls" }),
   ).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Export all" })).toHaveCount(0);
+});
+
+test("supports focused look discovery, synchronized preview inspection, and a compact mobile comparison", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(sonyFixture);
+  const basePreview = page.getByRole("img", {
+    name: "Base preview",
+    exact: true,
+  });
+  await expect(basePreview).toHaveAttribute("width", "1024", {
+    timeout: 30_000,
+  });
+
+  await expect(page.getByRole("searchbox", { name: "Look" })).toHaveCount(0);
+  await page.getByRole("button", { name: /Browse all 27 looks/ }).click();
+  await page.getByRole("searchbox", { name: "Look" }).fill("PROVIA");
+  await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
+  await page.getByRole("option", { name: "PROVIA", exact: true }).click();
+  await expect(page.getByLabel("PROVIA preview")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "PROVIA", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", { name: "Preview 1:1", exact: true }).click();
+  await expect(basePreview.locator("..")).toHaveClass(/is-actual/);
+  await expect(basePreview).toHaveCSS("width", "1024px");
+  const lookPreview = page.getByRole("img", {
+    name: "PROVIA preview",
+    exact: true,
+  });
+  const before = await basePreview.evaluate(
+    (canvas: HTMLCanvasElement) => canvas.style.left,
+  );
+  const imageWell = await basePreview.locator("..").boundingBox();
+  if (!imageWell) throw new Error("Base preview image well is unavailable.");
+  await page.mouse.move(
+    imageWell.x + imageWell.width / 2,
+    imageWell.y + imageWell.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    imageWell.x + imageWell.width / 2 + 80,
+    imageWell.y + imageWell.height / 2 + 40,
+  );
+  await page.mouse.up();
+  const focused = await basePreview.evaluate(
+    (canvas: HTMLCanvasElement) => canvas.style.left,
+  );
+  expect(focused).not.toBe(before);
+  expect(
+    await lookPreview.evaluate(
+      (canvas: HTMLCanvasElement) => canvas.style.left,
+    ),
+  ).toBe(focused);
+  const imageBounds = await basePreview.boundingBox();
+  const wellBounds = await basePreview.locator("..").boundingBox();
+  if (!imageBounds || !wellBounds) {
+    throw new Error("Preview inspection geometry is unavailable.");
+  }
+  expect(imageBounds.x).toBeLessThanOrEqual(wellBounds.x + 0.5);
+  expect(imageBounds.x + imageBounds.width).toBeGreaterThanOrEqual(
+    wellBounds.x + wellBounds.width - 0.5,
+  );
+
+  const beforeKeyboardPan = focused;
+  await basePreview.locator("..").focus();
+  await basePreview.locator("..").press("ArrowRight");
+  const keyboardFocused = await basePreview.evaluate(
+    (canvas: HTMLCanvasElement) => canvas.style.left,
+  );
+  expect(keyboardFocused).not.toBe(beforeKeyboardPan);
+  expect(
+    await lookPreview.evaluate(
+      (canvas: HTMLCanvasElement) => canvas.style.left,
+    ),
+  ).toBe(keyboardFocused);
+  await page.getByRole("button", { name: "Fit", exact: true }).click();
+  await expect(basePreview.locator("..")).toHaveClass(/is-fit/);
+  await page.locator(".canvas-title").click();
+  await page.keyboard.press("1");
+  await expect(basePreview.locator("..")).toHaveClass(/is-actual/);
+  await page.keyboard.press("f");
+  await expect(basePreview.locator("..")).toHaveClass(/is-fit/);
+
+  await page.getByText("Verify color space in your destination editor").click();
+  await expect(
+    page.getByText(/Check the result in your destination editor/),
+  ).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(basePreview).toBeHidden();
+  await expect(lookPreview).toBeVisible();
+  await page.getByRole("button", { name: "Base", exact: true }).click();
+  await expect(basePreview).toBeVisible();
+  await expect(lookPreview).toBeHidden();
+
+  const touchTargets = [
+    page.getByRole("button", { name: /Switch to (light|dark) mode/ }),
+    page.getByRole("button", { name: "Add RAW files" }),
+    page.getByRole("button", { name: "Base", exact: true }),
+    page.getByRole("button", { name: "Look", exact: true }),
+    page.getByRole("button", { name: "Fit", exact: true }),
+    page.getByRole("button", { name: "Preview 1:1", exact: true }),
+    page.getByRole("spinbutton", { name: "Exposure value" }),
+    page.getByRole("slider", { name: "Exposure" }),
+    page.getByText("How built-in looks work", { exact: true }),
+    page.getByText("Verify color space in your destination editor", {
+      exact: true,
+    }),
+  ];
+  for (const target of touchTargets) {
+    const bounds = await target.boundingBox();
+    expect(bounds?.width).toBeGreaterThanOrEqual(44);
+    expect(bounds?.height).toBeGreaterThanOrEqual(44);
+  }
+  await expect(page.locator('input[type="file"]')).toHaveAttribute(
+    "tabindex",
+    "-1",
+  );
+  expect(
+    await page
+      .locator(".panel-heading")
+      .evaluateAll((headings) =>
+        headings.every((heading) => heading.scrollWidth <= heading.clientWidth),
+      ),
+  ).toBe(true);
 });
 
 test("workspace theme persists across reloads", async ({ page }) => {

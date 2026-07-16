@@ -35,6 +35,9 @@
 - Duplicate files in one chooser action are ignored, drag and drop decodes the file, remove plus undo restores it, and choosing a LUT records it as a recent look.
 - Malformed local recent-look preferences do not prevent the empty application from rendering or accepting RAW files.
 - At mobile width, the empty-state chooser and Add RAW action are visible before any processing controls or export action.
+- A processed RAW exposes Fit and 1:1-preview controls, pans Base and Look around one synchronized normalized focus, returns to Fit without changing the preview recipe, and offers keyboard view shortcuts outside form controls.
+- Look discovery starts without the full catalog, expands into a searchable grouped browser, retains the current and previous choices in a four-item working set, and explains the V-Gamut/V-Log context inline.
+- Below 560px only the selected Base or Look pane occupies layout, the comparison switch and visible application actions have at least 44px hit targets, and the actionable output color-space explanation remains before export.
 - Switching between Light and Dark modes updates the complete application shell and persists the chosen theme across reloads without changing preview pixels.
 - At a short desktop height, wheel scrolling brings the selected-file export action into the viewport.
 - The asset build verifies every pinned source CUBE hash, emits a compact float32 LUT with equivalent domain and samples, and publishes only generated files whose SHA-256 matches the runtime manifest.

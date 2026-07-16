@@ -26,13 +26,17 @@ All color tokens use OKLCH. Neutral surfaces carry structure through value diffe
 
 ## Typography
 
-Use one Inter-compatible system sans family. UI labels and metadata use a compact fixed scale from 10 to 14 px; the empty-state title reaches 18 px. Numeric exposure values use tabular figures. Product headings are short, balanced, and never use display typography.
+Use one Inter-compatible system sans family. Meaningful UI labels and metadata use a compact fixed scale from 11 to 14 px; the empty-state title reaches 18 px. Numeric exposure values use tabular figures. Product headings are short, balanced, and never use display typography.
 
 ## Components
 
 Buttons use a consistent 6 px radius and 32–36 px desktop body; coarse-pointer targets expand to 44 px. Inputs use a compact 30–34 px body inside clear labeled groups. Search, selection, numeric entry, and range controls share dedicated control tokens and authored hover, focus, active, and disabled states instead of browser defaults. Menus render through a portal. A visible spinner in the adjustment header communicates whenever the displayed recipe is still processing. Surfaces use fill changes instead of borders or shadows.
 
+Look discovery shows the current transform and at most four recent working choices before progressively revealing the searchable full catalog. Inline explanations translate the V-Log pipeline and unverified output color space into task guidance.
+
 Progressive preview buffers never define layout size. Every preview Canvas fills a stable image well, so 256 px edit frames, 384 px initial frames, and 1024 px settled frames change clarity without changing geometry. Native exposure input paints independently while interruptible React transitions submit the latest preview recipe at a bounded rate.
+
+Fit and 1:1-preview inspection reuse the existing Canvas buffers without starting image processing. Both panes share one normalized focal point for synchronized pointer panning. `F` and `1` provide view shortcuts outside form controls.
 
 ## Motion
 
@@ -40,4 +44,4 @@ State transitions complete within 160–220 ms using ease-out curves. Motion com
 
 ## Responsive Behavior
 
-At medium widths, the queue becomes a horizontal source strip while comparison remains side by side and the inspector remains visible. Below 700 px, the layout becomes a vertical workflow: queue, adjustments, comparison, and output. Base and LUT previews stack only below 560 px. Mobile retains full-size action targets while keeping inputs visually compact.
+At medium widths, the queue becomes a horizontal source strip while comparison remains side by side and the inspector remains visible. Below 700 px, the layout becomes a vertical workflow: queue, adjustments, comparison, and output. Below 560 px, one image well switches explicitly between Base and Look so Output stays close to the comparison. Mobile retains 44 px action targets while keeping inputs visually compact.

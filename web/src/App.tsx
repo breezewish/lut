@@ -26,7 +26,7 @@ import {
 } from "react";
 import { Zip, ZipPassThrough } from "fflate";
 
-import { PreviewCanvas } from "./components/preview-canvas";
+import { PreviewCanvas, type PreviewFocus } from "./components/preview-canvas";
 import { Button } from "./components/ui/button";
 import { Select } from "./components/ui/select";
 import { ProcessingClient } from "./lib/processing-client";
@@ -69,6 +69,8 @@ interface PreviewImage {
 }
 
 type Theme = "light" | "dark";
+type PreviewView = "fit" | "actual";
+type MobilePreview = "base" | "look";
 
 function initialTheme(): Theme {
   try {
@@ -150,6 +152,14 @@ export default function App() {
   const [exportSummary, setExportSummary] = useState<string>();
   const [queueUndo, setQueueUndo] = useState<QueueUndo>();
   const [lookQuery, setLookQuery] = useState("");
+  const [lookBrowserOpen, setLookBrowserOpen] = useState(false);
+  const [previewView, setPreviewView] = useState<PreviewView>("fit");
+  const previewFocus = useRef<PreviewFocus>({
+    x: 0.5,
+    y: 0.5,
+  });
+  const previewGrid = useRef<HTMLDivElement>(null);
+  const [mobilePreview, setMobilePreview] = useState<MobilePreview>("look");
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [recentLutIds, setRecentLutIds] = useState<string[]>(() => {
     try {
@@ -218,6 +228,47 @@ export default function App() {
       !isDecodeFailure(selected) &&
       (!hasUsablePreview(selected) || renderedRecipe !== currentRecipe),
   );
+
+  useEffect(() => {
+    setPreviewView("fit");
+    previewFocus.current = { x: 0.5, y: 0.5 };
+    setMobilePreview("look");
+  }, [selectedId]);
+
+  const getPreviewFocus = useCallback(() => previewFocus.current, []);
+
+  const updatePreviewFocus = useCallback((next: PreviewFocus) => {
+    previewFocus.current = next;
+    for (const canvas of previewGrid.current?.querySelectorAll("canvas") ??
+      []) {
+      canvas.style.left = `calc(50% + ${(0.5 - next.x) * canvas.width}px)`;
+      canvas.style.top = `calc(50% + ${(0.5 - next.y) * canvas.height}px)`;
+    }
+  }, []);
+
+  useEffect(() => {
+    const changePreviewView = (event: KeyboardEvent) => {
+      if (!selected || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLButtonElement ||
+        event.target instanceof HTMLTextAreaElement ||
+        event.target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+      if (event.key.toLocaleLowerCase() === "f") {
+        setPreviewView("fit");
+      } else if (event.key === "1") {
+        setPreviewView("actual");
+      } else {
+        return;
+      }
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", changePreviewView);
+    return () => window.removeEventListener("keydown", changePreviewView);
+  }, [selected]);
 
   const updateItem = useCallback((id: string, patch: Partial<QueueItem>) => {
     setItems((current) =>
@@ -748,13 +799,20 @@ export default function App() {
     ];
   }, [lookQuery, lutId, manifest, recentLutIds]);
 
+  const workingLuts = useMemo(() => {
+    const ids = Array.from(new Set([lutId, ...recentLutIds])).slice(0, 4);
+    return ids
+      .map((id) => manifest?.luts.find((lut) => lut.id === id))
+      .filter((lut) => lut !== undefined);
+  }, [lutId, manifest, recentLutIds]);
+
   const chooseLut = (value: string) => {
     setLutId(value);
     setLookQuery("");
-    const next = [
-      value,
-      ...recentLutIds.filter((candidate) => candidate !== value),
-    ].slice(0, 4);
+    const next = Array.from(new Set([value, lutId, ...recentLutIds])).slice(
+      0,
+      4,
+    );
     setRecentLutIds(next);
     try {
       localStorage.setItem("raw-alchemy-recent-luts", JSON.stringify(next));
@@ -915,6 +973,7 @@ export default function App() {
           <input
             ref={fileInput}
             className="visually-hidden"
+            tabIndex={-1}
             type="file"
             accept={RAW_ACCEPT}
             multiple
@@ -1022,26 +1081,77 @@ export default function App() {
                 </div>
 
                 <div className="control-section">
-                  <label htmlFor="look-search">Look</label>
+                  <label>Look</label>
                   <div className="look-picker">
-                    <div className="search-control">
-                      <Search size={14} aria-hidden="true" />
-                      <input
-                        id="look-search"
-                        type="search"
-                        value={lookQuery}
-                        disabled={exporting}
-                        placeholder={`Filter ${manifest?.luts.length ?? 27} looks`}
-                        onChange={(event) => setLookQuery(event.target.value)}
-                      />
+                    <div className="look-current">
+                      <strong>{selectedLut.name}</strong>
+                      <span>{selectedLut.group} · built-in transform</span>
                     </div>
-                    <Select
-                      label="Built-in V-Log look"
-                      value={lutId}
-                      onValueChange={chooseLut}
-                      options={selectOptions}
+                    {workingLuts.length > 1 && (
+                      <div
+                        className="look-working-set"
+                        aria-label="Recent looks"
+                      >
+                        {workingLuts.map((lut) => (
+                          <button
+                            key={lut.id}
+                            type="button"
+                            className={lut.id === lutId ? "is-active" : ""}
+                            aria-pressed={lut.id === lutId}
+                            disabled={exporting}
+                            onClick={() => chooseLut(lut.id)}
+                          >
+                            {lut.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <Button
+                      size="compact"
+                      variant="secondary"
+                      aria-expanded={lookBrowserOpen}
+                      onClick={() => setLookBrowserOpen((open) => !open)}
                       disabled={exporting}
-                    />
+                    >
+                      <Search size={14} aria-hidden="true" />
+                      {lookBrowserOpen
+                        ? "Close look browser"
+                        : `Browse all ${manifest?.luts.length ?? 27} looks`}
+                    </Button>
+                    {lookBrowserOpen && (
+                      <div className="look-browser">
+                        <div className="search-control">
+                          <Search size={14} aria-hidden="true" />
+                          <input
+                            id="look-search"
+                            type="search"
+                            aria-label="Look"
+                            value={lookQuery}
+                            disabled={exporting}
+                            placeholder="Search by name or camera family"
+                            onChange={(event) =>
+                              setLookQuery(event.target.value)
+                            }
+                          />
+                        </div>
+                        <Select
+                          label="Built-in V-Log look"
+                          value={lutId}
+                          onValueChange={chooseLut}
+                          options={selectOptions}
+                          disabled={exporting}
+                        />
+                      </div>
+                    )}
+                    <details className="control-help">
+                      <summary>How built-in looks work</summary>
+                      <p>
+                        RAW Alchemy converts camera color to V-Gamut and V-Log,
+                        then applies the selected display transform. Compare the
+                        result before export because each look responds
+                        differently to exposure and color.
+                      </p>
+                    </details>
                   </div>
                 </div>
 
@@ -1109,17 +1219,61 @@ export default function App() {
               data-decode-count={preview?.decodeCount}
             >
               <div className="canvas-toolbar">
-                <div>
+                <div className="canvas-title">
                   <strong>{selected ? "Compare" : "Workspace"}</strong>
                   <span>{selectedLut?.name ?? "Local RAW processing"}</span>
                 </div>
-                {selected && (
-                  <span className="canvas-status">
-                    {isPreviewProcessing
-                      ? "Processing"
-                      : STATUS_LABELS[selected.status]}
-                  </span>
-                )}
+                <div className="canvas-actions">
+                  {selected && (
+                    <>
+                      <div
+                        className="mobile-preview-switch"
+                        aria-label="Mobile comparison view"
+                      >
+                        <button
+                          type="button"
+                          aria-pressed={mobilePreview === "base"}
+                          onClick={() => setMobilePreview("base")}
+                        >
+                          Base
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={mobilePreview === "look"}
+                          onClick={() => setMobilePreview("look")}
+                        >
+                          Look
+                        </button>
+                      </div>
+                      <div
+                        className="preview-view-switch"
+                        aria-label="Preview zoom"
+                      >
+                        <button
+                          type="button"
+                          aria-pressed={previewView === "fit"}
+                          title="Fit preview (F)"
+                          onClick={() => setPreviewView("fit")}
+                        >
+                          Fit
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={previewView === "actual"}
+                          title="Show preview pixels at 1:1 (1)"
+                          onClick={() => setPreviewView("actual")}
+                        >
+                          Preview 1:1
+                        </button>
+                      </div>
+                      <span className="canvas-status">
+                        {isPreviewProcessing
+                          ? "Processing"
+                          : STATUS_LABELS[selected.status]}
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
 
               <div className="canvas-stage">
@@ -1179,7 +1333,8 @@ export default function App() {
                   </figure>
                 ) : (
                   <div
-                    className={`preview-grid ${selected.status === "decoding" ? "is-loading" : ""}`}
+                    ref={previewGrid}
+                    className={`preview-grid mobile-show-${mobilePreview} ${selected.status === "decoding" ? "is-loading" : ""}`}
                   >
                     <PreviewCanvas
                       label="Base"
@@ -1187,6 +1342,10 @@ export default function App() {
                       pixels={preview?.base?.pixels}
                       width={preview?.base?.width}
                       height={preview?.base?.height}
+                      viewMode={previewView}
+                      focus={previewFocus.current}
+                      getFocus={getPreviewFocus}
+                      onFocusChange={updatePreviewFocus}
                     />
                     <PreviewCanvas
                       label={selectedLut?.name || "LUT"}
@@ -1194,6 +1353,10 @@ export default function App() {
                       pixels={preview?.lut?.pixels}
                       width={preview?.lut?.width}
                       height={preview?.lut?.height}
+                      viewMode={previewView}
+                      focus={previewFocus.current}
+                      getFocus={getPreviewFocus}
+                      onFocusChange={updatePreviewFocus}
                     />
                     {selected.status === "decoding" && (
                       <div className="loading-label" role="status">
@@ -1227,10 +1390,22 @@ export default function App() {
                     <dd>{selectedLut.name}</dd>
                   </div>
                 </dl>
-                <p className="lut-assumption">
-                  Output profile is undeclared. Preview assumes sRGB; exported
-                  TIFF has no misleading profile.
-                </p>
+                <details className="lut-assumption">
+                  <summary>
+                    Verify color space in your destination editor
+                  </summary>
+                  <p>
+                    This look does not declare an output color space, so another
+                    editor may interpret the TIFF differently. Check the result
+                    in your destination editor before production use.
+                  </p>
+                  <p>
+                    <strong>Why?</strong> The browser preview displays the LUT
+                    values as sRGB. The exported TIFF intentionally has no
+                    embedded profile rather than claiming one the source LUT
+                    does not provide.
+                  </p>
+                </details>
                 <div className="export-feedback" aria-live="polite">
                   {selected.status === "export-error" ? (
                     <span className="selected-error" role="alert">

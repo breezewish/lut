@@ -137,6 +137,7 @@ test("a selected look becomes a recent choice", async ({ page }) => {
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 20_000,
   });
+  await page.getByRole("button", { name: /Browse all/ }).click();
   await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
   await page.getByRole("option", { name: "PROVIA", exact: true }).click();
   await expect(page.getByLabel("PROVIA preview")).toBeVisible();

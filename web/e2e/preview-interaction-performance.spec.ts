@@ -288,6 +288,9 @@ test("keeps the interface responsive while a large RAW is decoding and exposure 
     const inputs = state.exposureDragInputs ?? [];
     const dragStartedAt = inputs[0];
     const dragEndedAt = inputs.at(-1);
+    if (dragStartedAt === undefined || dragEndedAt === undefined) {
+      throw new Error("The exposure drag produced no input events.");
+    }
     const frameGaps = frames.slice(1).map((at, index) => ({
       at,
       previousAt: frames[index],
@@ -342,6 +345,8 @@ test("keeps the interface responsive while a large RAW is decoding and exposure 
 
 async function chooseLook(page: Page, name: string) {
   return measure(page, async () => {
+    const browseLooks = page.getByRole("button", { name: /Browse all/ });
+    if (await browseLooks.isVisible()) await browseLooks.click();
     await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
     await page.getByRole("option", { name, exact: true }).click();
   });
