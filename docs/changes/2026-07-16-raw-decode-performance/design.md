@@ -231,8 +231,12 @@ Its black-level handling, defective-pixel repair, highlight reconstruction,
 demosaic, white balance, camera matrix, float precision, and orientation path
 are different by design. Treating its output delta as error would be invalid.
 Fixed 1:1 crops visibly confirmed this confound for both sensors: Studio RCD on
-Sony and Markesteijn on Fujifilm differed from LibRaw in overall brightness,
+the Sony crop `(x=2400, y=1500, 1400×1000)` and Markesteijn on the Fujifilm
+crop `(x=1800, y=1100, 1200×900)` differed from LibRaw in overall brightness,
 highlight clipping, and color before a demosaic-detail ranking could be made.
+The Studio benchmark records the coordinates in JSON and writes the final
+float32 result through the same fixed two-stop exposure and sRGB transfer used
+for the LibRaw crops.
 
 The quality evidence is sufficient to reject a silent algorithm swap, but not
 to rank AHD, AAHD, RCD, or Markesteijn. A release decision needs blinded crop
@@ -303,11 +307,20 @@ quality and can require a suitable WebGPU/ONNX browser environment.
 npm run build
 npm run benchmark:libraw -- --samples=5 --warmups=1 \
   --crop=2400,1500,1400,1000 --crop-dir=/tmp/libraw-quality-crops
+npm run benchmark:libraw -- --fixture=/path/to/fujifilm-x-t1.raf \
+  --samples=1 --warmups=0 --crop=1800,1100,1200,900 \
+  --crop-dir=/tmp/libraw-fujifilm-quality-crops
 RAW_PERF_SAMPLES=5 npm run benchmark:browser
 
 PYTHONPATH=/path/to/Raw-Alchemy-studio/src \
   /path/to/python scripts/benchmark-studio-decode.py \
-  --fixture=vendor/LibRaw-Wasm/example-sony.ARW --samples=5 --warmups=1
+  --fixture=vendor/LibRaw-Wasm/example-sony.ARW --samples=5 --warmups=1 \
+  --crop=2400,1500,1400,1000 --crop-output=/tmp/studio-sony-rcd.ppm
+
+PYTHONPATH=/path/to/Raw-Alchemy-studio/src \
+  /path/to/python scripts/benchmark-studio-decode.py \
+  --fixture=/path/to/fujifilm-x-t1.raf --samples=5 --warmups=1 \
+  --crop=1800,1100,1200,900 --crop-output=/tmp/studio-fujifilm-markesteijn.ppm
 ```
 
 The browser benchmark writes `raw-performance.json` into its Playwright test

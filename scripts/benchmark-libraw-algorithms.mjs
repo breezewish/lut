@@ -78,7 +78,7 @@ for (const algorithm of algorithms) {
 }
 
 const report = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   fixture,
   fixtureBytes: rawBytes.byteLength,
   halfSize,

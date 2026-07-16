@@ -27,9 +27,13 @@ def main() -> None:
     parser.add_argument("--output")
     parser.add_argument("--samples", type=int, default=5)
     parser.add_argument("--warmups", type=int, default=1)
+    parser.add_argument("--crop", type=parse_crop)
+    parser.add_argument("--crop-output")
     args = parser.parse_args()
     if args.samples < 1 or args.warmups < 0:
         parser.error("samples must be positive and warmups must be non-negative")
+    if (args.crop is None) != (args.crop_output is None):
+        parser.error("--crop and --crop-output must be provided together")
 
     fixture = str(Path(args.fixture).resolve())
     with rawpy.imread(fixture) as raw:
@@ -82,12 +86,14 @@ def main() -> None:
                     ),
                 }
             )
+            if index == args.warmups + args.samples - 1 and args.crop is not None:
+                write_crop(image, args.crop, Path(args.crop_output))
         del image
         gc.collect()
 
     measured_demosaic = demosaic_runs[args.warmups :]
     report = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "fixture": fixture,
         "fixtureBytes": Path(fixture).stat().st_size,
         "dimensions": dimensions,
@@ -98,6 +104,7 @@ def main() -> None:
         "providerUsed": demosaic_module._session_provider,
         "warmups": args.warmups,
         "samples": args.samples,
+        "qualityCrop": crop_description(args.crop),
         "totalMs": summarize(runs),
         "demosaicMs": summarize(measured_demosaic),
         "peakResidentMiB": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -108,6 +115,47 @@ def main() -> None:
     if args.output:
         Path(args.output).write_text(encoded, encoding="utf-8")
     print(encoded, end="")
+
+
+def parse_crop(value: str) -> tuple[int, int, int, int]:
+    try:
+        parts = tuple(int(part) for part in value.split(","))
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("crop values must be integers") from error
+    if len(parts) != 4 or any(part < 0 for part in parts) or min(parts[2:]) == 0:
+        raise argparse.ArgumentTypeError(
+            "crop must be x,y,width,height with positive dimensions"
+        )
+    return parts
+
+
+def crop_description(
+    crop: tuple[int, int, int, int] | None,
+) -> dict[str, int] | None:
+    if crop is None:
+        return None
+    x, y, width, height = crop
+    return {"x": x, "y": y, "width": width, "height": height}
+
+
+def write_crop(
+    image: np.ndarray, crop: tuple[int, int, int, int], output: Path
+) -> None:
+    x, y, width, height = crop
+    image_height, image_width = image.shape[:2]
+    if x + width > image_width or y + height > image_height:
+        raise ValueError(
+            f"crop {crop!r} exceeds decoded image {image_width}x{image_height}"
+        )
+    linear = np.clip(image[y : y + height, x : x + width] * 4.0, 0.0, 1.0)
+    display = np.where(
+        linear <= 0.003_130_8,
+        linear * 12.92,
+        1.055 * np.power(linear, 1.0 / 2.4) - 0.055,
+    )
+    pixels = np.rint(display * 255.0).astype(np.uint8)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(f"P6\n{width} {height}\n255\n".encode() + pixels.tobytes())
 
 
 def summarize(values: list[float]) -> dict[str, float]:
