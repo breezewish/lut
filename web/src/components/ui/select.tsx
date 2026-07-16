@@ -35,9 +35,12 @@ export function Select({
       disabled={disabled}
     >
       <SelectPrimitive.Trigger className="select-trigger" aria-label={label}>
-        <SelectPrimitive.Value />
+        <span className="select-value">
+          <span className="select-value-mark" aria-hidden="true" />
+          <SelectPrimitive.Value />
+        </span>
         <SelectPrimitive.Icon aria-hidden="true">
-          <ChevronDown size={16} />
+          <ChevronDown size={14} />
         </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>

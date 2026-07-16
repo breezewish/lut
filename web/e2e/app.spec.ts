@@ -18,17 +18,46 @@ const execFileAsync = promisify(execFile);
 test("shows an embedded camera JPEG before the processed preview", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1_440, height: 900 });
   await page.goto("/");
   await page.evaluate(() => {
-    const observedWindow = window as Window & { cameraPreviewSeen?: boolean };
+    const observedWindow = window as Window & {
+      cameraPreviewSeen?: boolean;
+      previewGeometry?: Array<{
+        cssWidth: number;
+        cssHeight: number;
+        pixelWidth: number;
+      }>;
+    };
     observedWindow.cameraPreviewSeen = false;
+    observedWindow.previewGeometry = [];
     const observer = new MutationObserver(() => {
       if (document.querySelector('img[alt="Embedded camera preview"]')) {
         observedWindow.cameraPreviewSeen = true;
-        observer.disconnect();
       }
+      requestAnimationFrame(() => {
+        const canvas = document.querySelector<HTMLCanvasElement>(
+          'canvas[aria-label="Base preview"]',
+        );
+        if (!canvas) return;
+        const bounds = canvas.getBoundingClientRect();
+        const geometry = {
+          cssWidth: bounds.width,
+          cssHeight: bounds.height,
+          pixelWidth: canvas.width,
+        };
+        const previous = observedWindow.previewGeometry?.at(-1);
+        if (previous?.pixelWidth !== geometry.pixelWidth) {
+          observedWindow.previewGeometry?.push(geometry);
+        }
+      });
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["width", "height"],
+      childList: true,
+      subtree: true,
+    });
   });
 
   await page.locator('input[type="file"]').setInputFiles(sonyFixture);
@@ -46,6 +75,33 @@ test("shows an embedded camera JPEG before the processed preview", async ({
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 30_000,
   });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as Window & {
+              previewGeometry?: Array<{ pixelWidth: number }>;
+            }
+          ).previewGeometry?.at(-1)?.pixelWidth,
+      ),
+    )
+    .toBe(1_024);
+  const geometry = await page.evaluate(
+    () =>
+      (
+        window as Window & {
+          previewGeometry?: Array<{ cssWidth: number; cssHeight: number }>;
+        }
+      ).previewGeometry ?? [],
+  );
+  expect(geometry.length).toBeGreaterThanOrEqual(2);
+  expect(new Set(geometry.map(({ cssWidth }) => Math.round(cssWidth)))).toEqual(
+    new Set([Math.round(geometry[0].cssWidth)]),
+  );
+  expect(
+    new Set(geometry.map(({ cssHeight }) => Math.round(cssHeight))),
+  ).toEqual(new Set([Math.round(geometry[0].cssHeight)]));
 });
 
 test("keeps the previous canvases visible until interaction frames are ready", async ({
@@ -72,6 +128,10 @@ test("keeps the previous canvases visible until interaction frames are ready", a
   const lutPreview = page.getByLabel("Classic Negative preview");
   await expect(basePreview).toBeVisible({ timeout: 20_000 });
   await expect(lutPreview).toBeVisible();
+  const processing = page.getByRole("status", {
+    name: "Preview processing",
+  });
+  await expect(processing).toHaveCount(0);
   const previousBase = await basePreview.evaluate((canvas: HTMLCanvasElement) =>
     canvas.toDataURL(),
   );
@@ -85,6 +145,7 @@ test("keeps the previous canvases visible until interaction frames are ready", a
   });
   await page.getByRole("slider", { name: "Exposure" }).fill("1");
   await page.waitForTimeout(100);
+  await expect(processing).toBeVisible();
 
   expect(await basePreview.count()).toBe(1);
   expect(await basePreview.isVisible()).toBe(true);
@@ -108,13 +169,15 @@ test("keeps the previous canvases visible until interaction frames are ready", a
 
   await expect(
     page.getByRole("button", { name: "Export selected" }),
-  ).toHaveClass(/button-primary/);
+  ).toBeEnabled();
+  await expect(processing).toHaveCount(0);
   const currentLut = await lutPreview.evaluate((canvas: HTMLCanvasElement) =>
     canvas.toDataURL(),
   );
   await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
   await page.getByRole("option", { name: "PROVIA", exact: true }).click();
   await page.waitForTimeout(100);
+  await expect(processing).toBeVisible();
 
   const proviaPreview = page.getByLabel("PROVIA preview");
   expect(await proviaPreview.count()).toBe(1);
@@ -129,6 +192,7 @@ test("keeps the previous canvases visible until interaction frames are ready", a
       proviaPreview.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
     )
     .not.toBe(currentLut);
+  await expect(processing).toHaveCount(0);
 });
 
 test("decodes, re-renders exposure, and exports a local RAW", async ({

@@ -3,16 +3,19 @@ import {
   FileImage,
   FolderOpen,
   ImageDown,
+  LoaderCircle,
   LockKeyhole,
   Moon,
   Plus,
   RotateCcw,
+  Search,
   Sun,
   Trash2,
   X,
 } from "lucide-react";
 import {
   type ChangeEvent,
+  type CSSProperties,
   type DragEvent,
   useCallback,
   useEffect,
@@ -201,6 +204,12 @@ export default function App() {
       selectedLut &&
       hasUsablePreview(selected) &&
       renderedRecipe === currentRecipe,
+  );
+  const isPreviewProcessing = Boolean(
+    selected &&
+      selectedLut &&
+      !isDecodeFailure(selected) &&
+      (!hasUsablePreview(selected) || renderedRecipe !== currentRecipe),
   );
 
   const updateItem = useCallback((id: string, patch: Partial<QueueItem>) => {
@@ -910,32 +919,50 @@ export default function App() {
                 aria-label="Processing controls"
               >
                 <div className="panel-heading">
-                  <div>
+                  <div className="panel-heading-copy">
                     <h2>Adjustments</h2>
-                    <p>Preview only until export</p>
                   </div>
-                  <Button
-                    size="icon"
-                    variant="quiet"
-                    aria-label="Reset exposure"
-                    onClick={() => setEv(0)}
-                    disabled={exporting || ev === 0}
-                  >
-                    <RotateCcw size={16} aria-hidden="true" />
-                  </Button>
+                  <div className="panel-heading-actions">
+                    {isPreviewProcessing && (
+                      <span
+                        className="processing-indicator"
+                        role="status"
+                        aria-label="Preview processing"
+                      >
+                        <LoaderCircle
+                          className="processing-spinner"
+                          size={14}
+                          aria-hidden="true"
+                        />
+                        Processing
+                      </span>
+                    )}
+                    <Button
+                      size="icon"
+                      variant="quiet"
+                      aria-label="Reset exposure"
+                      onClick={() => setEv(0)}
+                      disabled={exporting || ev === 0}
+                    >
+                      <RotateCcw size={15} aria-hidden="true" />
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="control-section">
                   <label htmlFor="look-search">Look</label>
                   <div className="look-picker">
-                    <input
-                      id="look-search"
-                      type="search"
-                      value={lookQuery}
-                      disabled={exporting}
-                      placeholder={`Filter ${manifest?.luts.length ?? 27} looks`}
-                      onChange={(event) => setLookQuery(event.target.value)}
-                    />
+                    <div className="search-control">
+                      <Search size={14} aria-hidden="true" />
+                      <input
+                        id="look-search"
+                        type="search"
+                        value={lookQuery}
+                        disabled={exporting}
+                        placeholder={`Filter ${manifest?.luts.length ?? 27} looks`}
+                        onChange={(event) => setLookQuery(event.target.value)}
+                      />
+                    </div>
                     <Select
                       label="Built-in V-Log look"
                       value={lutId}
@@ -979,7 +1006,13 @@ export default function App() {
                     max="4"
                     step="0.1"
                     value={ev}
+                    aria-valuetext={`${ev} EV`}
                     disabled={exporting}
+                    style={
+                      {
+                        "--range-progress": `${((ev + 4) / 8) * 100}%`,
+                      } as CSSProperties
+                    }
                     onChange={(event) => setEv(Number(event.target.value))}
                   />
                   <div className="range-scale" aria-hidden="true">
@@ -994,7 +1027,7 @@ export default function App() {
             <section
               className="comparison"
               aria-label="Base and LUT comparison"
-              aria-busy={selected ? selected.status === "decoding" : undefined}
+              aria-busy={selected ? isPreviewProcessing : undefined}
               data-decode-count={preview?.decodeCount}
             >
               <div className="canvas-toolbar">
@@ -1004,7 +1037,9 @@ export default function App() {
                 </div>
                 {selected && (
                   <span className="canvas-status">
-                    {STATUS_LABELS[selected.status]}
+                    {isPreviewProcessing
+                      ? "Processing"
+                      : STATUS_LABELS[selected.status]}
                   </span>
                 )}
               </div>
@@ -1095,7 +1130,7 @@ export default function App() {
             {selected && selectedLut && (
               <section className="output-panel" aria-label="Export controls">
                 <div className="panel-heading">
-                  <div>
+                  <div className="panel-heading-copy">
                     <h2>Output</h2>
                     <p>16-bit uncompressed TIFF</p>
                   </div>

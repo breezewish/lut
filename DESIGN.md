@@ -30,7 +30,9 @@ Use one Inter-compatible system sans family. UI labels and metadata use a compac
 
 ## Components
 
-Buttons use a consistent 8 px radius and a minimum 44 px target. Inputs use a visually compact 36 px body inside clear labeled groups. Menus render through a portal. Controls expose hover, focus, active, disabled, loading, error, and selected states where applicable. Surfaces use fill changes instead of borders or shadows.
+Buttons use a consistent 8 px radius and a minimum 44 px target. Inputs use a visually compact body inside clear labeled groups. Search, selection, numeric entry, and range controls share dedicated control tokens and authored hover, focus, active, and disabled states instead of browser defaults. Menus render through a portal. A visible spinner in the adjustment header communicates whenever the displayed recipe is still processing. Surfaces use fill changes instead of borders or shadows.
+
+Progressive preview buffers never define layout size. Every preview Canvas fills a stable image well, so 384 px interaction frames and 1024 px settled frames change clarity without changing geometry.
 
 ## Motion
 
