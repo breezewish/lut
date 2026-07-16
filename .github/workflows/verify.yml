@@ -27,11 +27,13 @@ jobs:
 
       - run: npm ci
       - run: cargo install wasm-pack --version 0.13.1 --locked
+      - run: rustup target add wasm32-unknown-unknown
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: cargo fmt --all --check
       - run: cargo test --workspace
       - run: cargo test --workspace --release
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy -p alchemy-core --target wasm32-unknown-unknown --features wasm -- -D warnings
       - run: cargo build -p alchemy-core
       - run: >-
           cc -std=c11 -Wall -Wextra -Werror

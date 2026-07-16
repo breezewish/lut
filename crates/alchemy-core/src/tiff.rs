@@ -1,6 +1,8 @@
 use std::{io::Cursor, ops::Range};
 
-use tiff_core::{ByteOrder, Compression, PhotometricInterpretation, PlanarConfiguration};
+use tiff_core::{
+    ByteOrder, Compression, PhotometricInterpretation, PlanarConfiguration, Predictor,
+};
 use tiff_writer::{ImageBuilder, ImageHandle, TiffVariant, TiffWriter, WriteOptions};
 
 use crate::{AlchemyError, Result};
@@ -38,6 +40,7 @@ impl Rgb16TiffWriter {
             .samples_per_pixel(3)
             .sample_type::<u16>()
             .compression(Compression::Deflate)
+            .predictor(Predictor::Horizontal)
             .photometric(PhotometricInterpretation::Rgb)
             .planar_configuration(PlanarConfiguration::Chunky)
             .strips(rows_per_strip);
@@ -173,6 +176,12 @@ mod tests {
                 .get_tag_unsigned::<u16>(tiff::tags::Tag::Compression)
                 .unwrap(),
             CompressionMethod::Deflate.to_u16()
+        );
+        assert_eq!(
+            decoder
+                .get_tag_unsigned::<u16>(tiff::tags::Tag::Predictor)
+                .unwrap(),
+            2
         );
         assert_eq!(decoder.strip_count().unwrap() as usize, ranges.len());
         let DecodingResult::U16(pixels) = decoder.read_image().unwrap() else {

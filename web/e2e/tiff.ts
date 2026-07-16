@@ -16,6 +16,7 @@ interface TiffLayout {
   width: number;
   height: number;
   samplesPerPixel: number;
+  predictor: number;
   stripOffsets: number[];
   stripByteCounts: number[];
 }
@@ -24,13 +25,11 @@ const SHORT = 3;
 const LONG = 4;
 
 export function decodeRgb16Tiff(bytes: Buffer): TiffImage {
-  const { width, height, samplesPerPixel, stripOffsets, stripByteCounts } =
-    readRgb16TiffLayout(bytes);
+  const layout = readRgb16TiffLayout(bytes);
+  const { width, height, samplesPerPixel, stripOffsets } = layout;
 
   const raw = Buffer.concat(
-    stripOffsets.map((offset, index) =>
-      inflateSync(bytes.subarray(offset, offset + stripByteCounts[index])),
-    ),
+    stripOffsets.map((_, index) => decodeStrip(bytes, layout, index)),
   );
   const expectedBytes = width * height * samplesPerPixel * 2;
   if (raw.byteLength !== expectedBytes)
@@ -62,18 +61,8 @@ export function compareRgb16Tiffs(
   let maxCodeDifference = 0;
   let comparedBytes = 0;
   for (let index = 0; index < actual.stripOffsets.length; index += 1) {
-    const actualStrip = inflateSync(
-      actualBytes.subarray(
-        actual.stripOffsets[index],
-        actual.stripOffsets[index] + actual.stripByteCounts[index],
-      ),
-    );
-    const expectedStrip = inflateSync(
-      expectedBytes.subarray(
-        expected.stripOffsets[index],
-        expected.stripOffsets[index] + expected.stripByteCounts[index],
-      ),
-    );
+    const actualStrip = decodeStrip(actualBytes, actual, index);
+    const expectedStrip = decodeStrip(expectedBytes, expected, index);
     if (actualStrip.length !== expectedStrip.length) {
       throw new Error(`TIFF strip ${index} decoded to different lengths.`);
     }
@@ -121,11 +110,45 @@ function readRgb16TiffLayout(bytes: Buffer): TiffLayout {
     throw new Error("Expected an RGB16 TIFF.");
   if (compression !== 8 && compression !== 32_946)
     throw new Error(`Expected Deflate compression, got ${compression}.`);
-  if (predictor !== 1)
+  if (predictor !== 1 && predictor !== 2)
     throw new Error(`Unsupported TIFF predictor ${predictor}.`);
   if (stripOffsets.length !== stripByteCounts.length)
     throw new Error("TIFF strip offsets and byte counts do not match.");
-  return { width, height, samplesPerPixel, stripOffsets, stripByteCounts };
+  return {
+    width,
+    height,
+    samplesPerPixel,
+    predictor,
+    stripOffsets,
+    stripByteCounts,
+  };
+}
+
+function decodeStrip(bytes: Buffer, layout: TiffLayout, index: number): Buffer {
+  const offset = layout.stripOffsets[index];
+  const strip = inflateSync(
+    bytes.subarray(offset, offset + layout.stripByteCounts[index]),
+  );
+  if (layout.predictor === 1) return strip;
+
+  const rowBytes = layout.width * layout.samplesPerPixel * 2;
+  if (strip.length % rowBytes !== 0)
+    throw new Error(`TIFF strip ${index} contains incomplete rows.`);
+  for (let rowOffset = 0; rowOffset < strip.length; rowOffset += rowBytes) {
+    for (
+      let sampleOffset = layout.samplesPerPixel * 2;
+      sampleOffset < rowBytes;
+      sampleOffset += 2
+    ) {
+      const offset = rowOffset + sampleOffset;
+      const previous = strip.readUInt16LE(offset - layout.samplesPerPixel * 2);
+      strip.writeUInt16LE(
+        (strip.readUInt16LE(offset) + previous) & 0xffff,
+        offset,
+      );
+    }
+  }
+  return strip;
 }
 
 function readIfd(bytes: Buffer): Map<number, number[]> {

@@ -1,10 +1,7 @@
 /// <reference lib="webworker" />
 
 import createLibRaw from "../libraw/libraw.js";
-import initAlchemy, {
-  PreviewRenderer,
-  TiffEncoder,
-} from "../wasm/alchemy_core.js";
+import initAlchemy, { PreviewRenderer, WasmLut } from "../wasm/alchemy_core.js";
 import { describeProcessingError } from "../lib/errors";
 import { sha256Hex } from "../lib/hash";
 import { renderTiffInStrips } from "../lib/tiff-export";
@@ -20,6 +17,9 @@ const context: DedicatedWorkerGlobalScope =
 const runtime = Promise.all([createLibRaw(), initAlchemy()]).then(
   ([module]) => ({ module }),
 );
+// WebKit intermittently corrupts large typed-array WASM arguments. Pack four
+// bytes per scalar call to bypass that binding path while keeping upload cheap.
+const LUT_UPLOAD_WORD_BYTES = 4;
 
 let cached:
   | {
@@ -29,7 +29,7 @@ let cached:
       metadata: PreviewResult["metadata"];
     }
   | undefined;
-let cachedLut: { id: string; bytes: Uint8Array<ArrayBuffer> } | undefined;
+let cachedLut: { id: string; lut: WasmLut } | undefined;
 let decodeCount = 0;
 
 // The comparison panes are display previews, not export surfaces. A 1024px
@@ -80,14 +80,14 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
         }
         const image = previewRaw.imageInfo();
         decodeCount += 1;
-        const cube = await loadLut(data.lut);
+        const lut = await loadLut(data.lut);
         cached = {
           fileId: data.fileId,
           renderer: createPreviewRenderer(
             previewRaw,
             image.width,
             image.height,
-            cube,
+            lut,
           ),
           lutId: data.lut.id,
           metadata: {
@@ -117,7 +117,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       return;
     }
 
-    const cube = await loadLut(data.lut);
+    const lut = await loadLut(data.lut);
     const exportRaw = new module.LibRaw();
     try {
       exportRaw.open(new Uint8Array(data.buffer), false);
@@ -125,7 +125,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       const tiff = renderTiffInStrips(
         image.sampleCount,
         (offset, length) => exportRaw.imageView(offset, length),
-        new TiffEncoder(image.width, image.height, data.ev, cube),
+        lut.create_tiff_encoder(image.width, image.height, data.ev),
       );
       const reply: WorkerReply = {
         requestId: data.requestId,
@@ -154,9 +154,9 @@ function createPreviewRenderer(
   raw: InstanceType<Awaited<ReturnType<typeof createLibRaw>>["LibRaw"]>,
   width: number,
   height: number,
-  cube: Uint8Array<ArrayBuffer>,
+  lut: WasmLut,
 ): PreviewRenderer {
-  const renderer = new PreviewRenderer(width, height, PREVIEW_MAX_EDGE, cube);
+  const renderer = lut.create_preview_renderer(width, height, PREVIEW_MAX_EDGE);
   const rowSamples = width * 3;
   try {
     for (;;) {
@@ -198,9 +198,9 @@ async function renderCached(
       "The selected RAW is not decoded. Select it again to retry.",
     );
   }
-  const cube = await loadLut(lut);
+  const parsedLut = await loadLut(lut);
   if (cached.lutId !== lut.id) {
-    cached.renderer.set_lut(cube);
+    parsedLut.apply_to_renderer(cached.renderer);
     cached.lutId = lut.id;
   }
   const preview = cached.renderer.render(ev);
@@ -229,16 +229,43 @@ function transferablePreviewView(
   return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
-async function loadLut(lut: LutDefinition): Promise<Uint8Array<ArrayBuffer>> {
-  if (cachedLut?.id === lut.id) return cachedLut.bytes;
+async function loadLut(lut: LutDefinition): Promise<WasmLut> {
+  if (cachedLut?.id === lut.id) return cachedLut.lut;
   const response = await fetch(`/luts/${lut.file}`);
   if (!response.ok) throw new Error(`Could not load LUT ${lut.name}.`);
   const bytes = new Uint8Array(await response.arrayBuffer());
   const actual = sha256Hex(bytes);
   if (actual !== lut.sha256)
     throw new Error(`LUT integrity check failed for ${lut.name}.`);
-  cachedLut = { id: lut.id, bytes };
-  return bytes;
+  const parsed = new WasmLut(bytes.length);
+  let complete = false;
+  try {
+    const words = new DataView(
+      bytes.buffer,
+      bytes.byteOffset,
+      bytes.byteLength,
+    );
+    let offset = 0;
+    for (
+      ;
+      offset + LUT_UPLOAD_WORD_BYTES <= bytes.length;
+      offset += LUT_UPLOAD_WORD_BYTES
+    ) {
+      parsed.write_word(offset, words.getUint32(offset, true), 4);
+    }
+    let tail = 0;
+    for (let index = offset; index < bytes.length; index += 1)
+      tail |= bytes[index] << ((index - offset) * 8);
+    if (offset < bytes.length)
+      parsed.write_word(offset, tail, bytes.length - offset);
+    parsed.finish();
+    complete = true;
+  } finally {
+    if (!complete) parsed.free();
+  }
+  cachedLut?.lut.free();
+  cachedLut = { id: lut.id, lut: parsed };
+  return parsed;
 }
 
 function postPreview(requestId: number, result: PreviewResult): void {

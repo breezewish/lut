@@ -2,14 +2,15 @@
 
 - The pinned Python environment rejects mismatched source checkouts and regenerates the committed legacy checkpoint archive and manifest from the hashed RAW and all 27 supported LUT inputs, with separate export and preview results; normal tests verify the committed RAW and archive hashes.
 - Native debug and optimized Rust pass the complete workspace suite against legacy and corrected behavior.
+- Native workspace targets and the WASM-specific `alchemy-core` target pass Clippy with warnings denied in CI.
 - Corrected matrix vectors include direct linear-sRGB output from pinned LibRaw, independently checking the numerical ProPhoto D65 basis.
 - An independent standard-library Python float64 oracle checks corrected-v2 Base and LUT preview, RGB16, and TIFF output without importing the Rust implementation or its constants.
 - A non-affine CUBE fixture produces distinct expected values for every tetrahedral interpolation branch and verifies their shared boundaries.
-- A multi-strip core test proves bounded, contiguous strip rendering and independently decodable Deflate output.
+- A multi-strip core test proves bounded, contiguous strip rendering and independently decodable horizontal-predicted Deflate output.
 - Core tests prove row-fed preview sampling retains exactly the pixels used by the requested display size and rejects incomplete or inconsistent input.
 - A browser adapter test proves export reads only bounded source views and rejects inconsistent encoder strip requests.
 - A browser adapter test drives a 6240 × 4168 export contract while bounding every source view to approximately 1 MB.
-- A production binding check proves LibRaw returns bounded zero-copy RGB16 views instead of a complete JavaScript image, verified LUT bytes use the WASM bulk-array binding, the preview constructor receives no RGB16 image, only requested source rows cross into Rust WASM, EV rerenders receive no source or CUBE data, active-file removal frees the preview renderer, transferred RGBA8 is reinterpreted without another complete Canvas-side copy, and whole-image TIFF export is not exposed.
+- A production binding check proves LibRaw returns bounded zero-copy RGB16 views instead of a complete JavaScript image, verified LUT bytes use ordered scalar words instead of a bulk byte binding, preview and export are created from the cached Rust parse result, preview creation receives no RGB16 image, only requested source rows cross into Rust WASM, EV rerenders receive no source or CUBE data, active-file removal frees the preview renderer, transferred RGBA8 is reinterpreted without another complete Canvas-side copy, and whole-image TIFF export is not exposed.
 - The static production build contains custom LibRaw WASM, Rust core WASM, and all hash-verified creative LUTs.
 - The parity harness requires bounded RGB16 slices to share the LibRaw WASM memory, out-of-bounds views to fail, and native and WASM LibRaw to decode linear DNG, lossy JPEG DNG, real Leica CFA DNG, and Sony ARW fixtures in both full-size and half-size modes to exactly the same dimensions and samples.
 - CLI integration covers readable RGB16 TIFF output, JSON-without-ANSI, forced and suppressed success and error text color, corrupt input, and destination write failure without a false output.
