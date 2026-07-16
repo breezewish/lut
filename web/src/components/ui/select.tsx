@@ -36,7 +36,6 @@ export function Select({
     >
       <SelectPrimitive.Trigger className="select-trigger" aria-label={label}>
         <span className="select-value">
-          <span className="select-value-mark" aria-hidden="true" />
           <SelectPrimitive.Value />
         </span>
         <SelectPrimitive.Icon aria-hidden="true">

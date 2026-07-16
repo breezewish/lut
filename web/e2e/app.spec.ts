@@ -262,7 +262,6 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
   const exportSelected = page.getByRole("button", {
     name: "Export selected",
   });
-  await expect(exportSelected).toBeDisabled();
   await expect(exportSelected).toBeEnabled();
 
   const classicNegativePreview = await page

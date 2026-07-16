@@ -17,6 +17,7 @@ import {
   type ChangeEvent,
   type CSSProperties,
   type DragEvent,
+  startTransition,
   useCallback,
   useEffect,
   useMemo,
@@ -33,9 +34,10 @@ import type { LutManifest, PreviewResult, QueueItem } from "./types";
 
 const RAW_ACCEPT =
   ".3fr,.ari,.arw,.bay,.cap,.cr2,.cr3,.dcr,.dcs,.dng,.drf,.eip,.erf,.fff,.gpr,.iiq,.k25,.kdc,.mdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.pef,.ptx,.pxn,.r3d,.raf,.raw,.rwl,.rw2,.rwz,.sr2,.srf,.srw,.x3f";
-const INTERACTIVE_PREVIEW_MAX_EDGE = 384;
+const INTERACTIVE_PREVIEW_MAX_EDGE = 256;
 const SETTLED_PREVIEW_MAX_EDGE = 1_024;
 const SETTLED_PREVIEW_IDLE_MS = 120;
+const EXPOSURE_PREVIEW_INTERVAL_MS = 50;
 
 const STATUS_LABELS: Record<QueueItem["status"], string> = {
   queued: "Queued",
@@ -177,6 +179,11 @@ export default function App() {
   const [renderedRecipe, setRenderedRecipe] = useState<string>();
   const fileInput = useRef<HTMLInputElement>(null);
   const exposureInput = useRef<HTMLInputElement>(null);
+  const exposureRange = useRef<HTMLInputElement>(null);
+  const exposureCommitTimer = useRef<number | undefined>(undefined);
+  const pendingExposure = useRef(ev);
+  const exposureHasPendingRecipe = useRef(false);
+  const lastExposureCommitAt = useRef(0);
   const stopAfterCurrent = useRef(false);
 
   useEffect(() => {
@@ -184,7 +191,7 @@ export default function App() {
     document.documentElement.style.colorScheme = theme;
     document
       .querySelector('meta[name="theme-color"]')
-      ?.setAttribute("content", theme === "dark" ? "#121012" : "#f2eef1");
+      ?.setAttribute("content", theme === "dark" ? "#121318" : "#eceef2");
     try {
       localStorage.setItem("raw-alchemy-theme", theme);
     } catch {
@@ -215,6 +222,44 @@ export default function App() {
   const updateItem = useCallback((id: string, patch: Partial<QueueItem>) => {
     setItems((current) =>
       current.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+    );
+  }, []);
+
+  const setExposure = useCallback((value: number) => {
+    const next = Math.max(-4, Math.min(4, value));
+    pendingExposure.current = next;
+    exposureHasPendingRecipe.current = true;
+    setRenderedRecipe(undefined);
+    if (exposureCommitTimer.current !== undefined) {
+      window.clearTimeout(exposureCommitTimer.current);
+      exposureCommitTimer.current = undefined;
+    }
+    lastExposureCommitAt.current = performance.now();
+    setEv(next);
+  }, []);
+
+  const scheduleExposurePreview = useCallback((input: HTMLInputElement) => {
+    const next = Number(input.value);
+    pendingExposure.current = next;
+    if (!exposureHasPendingRecipe.current) {
+      exposureHasPendingRecipe.current = true;
+      setRenderedRecipe(undefined);
+    }
+    input.style.setProperty("--range-progress", `${((next + 4) / 8) * 100}%`);
+    input.setAttribute("aria-valuetext", `${next} EV`);
+    if (exposureInput.current) exposureInput.current.value = String(next);
+    if (exposureCommitTimer.current !== undefined) return;
+
+    const elapsed = lastExposureCommitAt.current
+      ? performance.now() - lastExposureCommitAt.current
+      : 0;
+    exposureCommitTimer.current = window.setTimeout(
+      () => {
+        exposureCommitTimer.current = undefined;
+        lastExposureCommitAt.current = performance.now();
+        startTransition(() => setEv(pendingExposure.current));
+      },
+      Math.max(0, EXPOSURE_PREVIEW_INTERVAL_MS - elapsed),
     );
   }, []);
 
@@ -313,6 +358,9 @@ export default function App() {
         if (!active) return;
         decodedFileId.current = selected.id;
         settledBaseRecipe.current = basePreviewRecipeKey(selected.id, ev);
+        if (pendingExposure.current === ev) {
+          exposureHasPendingRecipe.current = false;
+        }
         setRenderedRecipe(decodeRecipe);
         setPreview(mergePreview(undefined, result));
         setCameraPreview(undefined);
@@ -341,7 +389,8 @@ export default function App() {
       !selected ||
       !selectedLut ||
       !hasUsablePreview(selected) ||
-      decodedFileId.current !== selected.id
+      decodedFileId.current !== selected.id ||
+      (exposureHasPendingRecipe.current && pendingExposure.current !== ev)
     )
       return;
     const recipe = previewRecipeKey(selected.id, ev, selectedLut.id);
@@ -385,7 +434,9 @@ export default function App() {
           includeBase,
         });
         if (!active) return;
+        if (pendingExposure.current !== ev) return;
         settledBaseRecipe.current = baseRecipe;
+        exposureHasPendingRecipe.current = false;
         setRenderedRecipe(recipe);
         setPreview((current) => mergePreview(current, settled));
       } catch (error) {
@@ -420,7 +471,24 @@ export default function App() {
     ) {
       exposureInput.current.value = String(ev);
     }
+    if (exposureRange.current && pendingExposure.current === ev) {
+      exposureRange.current.value = String(ev);
+      exposureRange.current.style.setProperty(
+        "--range-progress",
+        `${((ev + 4) / 8) * 100}%`,
+      );
+      exposureRange.current.setAttribute("aria-valuetext", `${ev} EV`);
+    }
   }, [ev]);
+
+  useEffect(
+    () => () => {
+      if (exposureCommitTimer.current !== undefined) {
+        window.clearTimeout(exposureCommitTimer.current);
+      }
+    },
+    [],
+  );
 
   const addFiles = useCallback((files: File[]) => {
     if (files.length === 0) return;
@@ -709,7 +777,11 @@ export default function App() {
           </div>
           <h1>RAW Alchemy</h1>
         </div>
-        <div className="document-context" aria-live="polite">
+        <div
+          className="document-context"
+          aria-label="Current document"
+          aria-live="polite"
+        >
           <strong>{selected?.file.name ?? "Local color workspace"}</strong>
           <span>
             {selected
@@ -941,7 +1013,7 @@ export default function App() {
                       size="icon"
                       variant="quiet"
                       aria-label="Reset exposure"
-                      onClick={() => setEv(0)}
+                      onClick={() => setExposure(0)}
                       disabled={exporting || ev === 0}
                     >
                       <RotateCcw size={15} aria-hidden="true" />
@@ -989,7 +1061,7 @@ export default function App() {
                         onChange={(event) => {
                           const value = event.currentTarget.valueAsNumber;
                           if (Number.isFinite(value)) {
-                            setEv(Math.max(-4, Math.min(4, value)));
+                            setExposure(value);
                           }
                         }}
                         onBlur={(event) => {
@@ -1000,12 +1072,13 @@ export default function App() {
                     </label>
                   </div>
                   <input
+                    ref={exposureRange}
                     id="exposure"
                     type="range"
                     min="-4"
                     max="4"
                     step="0.1"
-                    value={ev}
+                    defaultValue={ev}
                     aria-valuetext={`${ev} EV`}
                     disabled={exporting}
                     style={
@@ -1013,7 +1086,12 @@ export default function App() {
                         "--range-progress": `${((ev + 4) / 8) * 100}%`,
                       } as CSSProperties
                     }
-                    onChange={(event) => setEv(Number(event.target.value))}
+                    onInput={(event) =>
+                      scheduleExposurePreview(event.currentTarget)
+                    }
+                    onChange={(event) =>
+                      scheduleExposurePreview(event.currentTarget)
+                    }
                   />
                   <div className="range-scale" aria-hidden="true">
                     <span>−4</span>

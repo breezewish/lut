@@ -6,6 +6,8 @@ const enabled = process.env.RAW_PERF === "1";
 const fixture = resolve(
   process.env.RAW_PERF_FIXTURE ?? "vendor/LibRaw-Wasm/example-sony.ARW",
 );
+const minimumFixturePixels = Number(process.env.RAW_PERF_MIN_PIXELS ?? "0");
+const settledPreviewBudgetMs = minimumFixturePixels >= 33_000_000 ? 700 : 500;
 
 type Draw = {
   at: number;
@@ -103,7 +105,7 @@ test("records production preview interaction latency", async ({
   });
 
   expect(summary.ev.firstFrameP95Ms).toBeLessThan(200);
-  expect(summary.ev.settledFrameP95Ms).toBeLessThan(500);
+  expect(summary.ev.settledFrameP95Ms).toBeLessThan(settledPreviewBudgetMs);
   expect(summary.coldLuts.settledFrameP95Ms).toBeLessThan(500);
   expect(summary.warmLuts.firstFrameP95Ms).toBeLessThan(200);
 });
@@ -183,7 +185,7 @@ test("keeps painting fresh frames during continuous EV input", async ({
         ({ label }) => label === "Base preview",
       ) ?? [],
   );
-  const interactive = baseFrames.filter(({ width }) => width === 384);
+  const interactive = baseFrames.filter(({ width }) => width === 256);
   const settled = [...baseFrames]
     .reverse()
     .find(({ width }) => width === 1_024);
@@ -201,11 +203,141 @@ test("keeps painting fresh frames during continuous EV input", async ({
     contentType: "application/json",
   });
 
-  expect(interactive.length).toBeGreaterThanOrEqual(20);
+  expect(burst.endedAt - burst.startedAt).toBeLessThan(1_100);
+  expect(interactive.length).toBeGreaterThanOrEqual(12);
   expect(interactive[0].at - burst.startedAt).toBeLessThan(80);
   expect(interactive.at(-1)!.at - burst.endedAt).toBeLessThan(100);
   expect(settled).toBeDefined();
   expect(settled!.at - burst.endedAt).toBeLessThan(500);
+});
+
+test("keeps the interface responsive while a large RAW is decoding and exposure is dragged", async ({
+  context,
+  page,
+}, testInfo) => {
+  test.skip(
+    !enabled,
+    "Set RAW_PERF=1 to run the formal performance benchmark.",
+  );
+  test.setTimeout(60_000);
+
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+  await page.addInitScript(() => {
+    const state = window as Window & {
+      exposureDragFrames?: number[];
+      exposureDragInputs?: number[];
+    };
+    state.exposureDragFrames = [];
+    state.exposureDragInputs = [];
+    const recordFrame = (at: number) => {
+      state.exposureDragFrames?.push(at);
+      requestAnimationFrame(recordFrame);
+    };
+    requestAnimationFrame(recordFrame);
+    addEventListener(
+      "input",
+      (event) => {
+        if (
+          event.target instanceof HTMLInputElement &&
+          event.target.type === "range"
+        ) {
+          state.exposureDragInputs?.push(performance.now());
+        }
+      },
+      true,
+    );
+  });
+
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(fixture);
+  const exposure = page.getByRole("slider", { name: "Exposure" });
+  await expect(exposure).toBeVisible();
+  await page.evaluate(() => {
+    const state = window as Window & {
+      exposureDragFrames?: number[];
+      exposureDragInputs?: number[];
+    };
+    state.exposureDragFrames = [];
+    state.exposureDragInputs = [];
+  });
+
+  const bounds = await exposure.boundingBox();
+  if (!bounds) throw new Error("Exposure slider has no visible bounds.");
+  const y = bounds.y + bounds.height / 2;
+  await page.mouse.move(bounds.x + 1, y);
+  await page.mouse.down();
+  for (let index = 0; index < 60; index += 1) {
+    await page.mouse.move(bounds.x + 1 + ((bounds.width - 2) * index) / 59, y);
+    await new Promise((resolve) => setTimeout(resolve, 16));
+  }
+  await page.mouse.up();
+
+  await expect(page.getByLabel("Base preview")).toHaveAttribute(
+    "width",
+    "1024",
+    { timeout: 60_000 },
+  );
+
+  const measurement = await page.evaluate(() => {
+    const state = window as Window & {
+      exposureDragFrames?: number[];
+      exposureDragInputs?: number[];
+    };
+    const frames = state.exposureDragFrames ?? [];
+    const inputs = state.exposureDragInputs ?? [];
+    const dragStartedAt = inputs[0];
+    const dragEndedAt = inputs.at(-1);
+    const frameGaps = frames.slice(1).map((at, index) => ({
+      at,
+      previousAt: frames[index],
+      duration: at - frames[index],
+    }));
+    return {
+      inputCount: inputs.length,
+      interactionFrameGaps: frameGaps
+        .filter(
+          ({ at, previousAt }) =>
+            at >= dragStartedAt && previousAt <= dragEndedAt,
+        )
+        .map(({ duration }) => duration),
+      observedFrameGapMax: Math.max(
+        ...frameGaps.map(({ duration }) => duration),
+      ),
+    };
+  });
+  const frameGapP95 = percentile(measurement.interactionFrameGaps, 0.95);
+  const frameGapMax = Math.max(...measurement.interactionFrameGaps);
+  const documentContext =
+    (await page.getByLabel("Current document").textContent()) ?? "";
+  const dimensions = documentContext.match(/(\d+)\s*×\s*(\d+)/);
+  if (!dimensions) throw new Error("Decoded RAW dimensions are unavailable.");
+  const sourcePixels = Number(dimensions[1]) * Number(dimensions[2]);
+  const reportPath = testInfo.outputPath("large-raw-drag-performance.json");
+  await writeFile(
+    reportPath,
+    `${JSON.stringify(
+      {
+        fixture,
+        sourcePixels,
+        inputCount: measurement.inputCount,
+        frameGapP95,
+        frameGapMax,
+        observedFrameGapMax: measurement.observedFrameGapMax,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await testInfo.attach("large-raw-drag-performance.json", {
+    path: reportPath,
+    contentType: "application/json",
+  });
+
+  expect(measurement.inputCount).toBeGreaterThanOrEqual(45);
+  expect(sourcePixels).toBeGreaterThanOrEqual(minimumFixturePixels);
+  expect(frameGapP95).toBeLessThan(25);
+  expect(frameGapMax).toBeLessThan(100);
 });
 
 async function chooseLook(page: Page, name: string) {

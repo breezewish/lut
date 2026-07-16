@@ -241,7 +241,7 @@ test("renders only after the exposure recipe changes", async () => {
       expect.objectContaining({
         type: "render",
         ev: 1,
-        maxEdge: 384,
+        maxEdge: 256,
         includeBase: true,
       }),
       expect.objectContaining({

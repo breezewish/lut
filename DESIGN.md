@@ -2,7 +2,7 @@
 
 ## Direction
 
-RAW Alchemy is a precise, flat editing workspace. Its visual language is neutral, compact, and calm so photographs remain dominant. The shell uses no decorative borders, shadows, gradients, or glass effects. A restrained rose accent identifies selection and primary actions; amber is reserved for the unverified LUT output assumption.
+RAW Alchemy is a precise, flat editing workspace. Its visual language is neutral, compact, and calm so photographs remain dominant. The shell uses no decorative borders, shadows, gradients, or glass effects. A restrained spectral-blue accent identifies selection, active values, and primary actions; amber is reserved for the unverified LUT output assumption.
 
 ## Theme
 
@@ -22,7 +22,7 @@ The DOM follows the task order: adjust, compare, then export. Empty state keeps 
 
 ## Color
 
-All color tokens use OKLCH. Neutral surfaces carry structure through value differences rather than outlines. Rose is limited to primary actions, selection, and active state. Green indicates local privacy or completion, red indicates failure, and amber indicates an unverified color assumption. Text and placeholders meet WCAG AA contrast.
+All color tokens use OKLCH. Neutral surfaces carry structure through value differences rather than outlines. Spectral blue is limited to primary actions, selection, and active state. Green indicates local privacy or completion, red indicates failure, and amber indicates an unverified color assumption. Text and placeholders meet WCAG AA contrast.
 
 ## Typography
 
@@ -30,9 +30,9 @@ Use one Inter-compatible system sans family. UI labels and metadata use a compac
 
 ## Components
 
-Buttons use a consistent 8 px radius and a minimum 44 px target. Inputs use a visually compact body inside clear labeled groups. Search, selection, numeric entry, and range controls share dedicated control tokens and authored hover, focus, active, and disabled states instead of browser defaults. Menus render through a portal. A visible spinner in the adjustment header communicates whenever the displayed recipe is still processing. Surfaces use fill changes instead of borders or shadows.
+Buttons use a consistent 6 px radius and 32–36 px desktop body; coarse-pointer targets expand to 44 px. Inputs use a compact 30–34 px body inside clear labeled groups. Search, selection, numeric entry, and range controls share dedicated control tokens and authored hover, focus, active, and disabled states instead of browser defaults. Menus render through a portal. A visible spinner in the adjustment header communicates whenever the displayed recipe is still processing. Surfaces use fill changes instead of borders or shadows.
 
-Progressive preview buffers never define layout size. Every preview Canvas fills a stable image well, so 384 px interaction frames and 1024 px settled frames change clarity without changing geometry.
+Progressive preview buffers never define layout size. Every preview Canvas fills a stable image well, so 256 px edit frames, 384 px initial frames, and 1024 px settled frames change clarity without changing geometry. Native exposure input paints independently while interruptible React transitions submit the latest preview recipe at a bounded rate.
 
 ## Motion
 
