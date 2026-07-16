@@ -52,6 +52,21 @@ export interface LibRawDecodeTimings {
   totalMs: number;
 }
 
+export interface LibRawSensorTimings {
+  inputCopyMs: number;
+  openMs: number;
+  unpackMs: number;
+  mosaicCopyMs: number;
+  totalMs: number;
+}
+
+export interface DemosaicBenchmarkReport {
+  sensor: import("./lib/onnx-demosaic").SensorImageInfo;
+  sensorTimings: LibRawSensorTimings;
+  demosaic: import("./lib/onnx-demosaic").DemosaicResult;
+  workerTotalMs: number;
+}
+
 export interface PreviewTimings {
   libraw: LibRawDecodeTimings;
   previewSourceMs: number;
@@ -131,6 +146,12 @@ export type WorkerCommand =
       lut: LutDefinition;
       colorBackend?: "cpu" | "webgpu" | "onnx";
       validateGpu?: boolean;
+    }
+  | {
+      requestId: number;
+      type: "benchmark-demosaic";
+      buffer: ArrayBuffer;
+      referenceRgb16?: ArrayBuffer;
     };
 
 export type WorkerReply =
@@ -158,6 +179,12 @@ export type WorkerReply =
       fileId: string;
       tiff: Uint8Array;
       timings: ExportTimings;
+    }
+  | {
+      requestId: number;
+      ok: true;
+      type: "demosaic-benchmark";
+      result: DemosaicBenchmarkReport;
     }
   | {
       requestId: number;

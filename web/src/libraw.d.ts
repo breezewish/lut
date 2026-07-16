@@ -43,6 +43,9 @@ declare module "*libraw.js" {
     metadata(): Metadata;
     imageInfo(): DecodedImageInfo;
     imageView(offset: number, length: number): Uint16Array;
+    sensorInfo(): import("./lib/onnx-demosaic").SensorImageInfo;
+    sensorView(offset: number, length: number): Uint16Array;
+    sensorTimings(): import("./types").LibRawSensorTimings;
     timings(): DecodeTimings;
     thumbnailData(): Thumbnail | undefined;
     delete(): void;

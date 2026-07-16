@@ -1,5 +1,6 @@
 import type {
   CameraPreview,
+  DemosaicBenchmarkReport,
   ExportResult,
   LutDefinition,
   PreviewResult,
@@ -157,6 +158,21 @@ export class ProcessingClient {
       return { tiff: reply.tiff, timings: reply.timings };
     }
     throw new Error("Worker returned an unexpected export response.");
+  }
+
+  async benchmarkDemosaic(
+    buffer: ArrayBuffer,
+    referenceRgb16?: ArrayBuffer,
+  ): Promise<DemosaicBenchmarkReport> {
+    const transfer = referenceRgb16 ? [buffer, referenceRgb16] : [buffer];
+    const reply = await this.send(
+      { type: "benchmark-demosaic", buffer, referenceRgb16 },
+      transfer,
+    );
+    if (reply.ok && reply.type === "demosaic-benchmark") return reply.result;
+    throw new Error(
+      "Worker returned an unexpected demosaic benchmark response.",
+    );
   }
 
   dispose(): void {

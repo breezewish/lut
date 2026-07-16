@@ -7,6 +7,7 @@ import { sha256Hex } from "../lib/hash";
 import { renderTiffInGpuStrips, renderTiffInStrips } from "../lib/tiff-export";
 import type { RenderedTiff } from "../lib/tiff-export";
 import { OnnxColorRenderer } from "../lib/onnx-color";
+import { demosaicOnWebGpu } from "../lib/onnx-demosaic";
 import { WebGpuColorRenderer } from "../lib/webgpu-color";
 import type {
   ExportTimings,
@@ -52,7 +53,37 @@ context.onmessage = ({ data }: MessageEvent<WorkerCommand>) => {
 async function handleCommand(data: WorkerCommand): Promise<void> {
   let module: Awaited<ReturnType<typeof createLibRaw>> | undefined;
   try {
-    ({ module } = await runtime);
+    module = (await runtime).module;
+    if (data.type === "benchmark-demosaic") {
+      const workerStartedAt = performance.now();
+      const raw = new module.LibRaw();
+      try {
+        raw.open(new Uint8Array(data.buffer), false);
+        const sensor = raw.sensorInfo();
+        const demosaic = await demosaicOnWebGpu(
+          raw.sensorView(0, sensor.sampleCount),
+          sensor,
+          data.referenceRgb16
+            ? new Uint16Array(data.referenceRgb16)
+            : undefined,
+        );
+        const reply: WorkerReply = {
+          requestId: data.requestId,
+          ok: true,
+          type: "demosaic-benchmark",
+          result: {
+            sensor,
+            sensorTimings: raw.sensorTimings(),
+            demosaic,
+            workerTotalMs: performance.now() - workerStartedAt,
+          },
+        };
+        context.postMessage(reply);
+      } finally {
+        raw.delete();
+      }
+      return;
+    }
     if (data.type === "clear") {
       cached?.renderer.free();
       cached = undefined;

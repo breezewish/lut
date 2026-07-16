@@ -12,10 +12,11 @@
     "build": "npm run assets && npm run libraw-wasm && npm run wasm && tsc -b && vite build",
     "build:pages": "VITE_BASE_PATH=/lut/ npm run build",
     "test": "vitest run",
-    "test:e2e": "npm run build && cargo build --quiet --release -p alchemy-cli && node scripts/check-libraw-parity.mjs && playwright test",
+    "test:e2e": "npm run build && cargo build --quiet --release -p alchemy-cli && node scripts/check-libraw-parity.mjs && node scripts/check-libraw-sensor.mjs && playwright test",
     "test:pages": "npm run build:pages && VITE_BASE_PATH=/lut/ playwright test --config playwright.pages.config.ts",
     "benchmark:libraw": "npm run libraw-wasm && node scripts/benchmark-libraw-algorithms.mjs",
     "benchmark:browser": "RAW_PERF=1 PLAYWRIGHT_HTTP_PORT=${PLAYWRIGHT_HTTP_PORT:-46731} playwright test web/e2e/raw-performance.spec.ts --project=chromium",
+    "benchmark:demosaic": "DEMOSAIC_PERF=1 PLAYWRIGHT_HTTP_PORT=${PLAYWRIGHT_HTTP_PORT:-46731} playwright test web/e2e/demosaic-performance.spec.ts --project=chromium",
     "check": "npm run test && npm run build && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
     "format:check": "prettier --check ."
   },
