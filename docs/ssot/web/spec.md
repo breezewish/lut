@@ -8,6 +8,8 @@ The selected file has side-by-side Base and LUT previews. Changing EV or LUT rer
 
 Export selected downloads one TIFF. Export all processes nonfailed queue entries serially and downloads one ZIP. It reports the current file and position, can stop after the current file, continues past per-file failures, and leaves a completion or partial-success summary. A corrupt file displays product-language recovery actions, disables its selected export, and is skipped by batch export.
 
+Export actions remain disabled until the selected processed preview matches the visible EV and LUT. This prevents an undecoded or stale recipe from being exported before the user has compared it.
+
 A full-resolution export failure shows the concrete error, does not invalidate an already rendered preview, and does not mislabel the RAW as undecodable. The failed file remains eligible for an explicit retry. Removing the selected file or clearing the queue releases its persistent decoded preview cache.
 
 Import, queue selection, EV, and LUT controls are disabled while export is active. This keeps the visible recipe and serial Worker queue stable until the export finishes or stops after the current file.

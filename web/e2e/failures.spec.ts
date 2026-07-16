@@ -6,6 +6,39 @@ import { expect, test } from "@playwright/test";
 
 const linearFixture = resolve("tests/fixtures/linear.dng");
 
+test("export waits until the selected preview matches the visible recipe", async ({
+  page,
+}) => {
+  const bytes = await readFile(linearFixture);
+  let releaseLut!: () => void;
+  const lutGate = new Promise<void>((resolveGate) => {
+    releaseLut = resolveGate;
+  });
+  await page.route("**/*.cube", async (route) => {
+    await lutGate;
+    await route.continue();
+  });
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles([
+    { name: "selected.dng", mimeType: "image/x-adobe-dng", buffer: bytes },
+    { name: "queued.dng", mimeType: "image/x-adobe-dng", buffer: bytes },
+  ]);
+
+  const exportSelected = page.getByRole("button", {
+    name: "Export selected",
+  });
+  const exportAll = page.getByRole("button", { name: "Export all" });
+  await expect(exportSelected).toBeDisabled();
+  await expect(exportAll).toBeDisabled();
+
+  releaseLut();
+  await expect(page.getByLabel("Base preview")).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(exportSelected).toBeEnabled();
+  await expect(exportAll).toBeEnabled();
+});
+
 test("a mismatched LUT fails explicitly and the RAW can be retried", async ({
   page,
 }) => {

@@ -14,7 +14,7 @@ Use pinned native and Emscripten builds of the LibRaw source used by Raw Alchemy
 - Main-thread preview painting reinterprets each transferred RGBA8 result as a clamped Canvas view instead of allocating another complete Base and LUT copy on every rerender.
 - Full exports are sequential; the Worker reads only bounded LibRaw views into a stateful Rust WASM encoder, and fused color processing feeds bounded RGB16 strips to the horizontal-predicted, zlib-rs-backed Deflate TIFF writer without a JavaScript whole-image copy or second full-size source, float, or quantized intermediate.
 - Creative LUTs remain readable CUBE files, are copied only after hash verification, and load on demand.
-- The Worker uploads verified LUT bytes to one Rust-owned asset as ordered four-byte scalar words; Rust validates the transfer and creates preview and export work from one cached CUBE parse result.
+- The Worker passes verified LUT bytes through one WASM binding, and Rust creates preview and export work from one cached CUBE parse result.
 - Unknown LUT output semantics remain visible and unprofiled.
 - The interface follows the flat dark editing system in root `DESIGN.md`.
 - A verified `main` revision is built with one repository base path and published as an immutable GitHub Pages artifact; generated output does not live on a deployment branch.

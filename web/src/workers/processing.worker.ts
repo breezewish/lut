@@ -18,9 +18,6 @@ const context: DedicatedWorkerGlobalScope =
 const runtime = Promise.all([createLibRaw(), initAlchemy()]).then(
   ([module]) => ({ module }),
 );
-// WebKit intermittently corrupts large typed-array WASM arguments. Pack four
-// bytes per scalar call to bypass that binding path while keeping upload cheap.
-const LUT_UPLOAD_WORD_BYTES = 4;
 
 let cached:
   | {
@@ -262,32 +259,7 @@ async function loadLut(lut: LutDefinition): Promise<WasmLut> {
   const actual = sha256Hex(bytes);
   if (actual !== lut.sha256)
     throw new Error(`LUT integrity check failed for ${lut.name}.`);
-  const parsed = new WasmLut(bytes.length);
-  let complete = false;
-  try {
-    const words = new DataView(
-      bytes.buffer,
-      bytes.byteOffset,
-      bytes.byteLength,
-    );
-    let offset = 0;
-    for (
-      ;
-      offset + LUT_UPLOAD_WORD_BYTES <= bytes.length;
-      offset += LUT_UPLOAD_WORD_BYTES
-    ) {
-      parsed.write_word(offset, words.getUint32(offset, true), 4);
-    }
-    let tail = 0;
-    for (let index = offset; index < bytes.length; index += 1)
-      tail |= bytes[index] << ((index - offset) * 8);
-    if (offset < bytes.length)
-      parsed.write_word(offset, tail, bytes.length - offset);
-    parsed.finish();
-    complete = true;
-  } finally {
-    if (!complete) parsed.free();
-  }
+  const parsed = new WasmLut(bytes);
   cachedLut?.lut.free();
   cachedLut = { id: lut.id, lut: parsed };
   return parsed;

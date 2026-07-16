@@ -42,7 +42,7 @@ LibRaw WASM is built in `emscripten/emsdk:5.0.7` with C++17, portable O3 arithme
 
 The production bundle is a static GitHub Pages project site. Vite's configurable base path prefixes the entry bundle, Worker, WASM, manifest, and LUT requests consistently. A `main` push deploys only after the complete verification job succeeds; GitHub's Pages artifact and deployment actions publish `dist/` without a generated branch.
 
-The Worker verifies each LUT's SHA-256 over the fetched bytes and uploads those same bytes to one Rust-owned LUT asset as ordered four-byte scalar words. Rust validates the declared length and offsets before validating UTF-8 and parsing CUBE data once. Preview and export are created from that cached parse result, so the browser neither materializes a second megabyte-scale LUT string nor depends on browser-sensitive bulk byte bindings.
+The Worker verifies each LUT's SHA-256 over the fetched bytes and passes that byte array through one WASM binding. Rust validates UTF-8 and parses CUBE data once while the binding slice is alive. Preview and export are created from that cached parse result, so the browser neither materializes a second megabyte-scale LUT string nor performs hundreds of thousands of scalar binding calls.
 
 ## Alternatives
 

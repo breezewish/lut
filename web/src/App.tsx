@@ -98,7 +98,7 @@ export default function App() {
     }
   });
   const decodedFileId = useRef<string | undefined>(undefined);
-  const renderedRecipe = useRef<string | undefined>(undefined);
+  const [renderedRecipe, setRenderedRecipe] = useState<string>();
   const fileInput = useRef<HTMLInputElement>(null);
   const exposureInput = useRef<HTMLInputElement>(null);
   const stopAfterCurrent = useRef(false);
@@ -106,6 +106,16 @@ export default function App() {
   const selected = items.find((item) => item.id === selectedId);
   const selectedLut = manifest?.luts.find((lut) => lut.id === lutId);
   const exportableItems = items.filter((item) => !isDecodeFailure(item));
+  const currentRecipe =
+    selected && selectedLut
+      ? previewRecipeKey(selected.id, ev, selectedLut.id)
+      : undefined;
+  const canStartExport = Boolean(
+    selected &&
+      selectedLut &&
+      hasUsablePreview(selected) &&
+      renderedRecipe === currentRecipe,
+  );
 
   const updateItem = useCallback((id: string, patch: Partial<QueueItem>) => {
     setItems((current) =>
@@ -115,7 +125,7 @@ export default function App() {
 
   const releasePreview = useCallback(() => {
     decodedFileId.current = undefined;
-    renderedRecipe.current = undefined;
+    setRenderedRecipe(undefined);
     setPreview(undefined);
     setCameraPreview(undefined);
     void client.clear().catch((error: Error) => setGlobalError(error.message));
@@ -173,7 +183,7 @@ export default function App() {
     let active = true;
     const decodeRecipe = previewRecipeKey(selected.id, ev, selectedLut.id);
     decodedFileId.current = undefined;
-    renderedRecipe.current = undefined;
+    setRenderedRecipe(undefined);
     setPreview(undefined);
     setCameraPreview(undefined);
     setGlobalError(undefined);
@@ -188,7 +198,7 @@ export default function App() {
       .then((result) => {
         if (!active) return;
         decodedFileId.current = selected.id;
-        renderedRecipe.current = decodeRecipe;
+        setRenderedRecipe(decodeRecipe);
         setPreview(result);
         setCameraPreview(undefined);
         updateItem(selected.id, {
@@ -220,14 +230,14 @@ export default function App() {
     )
       return;
     const recipe = previewRecipeKey(selected.id, ev, selectedLut.id);
-    if (renderedRecipe.current === recipe) return;
+    if (renderedRecipe === recipe) return;
     let active = true;
     const timer = window.setTimeout(() => {
       client
         .render(selected.id, ev, selectedLut)
         .then((result) => {
           if (active) {
-            renderedRecipe.current = recipe;
+            setRenderedRecipe(recipe);
             setPreview(result);
           }
         })
@@ -239,7 +249,14 @@ export default function App() {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [client, ev, selected?.id, selected?.status, selectedLut?.id]);
+  }, [
+    client,
+    ev,
+    renderedRecipe,
+    selected?.id,
+    selected?.status,
+    selectedLut?.id,
+  ]);
 
   useEffect(() => {
     if (
@@ -327,7 +344,7 @@ export default function App() {
 
   const exportItems = async (targets: QueueItem[]) => {
     const eligibleTargets = targets.filter((item) => !isDecodeFailure(item));
-    if (!selectedLut || eligibleTargets.length === 0) return;
+    if (!selectedLut || !canStartExport || eligibleTargets.length === 0) return;
     setExporting(true);
     setGlobalError(undefined);
     setExportSummary(undefined);
@@ -558,7 +575,7 @@ export default function App() {
             <Button
               onClick={() => void exportItems(items)}
               disabled={
-                exportableItems.length === 0 || exporting || !selectedLut
+                exportableItems.length === 0 || exporting || !canStartExport
               }
             >
               <ImageDown size={17} aria-hidden="true" />
@@ -928,7 +945,7 @@ export default function App() {
                   variant={items.length > 1 ? "secondary" : "primary"}
                   onClick={() => void exportItems([selected])}
                   disabled={
-                    isDecodeFailure(selected) || exporting || !selectedLut
+                    isDecodeFailure(selected) || exporting || !canStartExport
                   }
                 >
                   Export selected

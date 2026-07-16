@@ -86,7 +86,18 @@ test("renders only after the exposure recipe changes", async () => {
     postMessage(command: Command) {
       this.commands.push(command);
       if (command.type !== "decode" && command.type !== "render") return;
+      if (command.type === "decode") return;
 
+      this.replyPreview(command);
+    }
+
+    replyToDecode() {
+      const command = this.commands.find(({ type }) => type === "decode");
+      if (!command) throw new Error("No decode command is waiting");
+      this.replyPreview(command);
+    }
+
+    private replyPreview(command: Command) {
       const red = command.type === "decode" ? 20 : 100 + command.ev!;
       queueMicrotask(() =>
         this.onmessage?.(
@@ -157,9 +168,15 @@ test("renders only after the exposure recipe changes", async () => {
   fireEvent.change(container.querySelector('input[type="file"]')!, {
     target: { files: [raw] },
   });
+  const exportButton = await screen.findByRole("button", {
+    name: "Export selected",
+  });
+  expect(exportButton).toBeDisabled();
+  RecipeWorker.instance.replyToDecode();
   await waitFor(() =>
     expect(screen.getByLabelText("Base preview")).toBeVisible(),
   );
+  expect(exportButton).toBeEnabled();
 
   await new Promise((resolve) => window.setTimeout(resolve, 260));
   expect(
@@ -169,10 +186,12 @@ test("renders only after the exposure recipe changes", async () => {
   fireEvent.change(screen.getByRole("slider", { name: "Exposure" }), {
     target: { value: "1" },
   });
+  expect(exportButton).toBeDisabled();
   await waitFor(() =>
     expect(
       RecipeWorker.instance.commands.filter(({ type }) => type === "render"),
     ).toEqual([expect.objectContaining({ type: "render", ev: 1 })]),
   );
   await waitFor(() => expect(paintedRedValues.slice(-2)).toEqual([101, 102]));
+  expect(exportButton).toBeEnabled();
 });

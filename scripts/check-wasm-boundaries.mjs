@@ -23,18 +23,13 @@ function methodBody(signature) {
 const previewConstructor = methodBody(
   "create_preview_renderer(source_width, source_height, max_edge)",
 );
-const lutWrite = methodBody("write_word(offset, word, length)");
 const previewWrite = methodBody("write_source_row(pixels)");
+const lutConstructor = methodBody("constructor(cube)");
 const previewRender = methodBody("render(ev)");
 const tiffConstructor = methodBody("create_tiff_encoder(width, height, ev)");
 const tiffRender = methodBody("render_strip(pixels)");
 const tiffWrite = methodBody("write_strip()");
 
-if (lutWrite.includes("passArray8ToWasm0")) {
-  throw new Error(
-    "LUT upload unexpectedly copies bytes through a bulk binding.",
-  );
-}
 if (
   previewConstructor.includes("passArray8ToWasm0") ||
   tiffConstructor.includes("passArray8ToWasm0")
@@ -42,6 +37,9 @@ if (
   throw new Error(
     "Preview or TIFF construction unexpectedly copies a complete CUBE document.",
   );
+}
+if (!lutConstructor.includes("passArray8ToWasm0(cube")) {
+  throw new Error("LUT construction no longer uses one byte-array binding.");
 }
 if (previewConstructor.includes("passArray16ToWasm0")) {
   throw new Error(
@@ -79,14 +77,11 @@ if (worker.includes(".imageData(")) {
 if (!worker.includes(".imageView(")) {
   throw new Error("The Worker no longer reads bounded LibRaw RGB16 views.");
 }
-if (
-  !worker.includes("LUT_UPLOAD_WORD_BYTES = 4") ||
-  !worker.includes("words.getUint32(offset, true)") ||
-  !worker.includes("parsed.write_word(offset")
-) {
-  throw new Error(
-    "The Worker no longer uploads verified LUTs through scalar WASM words.",
-  );
+if (!worker.includes("new WasmLut(bytes)")) {
+  throw new Error("LUT loading must use one hash-verified byte-array binding.");
+}
+if (worker.includes("parsed.write_")) {
+  throw new Error("The Worker must not issue repeated LUT upload calls.");
 }
 if (
   !worker.includes('data.type === "clear"') ||

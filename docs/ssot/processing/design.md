@@ -10,7 +10,7 @@ Corrected processing uses f32 throughout and maps cleanly to WASM SIMD. Legacy p
 
 Native and WASM LibRaw builds use signed `char`, define signed-integer overflow as two's-complement wrapping, disable implicit floating-point contraction, and replace upstream `postprocessing_utils.cpp` with the pinned local copy in `alchemy-libraw`. Only the final color-matrix dot products differ: their fused operation order is explicit, so WASM reproduces the native/Python RGB16 result exactly. AAHD is compiled with a narrow project-owned math override that promotes its float gamma-table power operation to double; this removes target-libm rounding differences while leaving its existing double operation unchanged. Defined wrapping is also part of the decode contract because AAHD gradient squares can overflow `int`; without it, native and WASM compilers may choose different interpolation directions.
 
-Browser LUT loading verifies SHA-256 over the fetched bytes and uploads those exact bytes to one Rust-owned LUT asset as ordered four-byte scalar words. Rust validates the declared length and offsets before validating UTF-8 and parsing CUBE data once. Preview and export are created from that cached parse result. The browser never materializes a second megabyte-scale LUT string or depends on browser-sensitive bulk byte bindings.
+Browser LUT loading verifies SHA-256 over the fetched bytes and passes that byte array through one WASM binding. Rust validates UTF-8 and parses CUBE data once while the binding slice is alive. Preview and export are created from that cached parse result. The browser never materializes a second megabyte-scale LUT string or issues one binding call per uploaded word.
 
 ## Memory
 
