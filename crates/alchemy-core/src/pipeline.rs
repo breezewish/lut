@@ -211,6 +211,11 @@ mod tests {
     use std::io::Cursor;
     use std::path::Path;
 
+    use ::tiff::{
+        ColorType,
+        decoder::{Decoder, DecodingResult},
+        tags::CompressionMethod,
+    };
     use ndarray::{Array3, Array4, Axis};
     use ndarray_npy::NpzReader;
     use serde::Deserialize;
@@ -222,6 +227,8 @@ mod tests {
     const HALF_GRAY_2: &str = "LUT_3D_SIZE 2\n0.5 0.5 0.5\n0.5 0.5 0.5\n0.5 0.5 0.5\n0.5 0.5 0.5\n0.5 0.5 0.5\n0.5 0.5 0.5\n0.5 0.5 0.5\n0.5 0.5 0.5\n";
     const LEGACY_BASELINE: &[u8] =
         include_bytes!("../../../baselines/legacy-python-v1/linear-all-looks-ev0.npz");
+    const CORRECTED_REFERENCE: &str =
+        include_str!("../../../tests/fixtures/corrected-v2-reference.json");
     const RAW: &[u8] = include_bytes!("../../../tests/fixtures/linear.dng");
     const LUT_MANIFEST: &str = include_str!("../../../assets/luts.json");
 
@@ -234,6 +241,25 @@ mod tests {
     struct LutAsset {
         id: String,
         file: String,
+    }
+
+    #[derive(Deserialize)]
+    struct CorrectedReference {
+        schema_version: u32,
+        cube: String,
+        cases: Vec<CorrectedReferenceCase>,
+    }
+
+    #[derive(Deserialize)]
+    struct CorrectedReferenceCase {
+        name: String,
+        ev: f32,
+        width: u32,
+        height: u32,
+        pixels: Vec<u16>,
+        base_rgba: Vec<u8>,
+        lut_rgba: Vec<u8>,
+        lut_rgb16: Vec<u16>,
     }
 
     #[test]
@@ -312,6 +338,50 @@ mod tests {
         assert_eq!(quantize_u16(0.5, ProcessingMode::CorrectedV2), 32_768);
         assert_eq!(quantize_u16(0.5, ProcessingMode::LegacyPythonV1), 32_767);
         assert_eq!(quantize_u16(2.0, ProcessingMode::CorrectedV2), 65_535);
+    }
+
+    #[test]
+    fn corrected_pipeline_matches_independent_float64_reference() {
+        let reference: CorrectedReference = serde_json::from_str(CORRECTED_REFERENCE).unwrap();
+        assert_eq!(reference.schema_version, 1);
+        let lut = Lut3d::parse(&reference.cube).unwrap();
+
+        for case in reference.cases {
+            let pipeline =
+                ColorPipeline::new(case.ev, ProcessingMode::CorrectedV2, lut.clone()).unwrap();
+            let preview = pipeline
+                .render_preview(
+                    &case.pixels,
+                    case.width,
+                    case.height,
+                    case.width.max(case.height),
+                )
+                .unwrap();
+            assert_code_values_close(&case.name, &preview.base_rgba, &case.base_rgba);
+            assert_code_values_close(&case.name, &preview.lut_rgba, &case.lut_rgba);
+
+            let rgb16 = pipeline
+                .render_rgb16(&case.pixels, case.width, case.height)
+                .unwrap();
+            assert_code_values_close(&case.name, &rgb16, &case.lut_rgb16);
+
+            let encoded = pipeline
+                .render_tiff(&case.pixels, case.width, case.height)
+                .unwrap();
+            let mut decoder = Decoder::new(Cursor::new(encoded)).unwrap();
+            assert_eq!(decoder.dimensions().unwrap(), (case.width, case.height));
+            assert_eq!(decoder.colortype().unwrap(), ColorType::RGB(16));
+            assert_eq!(
+                decoder
+                    .get_tag_unsigned::<u16>(::tiff::tags::Tag::Compression)
+                    .unwrap(),
+                CompressionMethod::Deflate.to_u16()
+            );
+            let DecodingResult::U16(tiff_rgb16) = decoder.read_image().unwrap() else {
+                panic!("{} TIFF did not decode to RGB16", case.name);
+            };
+            assert_code_values_close(&case.name, &tiff_rgb16, &case.lut_rgb16);
+        }
     }
 
     #[test]
@@ -470,6 +540,24 @@ mod tests {
             assert!(
                 (actual[channel] - expected[channel]).abs() <= tolerance,
                 "{label}: actual={actual:?}, expected={expected:?}"
+            );
+        }
+    }
+
+    fn assert_code_values_close<T>(label: &str, actual: &[T], expected: &[T])
+    where
+        T: Copy + std::fmt::Debug + Ord + std::ops::Sub<Output = T> + From<u8>,
+    {
+        assert_eq!(actual.len(), expected.len(), "{label}");
+        for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+            let difference = if actual >= expected {
+                *actual - *expected
+            } else {
+                *expected - *actual
+            };
+            assert!(
+                difference <= T::from(1),
+                "{label} differs at {index}: actual={actual:?}, expected={expected:?}"
             );
         }
     }

@@ -326,6 +326,64 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
   ).toBeDisabled();
 });
 
+test("batch export continues after a corrupt file without contaminating later output", async ({
+  page,
+}) => {
+  const [linearBytes, lossyBytes] = await Promise.all([
+    readFile(linearFixture),
+    readFile(lossyFixture),
+  ]);
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles([
+    {
+      name: "before.dng",
+      mimeType: "image/x-adobe-dng",
+      buffer: linearBytes,
+    },
+    {
+      name: "broken.dng",
+      mimeType: "image/x-adobe-dng",
+      buffer: Buffer.from("not a raw file"),
+    },
+    {
+      name: "after.dng",
+      mimeType: "image/x-adobe-dng",
+      buffer: lossyBytes,
+    },
+  ]);
+  await expect(page.getByLabel("Base preview")).toBeVisible({
+    timeout: 20_000,
+  });
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export all" }).click();
+  const download = await downloadPromise;
+  const archivePath = await download.path();
+  expect(archivePath).not.toBeNull();
+  const archive = unzipSync(new Uint8Array(await readFile(archivePath!)));
+  expect(Object.keys(archive).sort()).toEqual([
+    "after-fuji-classic-negative.tif",
+    "before-fuji-classic-negative.tif",
+  ]);
+  expect(
+    decodeRgb16Tiff(Buffer.from(archive["before-fuji-classic-negative.tif"]))
+      .width,
+  ).toBe(64);
+  expect(
+    decodeRgb16Tiff(Buffer.from(archive["after-fuji-classic-negative.tif"]))
+      .width,
+  ).toBe(256);
+  await expect(
+    page.getByText("Exported 2 of 3. Skipped 1. Failed: broken.dng."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /broken\.dng.*Failed/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /after\.dng.*Exported/ }),
+  ).toBeVisible();
+});
+
 test("batch export stops after the active file", async ({ page }) => {
   const bytes = await readFile(lossyFixture);
   await page.goto("/");

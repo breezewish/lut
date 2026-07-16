@@ -20,7 +20,7 @@ The browser uses one Dedicated Worker. It hosts a custom, single-threaded LibRaw
 
 - Decoded input is interleaved RGB16 in explicitly named `LibRaw ProPhoto D65 Linear`. Its numerical basis is defined by pinned LibRaw's `prophoto_rgb` transform, not by assigning a D65 white point to nominal ProPhoto primaries.
 - Browser and native LibRaw builds use source revision `0029e79482c3a133d3de72ff51117ca7d0a4ff43` and libjpeg-turbo revision `4e151a4ad91001b3aa8c2ece2205c15f487ce320`. Both use Blend highlight mode, camera white balance, AAHD, 16-bit output, linear gamma, and no auto-brightening.
-- Both LibRaw builds replace one pinned post-processing source unit with an otherwise identical local copy whose color-matrix dot products use explicit fused multiply-add order. This preserves the native/Python result exactly on WASM, which has no scalar hardware FMA.
+- Both LibRaw builds use signed `char` and disable implicit floating-point contraction. They replace one pinned post-processing source unit with an otherwise identical local copy whose color-matrix dot products use explicit fused multiply-add order, and compile AAHD with a narrow override that promotes its float gamma-table power operation to double. These constraints remove compiler and C-library variation while preserving intentional fused operations.
 - The canonical core is single-threaded f32 WASM SIMD and never uses `fast-math`.
 - Preview and export share one pipeline; only input resolution and output sink differ.
 - TIFF output is Deflate-compressed RGB16 and never creates a full-size float or quantized image.
@@ -38,7 +38,7 @@ The browser uses one Dedicated Worker. It hosts a custom, single-threaded LibRaw
 
 ## Operational design
 
-LibRaw WASM is built in `emscripten/emsdk:5.0.7` with C++17, portable O3 arithmetic, explicit color-matrix FMA, one worker environment, memory growth, and exception handling. Its JPEG dependency is built from the same pinned libjpeg-turbo source as native decoding. Build IDs include the LibRaw and libjpeg-turbo revisions, project-owned wrapper and FMA override content hashes, and toolchain revision. The separate Rust color core enables WASM SIMD. Rust is pinned by `rust-toolchain.toml`; JavaScript and Python baseline dependencies use lockfiles. A stateful WASM TIFF encoder declares the exact next source-strip size, validates every write, and emits each compressed block immediately. The final encoded `Vec` remains necessary for the current Rust/WASM return contract.
+LibRaw WASM is built in `emscripten/emsdk:5.0.7` with C++17, portable O3 arithmetic, signed `char`, disabled implicit contraction, explicit color-matrix FMA, one worker environment, memory growth, and exception handling. Its JPEG dependency is built from the same pinned libjpeg-turbo source as native decoding. Build IDs include the LibRaw and libjpeg-turbo revisions, project-owned wrapper, FMA override, AAHD math override content hashes, and toolchain revision. The separate Rust color core enables WASM SIMD. Rust is pinned by `rust-toolchain.toml`; JavaScript and Python baseline dependencies use lockfiles. A stateful WASM TIFF encoder declares the exact next source-strip size, validates every write, and emits each compressed block immediately. The final encoded `Vec` remains necessary for the current Rust/WASM return contract.
 
 ## Alternatives
 

@@ -75,7 +75,27 @@ test("a full-resolution Sony ARW export matches the native pipeline", async ({
 }) => {
   test.setTimeout(120_000);
   const nativeOutput = test.info().outputPath("sony-fx30-native.tif");
-  const nativeExport = execFileAsync(resolve("target/release/alchemy"), [
+
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(sonyArw);
+  await expect(page.getByText("SONY ILME-FX30")).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByLabel("Base preview")).toBeVisible();
+  const preview = page.getByRole("region", {
+    name: "Base and LUT comparison",
+  });
+  await expect(preview).toHaveAttribute("data-decode-count", "1");
+
+  const startedAt = Date.now();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export selected" }).click();
+  const download = await downloadPromise;
+  expect(Date.now() - startedAt).toBeLessThan(30_000);
+  const browserOutput = await download.path();
+  expect(browserOutput).not.toBeNull();
+
+  await execFileAsync(resolve("target/release/alchemy"), [
     sonyArw,
     nativeOutput,
     "--lut",
@@ -84,24 +104,23 @@ test("a full-resolution Sony ARW export matches the native pipeline", async ({
     "never",
   ]);
 
-  await page.goto("/");
-  await page.locator('input[type="file"]').setInputFiles(sonyArw);
-  await expect(page.getByText("SONY ILME-FX30")).toBeVisible({
-    timeout: 30_000,
-  });
-  await expect(page.getByLabel("Base preview")).toBeVisible();
-
-  const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
-  const download = await downloadPromise;
-  const browserOutput = await download.path();
-  expect(browserOutput).not.toBeNull();
-  await nativeExport;
-
   const comparison = compareRgb16Tiffs(
     await readFile(browserOutput!),
     await readFile(nativeOutput),
   );
   expect([comparison.width, comparison.height]).toEqual([6_240, 4_168]);
   expect(comparison.maxCodeDifference).toBeLessThanOrEqual(1);
+
+  const previewBeforeRerender = await page
+    .getByLabel("Base preview")
+    .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
+  await page.getByRole("slider", { name: "Exposure" }).fill("0.5");
+  await expect
+    .poll(() =>
+      page
+        .getByLabel("Base preview")
+        .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
+    )
+    .not.toBe(previewBeforeRerender);
+  await expect(preview).toHaveAttribute("data-decode-count", "1");
 });

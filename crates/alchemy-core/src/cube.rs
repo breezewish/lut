@@ -282,23 +282,58 @@ DOMAIN_MAX 1 1 1
 1 1 1
 "#;
 
+    // Deliberately non-affine: c111 cannot be reconstructed from the other
+    // seven vertices. Unlike an identity LUT, this fixture makes each
+    // tetrahedron select a measurably different interpolation path.
+    const NON_AFFINE_2: &str = r"
+LUT_3D_SIZE 2
+0.01 0.02 0.03
+0.11 0.12 0.13
+0.21 0.22 0.23
+0.31 0.32 0.33
+0.41 0.42 0.43
+0.51 0.52 0.53
+0.61 0.62 0.63
+0.91 0.92 0.93
+";
+
     #[test]
-    fn parses_red_fastest_and_interpolates_all_six_tetrahedra() {
+    fn parses_red_fastest() {
         let lut = Lut3d::parse(IDENTITY_2).unwrap();
-        for input in [
-            [0.8, 0.5, 0.2],
-            [0.8, 0.2, 0.5],
-            [0.5, 0.2, 0.8],
-            [0.5, 0.8, 0.2],
-            [0.2, 0.8, 0.5],
-            [0.2, 0.5, 0.8],
-            [0.5, 0.5, 0.2],
-            [0.2, 0.5, 0.5],
-            [0.5, 0.2, 0.5],
-        ] {
+        for input in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] {
             let actual = lut.sample(input);
             for channel in 0..3 {
                 assert!((actual[channel] - input[channel]).abs() < 2.0e-7);
+            }
+        }
+    }
+
+    #[test]
+    fn interpolates_all_six_tetrahedra_and_their_boundaries() {
+        let lut = Lut3d::parse(NON_AFFINE_2).unwrap();
+
+        // Expected values were independently expanded from the barycentric
+        // weights for each tetrahedron. A branch-insensitive identity LUT
+        // cannot serve as the oracle for this test.
+        for (input, expected_red) in [
+            ([0.8, 0.5, 0.2], 0.31), // r >= g >= b
+            ([0.8, 0.2, 0.5], 0.37), // r >= b >= g
+            ([0.5, 0.2, 0.8], 0.46), // b >= r >= g
+            ([0.5, 0.8, 0.2], 0.34), // g >= r >= b
+            ([0.2, 0.8, 0.5], 0.43), // g >= b >= r
+            ([0.2, 0.5, 0.8], 0.49), // b >= g >= r
+            ([0.6, 0.6, 0.2], 0.31), // r = g > b
+            ([0.6, 0.2, 0.6], 0.39), // r = b > g
+            ([0.2, 0.6, 0.6], 0.43), // g = b > r
+            ([0.5, 0.5, 0.5], 0.46), // shared diagonal
+        ] {
+            let actual = lut.sample(input);
+            for (channel, expected) in
+                actual
+                    .into_iter()
+                    .zip([expected_red, expected_red + 0.01, expected_red + 0.02])
+            {
+                assert!((channel - expected).abs() < 2.0e-7, "input={input:?}");
             }
         }
     }
@@ -310,6 +345,24 @@ DOMAIN_MAX 1 1 1
         for (actual, expected) in actual.into_iter().zip([0.0, 0.4, 1.0]) {
             assert!((actual - expected).abs() < 2.0e-7);
         }
+    }
+
+    #[test]
+    fn maps_non_default_domain_before_sampling() {
+        let source = IDENTITY_2
+            .replace("DOMAIN_MIN 0 0 0", "DOMAIN_MIN -1 -2 -3")
+            .replace("DOMAIN_MAX 1 1 1", "DOMAIN_MAX 1 2 5");
+        let lut = Lut3d::parse(&source).unwrap();
+        let actual = lut.sample([0.0, 0.0, 1.0]);
+        for (channel, expected) in actual.into_iter().zip([0.5, 0.5, 0.5]) {
+            assert!((channel - expected).abs() < 2.0e-7);
+        }
+
+        let invalid = source.replace("DOMAIN_MAX 1 2 5", "DOMAIN_MAX -1 2 5");
+        assert!(matches!(
+            Lut3d::parse(&invalid).unwrap_err(),
+            AlchemyError::InvalidCube { .. }
+        ));
     }
 
     #[test]

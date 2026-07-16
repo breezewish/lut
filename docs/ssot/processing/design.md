@@ -8,7 +8,7 @@ The C ABI exposes only corrected-v2 TIFF rendering. It returns a status plus a R
 
 Corrected processing uses f32 throughout and maps cleanly to WASM SIMD. Legacy processing has isolated f64 matrix and LUT-coordinate operations only where required to match the Python baseline.
 
-Native and WASM LibRaw builds replace upstream `postprocessing_utils.cpp` with the pinned local copy in `alchemy-libraw`. The final color-matrix dot products use an explicit fused operation order, and both builds disable implicit floating-point contraction throughout LibRaw. This makes LinearRaw, half-size CFA decode, and the interior of full-size CFA decode sample-exact across targets. Upstream AAHD still chooses a different result for one outer-edge pixel of the pinned Leica fixture; the parity contract isolates and bounds that edge behavior rather than treating the complete image as exact.
+Native and WASM LibRaw builds use signed `char`, disable implicit floating-point contraction, and replace upstream `postprocessing_utils.cpp` with the pinned local copy in `alchemy-libraw`. Only the final color-matrix dot products differ: their fused operation order is explicit, so WASM reproduces the native/Python RGB16 result exactly. AAHD is compiled with a narrow project-owned math override that promotes its float gamma-table power operation to double; this removes target-libm rounding differences while leaving its existing double operation unchanged. Pinned full-size Leica AAHD output still differs at one outer-edge pixel; the parity contract isolates and bounds that upstream edge behavior while requiring the complete interior and every other corpus mode to be exact.
 
 ## Memory
 

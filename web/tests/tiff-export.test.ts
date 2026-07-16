@@ -49,3 +49,38 @@ test("rejects an encoder strip contract that exceeds the source image", () => {
   );
   expect(free).toHaveBeenCalledOnce();
 });
+
+test("keeps a full-resolution camera export on bounded source views", () => {
+  const sampleCount = 6_240 * 4_168 * 3;
+  const stripSamples = 500_000;
+  let offset = 0;
+  let largestView = 0;
+  let viewCount = 0;
+  const encoder: StripTiffEncoder = {
+    next_strip_samples: () =>
+      Math.min(stripSamples, Math.max(0, sampleCount - offset)),
+    write_strip: (strip) => {
+      offset += strip.length;
+    },
+    finish: () => new Uint8Array([73, 73, 42, 0]),
+    free: vi.fn(),
+  };
+
+  renderTiffInStrips(
+    sampleCount,
+    (_offset, length) => {
+      largestView = Math.max(largestView, length);
+      viewCount += 1;
+      return new Uint16Array(length);
+    },
+    encoder,
+  );
+
+  expect(offset).toBe(sampleCount);
+  expect(largestView).toBe(stripSamples);
+  expect(largestView * Uint16Array.BYTES_PER_ELEMENT).toBeLessThanOrEqual(
+    1_000_000,
+  );
+  expect(viewCount).toBeGreaterThan(100);
+  expect(encoder.free).not.toHaveBeenCalled();
+});
