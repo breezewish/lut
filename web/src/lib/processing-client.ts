@@ -164,18 +164,29 @@ export class ProcessingClient {
     buffer: ArrayBuffer,
     referenceRgb16?: ArrayBuffer,
   ): Promise<DemosaicBenchmarkReport> {
+    const search = new URLSearchParams(location.search);
+    const requestedBackend = search.get("demosaicBackend");
     const demosaicBackend =
-      new URLSearchParams(location.search).get("demosaicBackend") ===
-      "native-wgsl"
-        ? "native-wgsl"
+      requestedBackend === "native-wgsl" ||
+      requestedBackend === "libraw-aahd-wgsl"
+        ? requestedBackend
         : "onnx";
+    const requestedStage = search.get("demosaicOutputStage");
     const demosaicOutputStage =
-      new URLSearchParams(location.search).get("demosaicOutputStage") ===
-      "demosaic"
-        ? "demosaic"
-        : "identity-lut";
-    const completeExport =
-      new URLSearchParams(location.search).get("completeExport") === "1";
+      demosaicBackend === "libraw-aahd-wgsl"
+        ? requestedStage === "horizontal" ||
+          requestedStage === "vertical" ||
+          requestedStage === "directions" ||
+          requestedStage === "aahd"
+          ? requestedStage
+          : "final"
+        : demosaicBackend === "native-wgsl"
+          ? requestedStage === "demosaic"
+            ? "demosaic"
+            : "identity-lut"
+          : "demosaic";
+    const completeExport = search.get("completeExport") === "1";
+    const librawReference = search.get("librawReference") === "1";
     const transfer = referenceRgb16 ? [buffer, referenceRgb16] : [buffer];
     const reply = await this.send(
       {
@@ -185,6 +196,7 @@ export class ProcessingClient {
         demosaicBackend,
         demosaicOutputStage,
         completeExport,
+        librawReference,
       },
       transfer,
     );

@@ -10,9 +10,11 @@ readonly JPEG_COMMIT="4e151a4ad91001b3aa8c2ece2205c15f487ce320"
 readonly FMA_OVERRIDE_SHA256="4d17be3e69bd0995410c07181ea56f35353ee60aa47bfe2d874ff687f593a146"
 readonly AAHD_MATH_SHA256="4e06458a46291439b3c3db0571fcb0a29d9d3a2ed4be75d98b9b2e46529cc7f2"
 readonly BROWSER_WRAPPER_SHA256="$(sha256sum "$ROOT/crates/alchemy-libraw/src/browser_wrapper.cpp" | cut -d ' ' -f 1)"
-readonly BUILD_ID="libraw-${LIBRAW_COMMIT}-wrapper-${BROWSER_WRAPPER_SHA256:0:12}-jpeg-${JPEG_COMMIT}-fma-${FMA_OVERRIDE_SHA256:0:12}-aahd-${AAHD_MATH_SHA256:0:12}-emcc-5.0.7-signed-char-wrapv-no-contract"
+readonly AAHD_CAPTURE_SHA256="$(sha256sum "$ROOT/crates/alchemy-libraw/src/aahd_capture.patch" | cut -d ' ' -f 1)"
+readonly BUILD_ID="libraw-${LIBRAW_COMMIT}-wrapper-${BROWSER_WRAPPER_SHA256:0:12}-jpeg-${JPEG_COMMIT}-fma-${FMA_OVERRIDE_SHA256:0:12}-aahd-${AAHD_MATH_SHA256:0:12}-capture-${AAHD_CAPTURE_SHA256:0:12}-emcc-5.0.7-signed-char-wrapv-no-contract"
 readonly JPEG_BUILD_DIR="$OUTPUT_DIR/.libjpeg-build"
 readonly AAHD_OBJECT="$OUTPUT_DIR/.aahd_demosaic.o"
+readonly AAHD_CAPTURE_SOURCE="$OUTPUT_DIR/.aahd_demosaic.capture.cpp"
 readonly -a CONTAINER_RUN=(
   "${CONTAINER_RUNTIME:-docker}" run --rm
   --user "$(id -u):$(id -g)"
@@ -61,6 +63,9 @@ mapfile -d '' SOURCES < <(
 
 cd "$ROOT"
 rm -rf "$JPEG_BUILD_DIR"
+cp vendor/LibRaw/src/demosaic/aahd_demosaic.cpp "$AAHD_CAPTURE_SOURCE"
+patch --silent "$AAHD_CAPTURE_SOURCE" \
+  crates/alchemy-libraw/src/aahd_capture.patch
 "${CONTAINER_RUN[@]}" \
   "$IMAGE" \
   bash -lc \
@@ -83,14 +88,16 @@ rm -rf "$JPEG_BUILD_DIR"
     -fsigned-char \
     -fwrapv \
     -ffp-contract=off \
+    -DALCHEMY_AAHD_CAPTURE \
     -DLIBRAW_NODLL \
     -DUSE_JPEG \
     -DUSE_JPEG8 \
     -Ivendor/LibRaw \
+    -Ivendor/LibRaw/src/demosaic \
     -Ivendor/libjpeg-turbo/src \
     -Iweb/src/libraw/.libjpeg-build \
     -include crates/alchemy-libraw/src/aahd_math_override.h \
-    -c vendor/LibRaw/src/demosaic/aahd_demosaic.cpp \
+    -c web/src/libraw/.aahd_demosaic.capture.cpp \
     -o web/src/libraw/.aahd_demosaic.o
 
 "${CONTAINER_RUN[@]}" \
@@ -122,6 +129,6 @@ rm -rf "$JPEG_BUILD_DIR"
     web/src/libraw/.libjpeg-build/libjpeg.a \
     -o web/src/libraw/libraw.js
 
-rm -rf "$JPEG_BUILD_DIR" "$AAHD_OBJECT"
+rm -rf "$JPEG_BUILD_DIR" "$AAHD_OBJECT" "$AAHD_CAPTURE_SOURCE"
 printf '%s' "$BUILD_ID" > "$OUTPUT_DIR/.build-id"
 echo "Built $BUILD_ID."

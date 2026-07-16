@@ -9,6 +9,10 @@ import type { RenderedTiff } from "../lib/tiff-export";
 import { OnnxColorRenderer } from "../lib/onnx-color";
 import { demosaicOnWebGpu } from "../lib/onnx-demosaic";
 import { demosaicRcdWithNativeWgsl } from "../lib/native-rcd";
+import {
+  demosaicLibRawAahdWithWgsl,
+  type AahdReferenceInfo,
+} from "../lib/libraw-aahd";
 import { WebGpuColorRenderer } from "../lib/webgpu-color";
 import type {
   ExportTimings,
@@ -61,10 +65,36 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       try {
         raw.open(new Uint8Array(data.buffer), false);
         const sensor = raw.sensorInfo();
-        const mosaic = raw.sensorView(0, sensor.sampleCount);
-        const reference = data.referenceRgb16
+        if (data.librawReference && data.referenceRgb16) {
+          throw new Error("Select either the LibRaw oracle or an RGB16 file.");
+        }
+        let referenceInfo: AahdReferenceInfo | undefined;
+        let reference: Uint16Array | undefined = data.referenceRgb16
           ? new Uint16Array(data.referenceRgb16)
           : undefined;
+        if (data.librawReference) {
+          if (data.demosaicBackend !== "libraw-aahd-wgsl") {
+            throw new Error("The internal LibRaw oracle requires WGSL AAHD.");
+          }
+          referenceInfo = raw.aahdReferenceInfo();
+          reference =
+            data.demosaicOutputStage === "horizontal"
+              ? raw.aahdHorizontalView(0, referenceInfo.candidateSampleCount)
+              : data.demosaicOutputStage === "vertical"
+                ? raw.aahdVerticalView(0, referenceInfo.candidateSampleCount)
+                : data.demosaicOutputStage === "directions"
+                  ? expandDirections(
+                      raw.aahdDirectionView(
+                        0,
+                        referenceInfo.directionSampleCount,
+                      ),
+                    )
+                  : data.demosaicOutputStage === "aahd"
+                    ? raw.aahdOutputView(0, referenceInfo.outputSampleCount)
+                    : raw.imageView(0, referenceInfo.outputSampleCount);
+        }
+        // Capturing the oracle can grow WASM memory and detach earlier views.
+        const mosaic = raw.sensorView(0, sensor.sampleCount);
         if (data.completeExport && data.demosaicBackend !== "native-wgsl") {
           throw new Error(
             "Complete export is currently implemented for native WGSL only.",
@@ -78,15 +108,30 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
             )
           : undefined;
         const demosaic =
-          data.demosaicBackend === "native-wgsl"
-            ? await demosaicRcdWithNativeWgsl(
+          data.demosaicBackend === "libraw-aahd-wgsl"
+            ? await demosaicLibRawAahdWithWgsl(
                 mosaic,
                 sensor,
+                data.demosaicOutputStage === "horizontal" ||
+                  data.demosaicOutputStage === "vertical" ||
+                  data.demosaicOutputStage === "directions" ||
+                  data.demosaicOutputStage === "aahd"
+                  ? data.demosaicOutputStage
+                  : "final",
                 reference,
-                data.demosaicOutputStage,
-                benchmarkEncoder,
+                referenceInfo,
               )
-            : await demosaicOnWebGpu(mosaic, sensor, reference);
+            : data.demosaicBackend === "native-wgsl"
+              ? await demosaicRcdWithNativeWgsl(
+                  mosaic,
+                  sensor,
+                  reference,
+                  data.demosaicOutputStage === "demosaic"
+                    ? "demosaic"
+                    : "identity-lut",
+                  benchmarkEncoder,
+                )
+              : await demosaicOnWebGpu(mosaic, sensor, reference);
         const reply: WorkerReply = {
           requestId: data.requestId,
           ok: true,
@@ -302,6 +347,17 @@ function describeRuntimeError(
   } finally {
     module.decrementExceptionRefcount(error);
   }
+}
+
+function expandDirections(source: Uint8Array): Uint16Array {
+  const result = new Uint16Array(source.length * 3);
+  for (let index = 0; index < source.length; index += 1) {
+    const direction = source[index] & 15;
+    result[index * 3] = direction;
+    result[index * 3 + 1] = direction;
+    result[index * 3 + 2] = direction;
+  }
+  return result;
 }
 
 async function renderCached(

@@ -65,7 +65,8 @@ export interface DemosaicBenchmarkReport {
   sensorTimings: LibRawSensorTimings;
   demosaic:
     | import("./lib/onnx-demosaic").DemosaicResult
-    | import("./lib/native-rcd").NativeRcdResult;
+    | import("./lib/native-rcd").NativeRcdResult
+    | import("./lib/libraw-aahd").LibRawAahdResult;
   workerTotalMs: number;
 }
 
@@ -154,9 +155,17 @@ export type WorkerCommand =
       type: "benchmark-demosaic";
       buffer: ArrayBuffer;
       referenceRgb16?: ArrayBuffer;
-      demosaicBackend: "onnx" | "native-wgsl";
-      demosaicOutputStage: "demosaic" | "identity-lut";
+      demosaicBackend: "onnx" | "native-wgsl" | "libraw-aahd-wgsl";
+      demosaicOutputStage:
+        | "demosaic"
+        | "identity-lut"
+        | "horizontal"
+        | "vertical"
+        | "directions"
+        | "aahd"
+        | "final";
       completeExport: boolean;
+      librawReference: boolean;
     };
 
 export type WorkerReply =

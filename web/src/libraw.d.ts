@@ -33,6 +33,22 @@ declare module "*libraw.js" {
     totalMs: number;
   }
 
+  interface AahdReferenceInfo {
+    width: number;
+    height: number;
+    inputSampleCount: number;
+    outputSampleCount: number;
+    candidateSampleCount: number;
+    directionSampleCount: number;
+    hotPixelMs: number;
+    scaleMultipliers: number[];
+    preMultipliers: number[];
+    yuvMatrix: number[];
+    outputMatrix: number[];
+    channelMinimum: number[];
+    channelMaximum: number[];
+  }
+
   class LibRawInstance {
     open(buffer: Uint8Array, halfSize: boolean): void;
     openWithQuality(
@@ -43,6 +59,12 @@ declare module "*libraw.js" {
     metadata(): Metadata;
     imageInfo(): DecodedImageInfo;
     imageView(offset: number, length: number): Uint16Array;
+    aahdReferenceInfo(): AahdReferenceInfo;
+    aahdInputView(offset: number, length: number): Uint16Array;
+    aahdHorizontalView(offset: number, length: number): Uint16Array;
+    aahdVerticalView(offset: number, length: number): Uint16Array;
+    aahdDirectionView(offset: number, length: number): Uint8Array;
+    aahdOutputView(offset: number, length: number): Uint16Array;
     sensorInfo(): import("./lib/onnx-demosaic").SensorImageInfo;
     sensorView(offset: number, length: number): Uint16Array;
     sensorTimings(): import("./types").LibRawSensorTimings;

@@ -16,6 +16,9 @@ export interface SensorImageInfo {
   whiteLevel: number;
   cameraWhiteBalance: number[];
   xyzToCamera: number[];
+  rgbCamera: number[];
+  aahdYuvMatrix: number[];
+  librawProPhotoMatrix: number[];
   orientation: number;
 }
 
