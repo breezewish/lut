@@ -25,3 +25,5 @@
 - At mobile width, the empty-state chooser and Add RAW action are visible before any processing controls or export action.
 - At a short desktop height, wheel scrolling brings the selected-file export action into the viewport.
 - The built-in LUT manifest contains only verified source files with matching SHA-256 hashes.
+- Rebuilding LUT assets while the development server is running preserves the manifest and every Look URL, and reloading still completes the basic DNG preview flow.
+- An unavailable or invalid LUT manifest keeps an imported RAW queued, exposes no processing or export controls, and shows a reloadable startup error instead of black preview canvases.

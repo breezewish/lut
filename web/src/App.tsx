@@ -67,6 +67,7 @@ function hasUsablePreview(item: QueueItem): boolean {
 export default function App() {
   const [client] = useState(() => new ProcessingClient());
   const [manifest, setManifest] = useState<LutManifest>();
+  const [manifestError, setManifestError] = useState<string>();
   const [items, setItems] = useState<QueueItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
   const [lutId, setLutId] = useState("fuji-classic-negative");
@@ -122,10 +123,22 @@ export default function App() {
         return response.json() as Promise<LutManifest>;
       })
       .then((value) => {
-        if (active) setManifest(value);
+        if (!Array.isArray(value.luts) || value.luts.length === 0) {
+          throw new Error("The built-in LUT manifest is empty.");
+        }
+        if (active) {
+          setManifest(value);
+          setLutId((current) =>
+            value.luts.some((lut) => lut.id === current)
+              ? current
+              : value.luts[0].id,
+          );
+        }
       })
-      .catch((error: Error) => {
-        if (active) setGlobalError(error.message);
+      .catch(() => {
+        if (active) {
+          setManifestError("The built-in LUT manifest could not be loaded.");
+        }
       });
     return () => {
       active = false;
@@ -621,7 +634,7 @@ export default function App() {
         </aside>
 
         <main className="workspace">
-          {selected && (
+          {selected && selectedLut && (
             <section className="control-bar" aria-label="Processing controls">
               <div className="control-group lut-control">
                 <label htmlFor="look-search">Look</label>
@@ -695,6 +708,17 @@ export default function App() {
             </section>
           )}
 
+          {manifestError && (
+            <div className="error-banner" role="alert">
+              <span>{manifestError}</span>
+              <div className="banner-actions">
+                <Button variant="secondary" onClick={() => location.reload()}>
+                  Reload
+                </Button>
+              </div>
+            </div>
+          )}
+
           {globalError && (
             <div className="error-banner" role="alert">
               <span>{globalError}</span>
@@ -766,6 +790,20 @@ export default function App() {
                   <FolderOpen size={17} aria-hidden="true" /> Choose RAW files
                 </Button>
               </div>
+            ) : !selectedLut ? (
+              <div className="processing-error-state" role="status">
+                <FileImage size={30} aria-hidden="true" />
+                <h2>
+                  {manifestError
+                    ? "Built-in looks unavailable"
+                    : "Loading looks…"}
+                </h2>
+                <p>
+                  {manifestError
+                    ? "Reload after the application assets are available. This RAW has not been decoded."
+                    : "The selected RAW will be decoded when its processing assets are ready."}
+                </p>
+              </div>
             ) : isDecodeFailure(selected) ? (
               <div className="processing-error-state">
                 <FileImage size={30} aria-hidden="true" />
@@ -812,7 +850,7 @@ export default function App() {
             )}
           </section>
 
-          {selected && (
+          {selected && selectedLut && (
             <section className="output-bar" aria-label="Export controls">
               <div className="selected-meta">
                 <strong>{selected.file.name}</strong>
