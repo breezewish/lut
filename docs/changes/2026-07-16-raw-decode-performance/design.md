@@ -123,9 +123,10 @@ The algorithm benchmark initializes the production LibRaw WASM once. For each
 algorithm it discards one warm-up and records five decodes. Every algorithm
 uses the same camera white balance, matrix, ProPhoto D65 output, 16-bit linear
 output, highlight blend, no automatic brightness, and full-size Sony input.
-It also renders the same 1400 × 1000 crop containing oblique bridge rails,
-small repeating foliage, wire, and high-contrast gravel through one fixed
-display transform for a 1:1 visual check.
+It also renders the 1400 × 1000 crop at `(x=2400, y=1500)`, containing
+oblique bridge rails and small repeating foliage, through a fixed two-stop
+linear exposure and sRGB transfer for a 1:1 visual check. The benchmark records
+these crop coordinates in its JSON output.
 
 Studio runs one warm-up and five measurements in one process, preserving the
 ONNX session. The benchmark wraps the demosaic function selected by the real
@@ -300,7 +301,8 @@ quality and can require a suitable WebGPU/ONNX browser environment.
 
 ```sh
 npm run build
-npm run benchmark:libraw -- --samples=5 --warmups=1
+npm run benchmark:libraw -- --samples=5 --warmups=1 \
+  --crop=2400,1500,1400,1000 --crop-dir=/tmp/libraw-quality-crops
 RAW_PERF_SAMPLES=5 npm run benchmark:browser
 
 PYTHONPATH=/path/to/Raw-Alchemy-studio/src \

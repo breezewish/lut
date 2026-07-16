@@ -19,6 +19,10 @@ const halfSize = arguments_.includes("--half-size");
 const crop = parseCrop(argumentValue("--crop"));
 const cropDirectory = argumentValue("--crop-dir");
 
+if ((crop === undefined) !== (cropDirectory === undefined)) {
+  throw new Error("--crop and --crop-dir must be provided together");
+}
+
 if (!Number.isInteger(samples) || samples < 1) {
   throw new Error("--samples must be a positive integer");
 }
@@ -80,6 +84,14 @@ const report = {
   halfSize,
   warmups,
   samples,
+  qualityCrop: crop
+    ? {
+        x: crop[0],
+        y: crop[1],
+        width: crop[2],
+        height: crop[3],
+      }
+    : null,
   algorithms: results,
   pairwiseSampledDifferences: pairwiseDifferences(signatures),
 };
