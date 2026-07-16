@@ -211,11 +211,20 @@ export default function App() {
 
   useEffect(() => {
     const unsubscribe = client.onThumbnail(({ fileId, jpeg }) => {
+      performance.mark("raw-alchemy:thumbnail");
       const url = URL.createObjectURL(new Blob([jpeg], { type: "image/jpeg" }));
       setCameraPreview({ fileId, url });
     });
     return unsubscribe;
   }, [client]);
+
+  useEffect(() => {
+    return client.onPreviewFrame((result) => {
+      if (result.fileId !== selectedId) return;
+      setPreview((current) => mergePreview(current, result));
+      setCameraPreview(undefined);
+    });
+  }, [client, selectedId]);
 
   useEffect(
     () => () => {
@@ -239,8 +248,15 @@ export default function App() {
       error: undefined,
     });
 
+    const fileReadStartedAt = performance.now();
     selected.file
       .arrayBuffer()
+      .then((buffer) => {
+        performance.mark("raw-alchemy:file-read", {
+          detail: { durationMs: performance.now() - fileReadStartedAt },
+        });
+        return buffer;
+      })
       .then((buffer) => client.decode(selected.id, buffer, ev, selectedLut))
       .then((result) => {
         if (!active) return;
@@ -340,6 +356,7 @@ export default function App() {
 
   const addFiles = useCallback((files: File[]) => {
     if (files.length === 0) return;
+    performance.mark("raw-alchemy:file-selected");
     setGlobalError(undefined);
     setQueueUndo(undefined);
     setExportSummary(undefined);

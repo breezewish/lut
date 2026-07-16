@@ -1,5 +1,10 @@
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -23,6 +28,7 @@ struct DecodeTimings {
   double demosaic_ms = 0;
   double postprocess_ms = 0;
   double color_conversion_ms = 0;
+  double preview_resize_ms = 0;
   double process_remainder_ms = 0;
   double rgb16_ms = 0;
   double total_ms = 0;
@@ -46,6 +52,15 @@ public:
     color_started_at_ = color_finished_at_ = 0;
   }
 
+  void set_preview_max_edge(unsigned max_edge) {
+    preview_max_edge_ = max_edge;
+    preview_resize_ms_ = 0;
+  }
+
+  bool has_legacy_fuji_geometry() const {
+    return libraw_internal_data.internal_output_params.fuji_width != 0;
+  }
+
   void finish_process_timings(DecodeTimings &timings) const {
     const double finished_at = emscripten_get_now();
     if (demosaic_started_at_ != 0) {
@@ -61,6 +76,7 @@ public:
       timings.color_conversion_ms = color_finished_at_ - color_started_at_;
       timings.process_remainder_ms = finished_at - color_finished_at_;
     }
+    timings.preview_resize_ms = preview_resize_ms_;
   }
 
 private:
@@ -69,9 +85,97 @@ private:
   double demosaic_finished_at_ = 0;
   double color_started_at_ = 0;
   double color_finished_at_ = 0;
+  double preview_resize_ms_ = 0;
+  unsigned preview_max_edge_ = 0;
+
+  static std::size_t oriented_index(unsigned row, unsigned col,
+                                    unsigned width, unsigned height,
+                                    int flip) {
+    if (flip & 4) {
+      std::swap(row, col);
+    }
+    if (flip & 2) {
+      row = height - 1 - row;
+    }
+    if (flip & 1) {
+      col = width - 1 - col;
+    }
+    return static_cast<std::size_t>(row) * width + col;
+  }
+
+  void resize_preview() {
+    if (preview_max_edge_ == 0 || imgdata.image == nullptr) {
+      return;
+    }
+
+    auto &sizes = imgdata.sizes;
+    // Legacy diagonal Fuji layouts and non-square pixels still require
+    // LibRaw's later geometric resampling. Keep their exact path until a
+    // display-sized implementation can perform those transforms directly.
+    if (libraw_internal_data.internal_output_params.fuji_width != 0 ||
+        std::abs(sizes.pixel_aspect - 1.0) > 0.005) {
+      return;
+    }
+
+    const unsigned source_width = sizes.width;
+    const unsigned source_height = sizes.height;
+    const bool transposed = (sizes.flip & 4) != 0;
+    const unsigned output_width = transposed ? source_height : source_width;
+    const unsigned output_height = transposed ? source_width : source_height;
+    const unsigned longest_edge = std::max(output_width, output_height);
+    if (longest_edge <= preview_max_edge_) {
+      return;
+    }
+
+    const double scale = static_cast<double>(preview_max_edge_) / longest_edge;
+    const unsigned target_output_width = std::max(
+        1U, static_cast<unsigned>(std::lround(output_width * scale)));
+    const unsigned target_output_height = std::max(
+        1U, static_cast<unsigned>(std::lround(output_height * scale)));
+    const unsigned target_width =
+        transposed ? target_output_height : target_output_width;
+    const unsigned target_height =
+        transposed ? target_output_width : target_output_height;
+    const std::size_t pixel_count =
+        static_cast<std::size_t>(target_width) * target_height;
+    auto *target = static_cast<unsigned short(*)[4]>(
+        std::calloc(pixel_count, sizeof(unsigned short[4])));
+    if (target == nullptr) {
+      throw std::bad_alloc();
+    }
+
+    for (unsigned row = 0; row < target_output_height; ++row) {
+      const unsigned source_row = static_cast<unsigned>(
+          static_cast<std::uint64_t>(row) * output_height /
+          target_output_height);
+      for (unsigned col = 0; col < target_output_width; ++col) {
+        const unsigned source_col = static_cast<unsigned>(
+            static_cast<std::uint64_t>(col) * output_width /
+            target_output_width);
+        const std::size_t source = oriented_index(
+            source_row, source_col, source_width, source_height, sizes.flip);
+        const std::size_t destination = oriented_index(
+            row, col, target_width, target_height, sizes.flip);
+        std::memcpy(target[destination], imgdata.image[source],
+                    sizeof(*target));
+      }
+    }
+
+    std::free(imgdata.image);
+    imgdata.image = target;
+    sizes.width = sizes.iwidth = target_width;
+    sizes.height = sizes.iheight = target_height;
+  }
 
   static void start_demosaic(void *raw) {
-    static_cast<TimedLibRaw *>(raw)->demosaic_started_at_ = emscripten_get_now();
+    auto *processor = static_cast<TimedLibRaw *>(raw);
+    processor->demosaic_started_at_ = emscripten_get_now();
+    if (processor->preview_max_edge_ == 0) {
+      return;
+    }
+    const double resize_started_at = emscripten_get_now();
+    processor->resize_preview();
+    processor->preview_resize_ms_ = emscripten_get_now() - resize_started_at;
   }
 
   static void finish_demosaic(void *raw) {
@@ -100,10 +204,22 @@ public:
   BrowserLibRaw &operator=(const BrowserLibRaw &) = delete;
 
   void open(const val &bytes, bool half_size) {
-    open_with_quality(bytes, half_size, 12);
+    open_with_quality_and_preview(bytes, half_size, 12, 0);
   }
 
   void open_with_quality(const val &bytes, bool half_size, int quality) {
+    open_with_quality_and_preview(bytes, half_size, quality, 0);
+  }
+
+  void open_preview(const val &bytes, unsigned max_edge) {
+    if (max_edge == 0) {
+      throw std::runtime_error("Preview longest edge must be positive");
+    }
+    open_with_quality_and_preview(bytes, true, 12, max_edge);
+  }
+
+  void open_with_quality_and_preview(const val &bytes, bool half_size,
+                                     int quality, unsigned preview_max_edge) {
     if (quality != 3 && quality != 4 && quality != 12) {
       throw std::runtime_error(
           "LibRaw quality must be AHD (3), DCB (4), or AAHD (12)");
@@ -113,6 +229,7 @@ public:
     timings_ = {};
     quality_ = quality;
     total_started_at_ = emscripten_get_now();
+    processor_.set_preview_max_edge(preview_max_edge);
     const double copy_started_at = emscripten_get_now();
     input_ = copy_bytes(bytes);
     timings_.input_copy_ms = emscripten_get_now() - copy_started_at;
@@ -138,6 +255,11 @@ public:
       fail("open", status);
     }
     opened_ = true;
+    if (preview_max_edge != 0 && processor_.has_legacy_fuji_geometry()) {
+      release_decoder_state();
+      throw std::runtime_error(
+          "This legacy Fujifilm sensor layout cannot be previewed reliably");
+    }
   }
 
   val metadata() const {
@@ -247,6 +369,7 @@ public:
     result.set("demosaicMs", timings_.demosaic_ms);
     result.set("postprocessMs", timings_.postprocess_ms);
     result.set("colorConversionMs", timings_.color_conversion_ms);
+    result.set("previewResizeMs", timings_.preview_resize_ms);
     result.set("processRemainderMs", timings_.process_remainder_ms);
     result.set("rgb16Ms", timings_.rgb16_ms);
     result.set("totalMs", timings_.total_ms);
@@ -317,6 +440,7 @@ EMSCRIPTEN_BINDINGS(raw_alchemy_libraw) {
   emscripten::class_<BrowserLibRaw>("LibRaw")
       .constructor<>()
       .function("open", &BrowserLibRaw::open)
+      .function("openPreview", &BrowserLibRaw::open_preview)
       .function("openWithQuality", &BrowserLibRaw::open_with_quality)
       .function("metadata", &BrowserLibRaw::metadata)
       .function("thumbnailData", &BrowserLibRaw::thumbnail_data)

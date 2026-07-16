@@ -28,6 +28,7 @@ declare module "*libraw.js" {
     demosaicMs: number;
     postprocessMs: number;
     colorConversionMs: number;
+    previewResizeMs: number;
     processRemainderMs: number;
     rgb16Ms: number;
     totalMs: number;
@@ -35,6 +36,7 @@ declare module "*libraw.js" {
 
   class LibRawInstance {
     open(buffer: Uint8Array, halfSize: boolean): void;
+    openPreview(buffer: Uint8Array, maxEdge: number): void;
     openWithQuality(
       buffer: Uint8Array,
       halfSize: boolean,

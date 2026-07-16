@@ -44,9 +44,11 @@ test("records production preview interaction latency", async ({
 
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(fixture);
-  await expect(page.getByLabel("Base preview")).toBeVisible({
+  const basePreview = page.getByLabel("Base preview");
+  await expect(basePreview).toBeVisible({
     timeout: 60_000,
   });
+  await expect(basePreview).toHaveAttribute("width", "1024");
 
   const exposure = page.getByRole("slider", { name: "Exposure" });
   const ev: Measurement[] = [];
@@ -129,6 +131,9 @@ async function measure(page: Page, change: () => Promise<void>) {
       }),
     )
     .toBe(true);
+  await expect(
+    page.getByRole("button", { name: "Export selected" }),
+  ).toBeEnabled();
   const draws = await page.evaluate(
     () => (window as Window & { previewDraws?: Draw[] }).previewDraws ?? [],
   );

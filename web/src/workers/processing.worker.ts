@@ -66,7 +66,12 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       cached = undefined;
       const previewRaw = new module.LibRaw();
       try {
-        previewRaw.open(new Uint8Array(data.buffer), true);
+        // Preview has its own display-sized decode contract. LibRaw keeps RAW
+        // identification, unpack, black levels, WB, CFA handling, crop, and
+        // orientation, then discards pixels that cannot reach the 1024px
+        // cache before highlight and color conversion. Export never calls
+        // this entry point.
+        previewRaw.openPreview(new Uint8Array(data.buffer), PREVIEW_MAX_EDGE);
         const metadata = previewRaw.metadata();
         const thumbnail = previewRaw.thumbnailData();
         if (thumbnail?.format === "jpeg") {
@@ -115,6 +120,15 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
         // before rerenders or a full-resolution export add memory pressure.
         previewRaw.delete();
       }
+      const interactive = await renderCached(
+        data.fileId,
+        data.ev,
+        data.lut,
+        384,
+        true,
+      );
+      interactive.timings.workerTotalMs = performance.now() - workerStartedAt;
+      postPreviewFrame(data.requestId, interactive);
       const result = await renderCached(
         data.fileId,
         data.ev,
@@ -292,6 +306,19 @@ async function loadLut(lut: LutDefinition): Promise<WasmLut> {
 
 function postPreview(requestId: number, result: PreviewResult): void {
   const reply: WorkerReply = { requestId, ok: true, type: "preview", result };
+  const transfer = result.base
+    ? [result.base.buffer, result.lut.buffer]
+    : [result.lut.buffer];
+  context.postMessage(reply, transfer);
+}
+
+function postPreviewFrame(requestId: number, result: PreviewResult): void {
+  const reply: WorkerReply = {
+    requestId,
+    ok: true,
+    type: "preview-frame",
+    result,
+  };
   const transfer = result.base
     ? [result.base.buffer, result.lut.buffer]
     : [result.lut.buffer];

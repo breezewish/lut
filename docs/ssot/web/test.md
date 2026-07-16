@@ -1,12 +1,14 @@
 # Web End-to-End Tests
 
-- Selecting a RAW shows local camera metadata, exposes the current queue item and ready comparison to assistive technology, makes selected export the only primary action, transfers only display-contributing source rows into a longest-edge-1024 cache, renders Base and LUT previews through zero-copy clamped views, releases the short-lived LibRaw decoder, and changes positive or directly typed negative EV plus LUT through the persistent Rust renderer without another RAW decode or source-image transfer.
+- Selecting a RAW shows its labeled embedded JPEG only as a placeholder, decodes a display-sized linear source through the Preview-only LibRaw entry point, draws a longest-edge-384 processed comparison before the longest-edge-1024 settled comparison, exposes local camera metadata and readiness to assistive technology, and rerenders EV plus LUT through the persistent Rust renderer without another RAW decode or source-image transfer.
 - Decode completion and export status changes do not repeat an unchanged preview recipe; continuous EV changes keep at most one render active and one latest recipe waiting, retain both previous canvases until the next interaction frame is ready, render exact-color longest-edge-384 interaction frames before a longest-edge-1024 settled frame, never paint an obsolete recipe, and enable export only after the final settled frame.
 - Selected and batch export stay disabled while the selected RAW is decoding or its visible EV/LUT recipe is waiting to render, then become available only when that exact processed preview is ready.
 - A real camera RAW displays its labeled embedded JPEG before the processed preview replaces it.
 - Decode, rerender, and export issue only same-origin static GET requests; no photo data is uploaded.
 - A populated queue accepts another drop, and duplicate files in the same drop event create only one queue entry.
 - Synthetic LinearRaw, real Leica DNG, and Sony ARW output decode to exactly the same RGB16 dimensions and samples in native and WASM LibRaw builds in both full-size and half-size modes.
+- Full-resolution export sampled to display size and fast Preview satisfy the RGB8 quality contract for Linear DNG, lossy Linear DNG, Leica Bayer DNG, rotated Leica Bayer DNG, Sony Bayer ARW, and Fujifilm X-Trans RAF; fixed crops are emitted for visual inspection.
+- A legacy diagonal Fujifilm Super CCD RAF fails during format identification with a reliability error instead of displaying a processed image that disagrees materially with export.
 - Real Leica DNG and Sony ARW files render nonblank previews and export full-resolution TIFFs; browser output matches native corrected-v2 output within one code value.
 - The HTTPS production bundle imports, previews, and exports in Chromium, Firefox, and WebKit.
 - The GitHub Pages repository-path bundle loads its manifest, LUT, Worker, and WASM assets below `/lut/` and previews a DNG without root-path requests or failed responses.
@@ -19,7 +21,7 @@
 - A valid-corrupt-valid batch exports only the two valid TIFFs, keeps their dimensions isolated, marks the corrupt file failed, continues to the later file, and reports the exact partial-success summary.
 - Stopping a multi-file export finishes the active file, omits the remaining files from the ZIP, and reports the partial count.
 - Browser export reads bounded zero-copy LibRaw views, transfers only those source strips into the color WASM, and fails if the encoder's requested strip sizes do not consume the image exactly.
-- An opt-in production Chromium benchmark records processed-preview, full LibRaw decode, color processing, TIFF encoding, Blob, and full-export boundaries for cold and warm runs without substituting a test decoder.
+- An opt-in production Chromium benchmark records file reading, embedded JPEG, first processed frame, settled processed frame, Canvas drawing, phased LibRaw preview, full LibRaw decode, color processing, TIFF encoding, Blob, and full-export boundaries for cold and warm runs without substituting a test decoder; it enforces the initial Preview budgets.
 - An opt-in production Chromium benchmark measures at least 20 EV edits, every initially uncached built-in LUT, and at least 20 cached LUT changes from control input through Canvas drawing; it enforces the preview p95 budgets and records Worker LUT-load and color stages.
 - A 6240 × 4168 Sony ARW produces a nontrivial full-resolution TIFF in under 30 seconds for the export operation, and a later EV preview rerender reuses the existing preview source without another RAW decode.
 - A corrupt DNG reports a product-language decode error with recovery actions and cannot be exported as a successful file.

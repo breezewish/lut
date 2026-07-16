@@ -47,6 +47,7 @@ export interface LibRawDecodeTimings {
   demosaicMs: number;
   postprocessMs: number;
   colorConversionMs: number;
+  previewResizeMs: number;
   processRemainderMs: number;
   rgb16Ms: number;
   totalMs: number;
@@ -134,6 +135,12 @@ export type WorkerReply =
       ok: true;
       type: "thumbnail";
       result: CameraPreview;
+    }
+  | {
+      requestId: number;
+      ok: true;
+      type: "preview-frame";
+      result: PreviewResult;
     }
   | {
       requestId: number;

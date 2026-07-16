@@ -26,8 +26,17 @@ export function PreviewCanvas({
       pixels.byteOffset,
       pixels.byteLength,
     );
+    const drawStartedAt = performance.now();
     context.putImageData(new ImageData(clamped, width, height), 0, 0);
-  }, [pixels, width, height]);
+    performance.mark("raw-alchemy:canvas-draw", {
+      detail: {
+        label,
+        width,
+        height,
+        durationMs: performance.now() - drawStartedAt,
+      },
+    });
+  }, [label, pixels, width, height]);
 
   return (
     <figure className="preview-pane">

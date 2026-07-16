@@ -42,6 +42,7 @@ export class ProcessingClient {
   private readonly pending = new Map<number, Pending>();
   private nextRequestId = 1;
   private thumbnailListener?: (preview: CameraPreview) => void;
+  private previewFrameListener?: (preview: PreviewResult) => void;
   private activeRender?: RenderBatch;
   private queuedRender?: RenderBatch;
   private stoppedError?: Error;
@@ -50,6 +51,13 @@ export class ProcessingClient {
     this.worker.onmessage = ({ data }: MessageEvent<WorkerReply>) => {
       if (data.ok && data.type === "thumbnail") {
         this.thumbnailListener?.(data.result);
+        return;
+      }
+      if (data.ok && data.type === "preview-frame") {
+        performance.mark("raw-alchemy:initial-preview-frame", {
+          detail: data.result.timings,
+        });
+        this.previewFrameListener?.(data.result);
         return;
       }
       const pending = this.pending.get(data.requestId);
@@ -74,6 +82,14 @@ export class ProcessingClient {
     return () => {
       if (this.thumbnailListener === listener)
         this.thumbnailListener = undefined;
+    };
+  }
+
+  onPreviewFrame(listener: (preview: PreviewResult) => void): () => void {
+    this.previewFrameListener = listener;
+    return () => {
+      if (this.previewFrameListener === listener)
+        this.previewFrameListener = undefined;
     };
   }
 
