@@ -25,7 +25,6 @@ name = "alchemy-core"
 version = "0.1.0"
 dependencies = [
  "alchemy-libraw",
- "flate2",
  "ndarray",
  "ndarray-npy",
  "serde",

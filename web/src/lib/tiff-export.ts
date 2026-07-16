@@ -10,7 +10,7 @@ export interface StripTiffEncoder {
 export interface RenderedTiff {
   bytes: Uint8Array;
   colorProcessingMs: number;
-  deflateMs: number;
+  tiffEncodingMs: number;
 }
 
 /**
@@ -26,7 +26,7 @@ export function renderTiffInStrips(
   let offset = 0;
   let consumed = false;
   let colorProcessingMs = 0;
-  let deflateMs = 0;
+  let tiffEncodingMs = 0;
   try {
     for (;;) {
       const requested = encoder.next_strip_samples();
@@ -42,7 +42,7 @@ export function renderTiffInStrips(
       colorProcessingMs += performance.now() - startedAt;
       startedAt = performance.now();
       encoder.write_strip();
-      deflateMs += performance.now() - startedAt;
+      tiffEncodingMs += performance.now() - startedAt;
       offset += requested;
     }
     if (offset !== sampleCount) {
@@ -54,8 +54,8 @@ export function renderTiffInStrips(
     // `finish` consumes the WASM encoder even when it returns an error.
     consumed = true;
     const bytes = encoder.finish();
-    deflateMs += performance.now() - startedAt;
-    return { bytes, colorProcessingMs, deflateMs };
+    tiffEncodingMs += performance.now() - startedAt;
+    return { bytes, colorProcessingMs, tiffEncodingMs };
   } finally {
     if (!consumed) encoder.free();
   }

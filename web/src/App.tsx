@@ -431,8 +431,8 @@ export default function App() {
     stopAfterCurrent.current = false;
     const single = targets.length === 1;
     const outputNames = new Set<string>();
-    // TIFF payloads are already Deflate-compressed. Pass-through ZIP entries
-    // avoid redundant compression and a second contiguous archive buffer.
+    // Keep batch export on the same fast, uncompressed path as single export.
+    // Pass-through ZIP entries also avoid a second contiguous archive buffer.
     const archiveChunks: Uint8Array<ArrayBuffer>[] = [];
     let archiveError: Error | undefined;
     const archive = single

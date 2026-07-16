@@ -6,7 +6,7 @@
 - Corrected matrix vectors include direct linear-sRGB output from pinned LibRaw, independently checking the numerical ProPhoto D65 basis.
 - An independent standard-library Python float64 oracle checks corrected-v2 Base and LUT preview, RGB16, and TIFF output without importing the Rust implementation or its constants.
 - A non-affine CUBE fixture produces distinct expected values for every tetrahedral interpolation branch and verifies their shared boundaries.
-- A multi-strip core test proves bounded, contiguous strip rendering and independently decodable horizontal-predicted Deflate output.
+- A multi-strip core test proves bounded, contiguous strip rendering and independently decodable uncompressed TIFF output.
 - Core tests prove row-fed preview sampling retains exactly the pixels used by the requested display size and rejects incomplete or inconsistent input.
 - A browser adapter test proves export reads only bounded source views and rejects inconsistent encoder strip requests.
 - A browser adapter test drives a 6240 × 4168 export contract while bounding every source view to approximately 1 MB.

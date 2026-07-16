@@ -63,7 +63,7 @@ export interface PreviewTimings {
 export interface ExportTimings {
   libraw: LibRawDecodeTimings;
   colorProcessingMs: number;
-  deflateMs: number;
+  tiffEncodingMs: number;
   workerTotalMs: number;
 }
 

@@ -10,7 +10,7 @@ Exposure multiplies linear RGB by `2^EV`. The Base path converts ProPhoto D65 to
 
 The LUT path applies the fixed ProPhoto D65 to V-Gamut D65 matrix, Panasonic's piecewise V-Log formula including its negative-capable linear branch, lookup-domain clamping, and tetrahedral interpolation. Red is the fastest-changing CUBE axis. Camera-Match Boost is disabled.
 
-Preview produces RGBA8. Export produces a Deflate-compressed interleaved RGB16 TIFF. Corrected quantization clamps to `[0,1]`, scales by 65535, and rounds to nearest.
+Preview produces RGBA8. Export produces an uncompressed interleaved RGB16 TIFF. Corrected quantization clamps to `[0,1]`, scales by 65535, and rounds to nearest.
 
 ## LUT contract
 

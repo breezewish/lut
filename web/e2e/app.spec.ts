@@ -397,6 +397,17 @@ test("batch export continues after a corrupt file without contaminating later ou
 
 test("batch export stops after the active file", async ({ page }) => {
   const bytes = await readFile(lossyFixture);
+  await page.addInitScript(() => {
+    const postMessage = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (...args) {
+      const message = args[0] as { type?: string };
+      if (message?.type === "export") {
+        window.setTimeout(() => Reflect.apply(postMessage, this, args), 250);
+        return;
+      }
+      return Reflect.apply(postMessage, this, args);
+    };
+  });
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles([
     { name: "one.dng", mimeType: "image/x-adobe-dng", buffer: bytes },

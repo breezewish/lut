@@ -12,7 +12,7 @@ Interactive rerenders are progressive and recipe-correct. They may temporarily r
 
 The acceptance fixture is the 6240 × 4168 Sony RAW in the repository, rendered by the production Chromium bundle after its longest-edge-1024 source cache is ready. Across at least 20 samples, EV input must show its first recipe-correct frame with p95 below 0.2 seconds and its settled frame with p95 below 0.5 seconds. First access to the built-in LUT set must update the preview, including the settled frame, with p95 below 0.5 seconds. A previously loaded LUT must show its first recipe-correct frame with p95 below 0.2 seconds. These budgets include control handling, Worker processing, transfer, and Canvas drawing.
 
-Export selected downloads one TIFF. Export all processes nonfailed queue entries serially and downloads one ZIP. It reports the current file and position, can stop after the current file, continues past per-file failures, and leaves a completion or partial-success summary. A corrupt file displays product-language recovery actions, disables its selected export, and is skipped by batch export.
+Export selected downloads one uncompressed RGB16 TIFF. Export all processes nonfailed queue entries serially and downloads one ZIP containing uncompressed TIFF entries. It reports the current file and position, can stop after the current file, continues past per-file failures, and leaves a completion or partial-success summary. A corrupt file displays product-language recovery actions, disables its selected export, and is skipped by batch export.
 
 Export actions remain disabled until the selected processed preview matches the visible EV and LUT. This prevents an undecoded or stale recipe from being exported before the user has compared it.
 

@@ -1,5 +1,9 @@
 # RAW Decode Performance Diagnosis
 
+## Status
+
+This report preserves the pre-optimization measurements from project base `3820286`. TIFF Deflate was subsequently removed; current output behavior and replacement measurements are specified in `docs/changes/2026-07-16-uncompressed-tiff/`. Deflate timings below remain historical evidence and are not the current benchmark contract.
+
 ## Introduction
 
 This report separates browser preview, full RAW decode, and full export costs.

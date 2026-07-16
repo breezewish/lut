@@ -1,5 +1,3 @@
-import { inflateSync } from "node:zlib";
-
 interface TiffImage {
   width: number;
   height: number;
@@ -16,7 +14,6 @@ interface TiffLayout {
   width: number;
   height: number;
   samplesPerPixel: number;
-  predictor: number;
   stripOffsets: number[];
   stripByteCounts: number[];
 }
@@ -104,21 +101,17 @@ function readRgb16TiffLayout(bytes: Buffer): TiffLayout {
   const stripOffsets = required(entries, 273);
   const samplesPerPixel = required(entries, 277)[0];
   const stripByteCounts = required(entries, 279);
-  const predictor = entries.get(317)?.[0] ?? 1;
 
   if (bits.some((value) => value !== 16) || samplesPerPixel !== 3)
     throw new Error("Expected an RGB16 TIFF.");
-  if (compression !== 8 && compression !== 32_946)
-    throw new Error(`Expected Deflate compression, got ${compression}.`);
-  if (predictor !== 1 && predictor !== 2)
-    throw new Error(`Unsupported TIFF predictor ${predictor}.`);
+  if (compression !== 1)
+    throw new Error(`Expected uncompressed TIFF data, got ${compression}.`);
   if (stripOffsets.length !== stripByteCounts.length)
     throw new Error("TIFF strip offsets and byte counts do not match.");
   return {
     width,
     height,
     samplesPerPixel,
-    predictor,
     stripOffsets,
     stripByteCounts,
   };
@@ -126,29 +119,7 @@ function readRgb16TiffLayout(bytes: Buffer): TiffLayout {
 
 function decodeStrip(bytes: Buffer, layout: TiffLayout, index: number): Buffer {
   const offset = layout.stripOffsets[index];
-  const strip = inflateSync(
-    bytes.subarray(offset, offset + layout.stripByteCounts[index]),
-  );
-  if (layout.predictor === 1) return strip;
-
-  const rowBytes = layout.width * layout.samplesPerPixel * 2;
-  if (strip.length % rowBytes !== 0)
-    throw new Error(`TIFF strip ${index} contains incomplete rows.`);
-  for (let rowOffset = 0; rowOffset < strip.length; rowOffset += rowBytes) {
-    for (
-      let sampleOffset = layout.samplesPerPixel * 2;
-      sampleOffset < rowBytes;
-      sampleOffset += 2
-    ) {
-      const offset = rowOffset + sampleOffset;
-      const previous = strip.readUInt16LE(offset - layout.samplesPerPixel * 2);
-      strip.writeUInt16LE(
-        (strip.readUInt16LE(offset) + previous) & 0xffff,
-        offset,
-      );
-    }
-  }
-  return strip;
+  return bytes.subarray(offset, offset + layout.stripByteCounts[index]);
 }
 
 function readIfd(bytes: Buffer): Map<number, number[]> {

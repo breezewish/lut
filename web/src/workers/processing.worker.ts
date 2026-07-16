@@ -155,7 +155,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       const timings = {
         libraw: exportRaw.timings() as LibRawDecodeTimings,
         colorProcessingMs: rendered.colorProcessingMs,
-        deflateMs: rendered.deflateMs,
+        tiffEncodingMs: rendered.tiffEncodingMs,
         workerTotalMs: performance.now() - workerStartedAt,
       };
       const reply: WorkerReply = {

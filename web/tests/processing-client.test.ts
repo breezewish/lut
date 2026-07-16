@@ -32,7 +32,7 @@ const exportTimings: ExportTimings = {
     totalMs: 45,
   },
   colorProcessingMs: 10,
-  deflateMs: 11,
+  tiffEncodingMs: 11,
   workerTotalMs: 66,
 };
 

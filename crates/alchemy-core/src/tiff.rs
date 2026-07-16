@@ -1,8 +1,6 @@
 use std::{io::Cursor, ops::Range};
 
-use tiff_core::{
-    ByteOrder, Compression, PhotometricInterpretation, PlanarConfiguration, Predictor,
-};
+use tiff_core::{ByteOrder, Compression, PhotometricInterpretation, PlanarConfiguration};
 use tiff_writer::{ImageBuilder, ImageHandle, TiffVariant, TiffWriter, WriteOptions};
 
 use crate::{AlchemyError, Result};
@@ -39,8 +37,7 @@ impl Rgb16TiffWriter {
         let image = ImageBuilder::new(width, height)
             .samples_per_pixel(3)
             .sample_type::<u16>()
-            .compression(Compression::Deflate)
-            .predictor(Predictor::Horizontal)
+            .compression(Compression::None)
             .photometric(PhotometricInterpretation::Rgb)
             .planar_configuration(PlanarConfiguration::Chunky)
             .strips(rows_per_strip);
@@ -142,7 +139,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn encodes_multiple_deflate_strips_with_bounded_render_buffers() {
+    fn encodes_multiple_uncompressed_strips_with_bounded_render_buffers() {
         const WIDTH: u32 = 1_000;
         const HEIGHT: u32 = 400;
 
@@ -175,13 +172,7 @@ mod tests {
             decoder
                 .get_tag_unsigned::<u16>(tiff::tags::Tag::Compression)
                 .unwrap(),
-            CompressionMethod::Deflate.to_u16()
-        );
-        assert_eq!(
-            decoder
-                .get_tag_unsigned::<u16>(tiff::tags::Tag::Predictor)
-                .unwrap(),
-            2
+            CompressionMethod::None.to_u16()
         );
         assert_eq!(decoder.strip_count().unwrap() as usize, ranges.len());
         let DecodingResult::U16(pixels) = decoder.read_image().unwrap() else {

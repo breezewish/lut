@@ -137,8 +137,8 @@ impl ColorPipeline {
         Ok(output)
     }
 
-    /// Renders and Deflate-compresses a 16-bit RGB TIFF. Processing is fused
-    /// into bounded strips, so no full-size float or quantized image is retained.
+    /// Renders an uncompressed 16-bit RGB TIFF. Processing is fused into bounded
+    /// strips, so no full-size float or quantized image is retained.
     ///
     /// # Errors
     ///
@@ -426,7 +426,7 @@ mod tests {
                 decoder
                     .get_tag_unsigned::<u16>(::tiff::tags::Tag::Compression)
                     .unwrap(),
-                CompressionMethod::Deflate.to_u16()
+                CompressionMethod::None.to_u16()
             );
             let DecodingResult::U16(tiff_rgb16) = decoder.read_image().unwrap() else {
                 panic!("{} TIFF did not decode to RGB16", case.name);

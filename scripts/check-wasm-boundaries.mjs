@@ -63,7 +63,7 @@ if (!tiffRender.includes("passArray16ToWasm0(pixels")) {
   );
 }
 if (tiffWrite.includes("passArray16ToWasm0")) {
-  throw new Error("TIFF Deflate unexpectedly copies another RGB16 strip.");
+  throw new Error("TIFF writing unexpectedly copies another RGB16 strip.");
 }
 if (binding.includes("export function render_tiff(")) {
   throw new Error("The whole-image TIFF WASM binding must not be exported.");
