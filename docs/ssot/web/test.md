@@ -4,14 +4,21 @@
 - A real camera RAW displays its labeled embedded JPEG before the processed preview replaces it.
 - Decode, rerender, and export issue only same-origin static GET requests; no photo data is uploaded.
 - A populated queue accepts another drop, and duplicate files in the same drop event create only one queue entry.
-- The deterministic DNG decodes to exactly the same RGB16 dimensions and samples in native and WASM LibRaw builds.
-- A browser-exported TIFF decodes to the same dimensions and RGB16 values within one code value of the native corrected-v2 export for the same RAW, EV, LUT, and decoder source.
+- Synthetic LinearRaw and real-CFA half-size output decode to exactly the same RGB16 dimensions and samples in native and WASM LibRaw builds; real-CFA full-size output is exact inside the image and permits only one bounded AAHD outer-edge pixel.
+- Real Leica DNG and Sony ARW files render nonblank previews and export full-resolution TIFFs; browser output matches native corrected-v2 output within one code value except for the single bounded Leica AAHD edge pixel.
+- The HTTPS production bundle imports, previews, and exports in Chromium, Firefox, and WebKit.
+- A non-secure remote HTTP development origin imports and previews a DNG without relying on secure-context Web Crypto.
 - Every built-in LUT produces browser WASM RGB16 output within one code value of the optimized native corrected-v2 export.
 - Two different RAW files make batch export the sole primary action, lock import, queue selection, EV, and LUT controls for the operation, and export as separately named RGB16 TIFF entries in one ZIP; each decompressed image matches its independent native export within one code value, proving isolated sequential processing state.
+- A rapid file-selection race leaves only the final selected file and its preview active.
+- A mixed-success batch continues past a decode that fails during export, includes both successful files, and reports the failed file.
 - Stopping a multi-file export finishes the active file, omits the remaining files from the ZIP, and reports the partial count.
 - Browser export reads bounded zero-copy LibRaw views, transfers only those source strips into the color WASM, and fails if the encoder's requested strip sizes do not consume the image exactly.
 - A corrupt DNG reports a product-language decode error with recovery actions and cannot be exported as a successful file.
 - Blocking WASM startup requests produces a visible reload instruction and clears the indefinite decoding state.
+- A worker error rejects every pending processing command instead of leaving unresolved promises.
+- A LUT hash mismatch, missing LUT, and hash-valid malformed CUBE each show a specific error, stop the decoding state, disable export, and allow a later valid import.
+- Duplicate files in one chooser action are ignored, drag and drop decodes the file, remove plus undo restores it, and choosing a LUT records it as a recent look.
 - At mobile width, the empty-state chooser and Add RAW action are visible before any processing controls or export action.
 - At a short desktop height, wheel scrolling brings the selected-file export action into the viewport.
 - The built-in LUT manifest contains only verified source files with matching SHA-256 hashes.

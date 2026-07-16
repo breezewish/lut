@@ -1,12 +1,20 @@
 import { defineConfig } from "vitest/config";
+import basicSsl from "@vitejs/plugin-basic-ssl";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    ...(process.env.VITE_HTTPS === "1" ? [basicSsl()] : []),
+  ],
   root: "web",
   publicDir: "public",
   server: {
+    allowedHosts: true,
+  },
+  preview: {
     allowedHosts: true,
   },
   build: {

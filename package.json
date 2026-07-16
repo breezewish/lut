@@ -16,6 +16,7 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "@noble/hashes": "2.2.0",
     "@radix-ui/react-select": "2.2.6",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
@@ -33,6 +34,7 @@
     "@types/node": "24.10.0",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-basic-ssl": "2.3.0",
     "@vitejs/plugin-react": "5.1.0",
     "jsdom": "27.1.0",
     "prettier": "3.6.2",

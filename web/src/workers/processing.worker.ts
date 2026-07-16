@@ -6,6 +6,7 @@ import initAlchemy, {
   TiffEncoder,
 } from "../wasm/alchemy_core.js";
 import { describeProcessingError } from "../lib/errors";
+import { sha256Hex } from "../lib/hash";
 import { renderTiffInStrips } from "../lib/tiff-export";
 import type {
   LutDefinition,
@@ -217,10 +218,7 @@ async function loadLut(lut: LutDefinition): Promise<string> {
   const response = await fetch(`/luts/${lut.file}`);
   if (!response.ok) throw new Error(`Could not load LUT ${lut.name}.`);
   const bytes = await response.arrayBuffer();
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  const actual = Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
+  const actual = sha256Hex(bytes);
   if (actual !== lut.sha256)
     throw new Error(`LUT integrity check failed for ${lut.name}.`);
   const source = new TextDecoder().decode(bytes);

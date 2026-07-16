@@ -27,7 +27,7 @@ jobs:
 
       - run: npm ci
       - run: cargo install wasm-pack --version 0.13.1 --locked
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium firefox webkit
       - run: cargo fmt --all --check
       - run: cargo test --workspace
       - run: cargo test --workspace --release

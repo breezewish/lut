@@ -5,17 +5,41 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: false,
+  workers: 1,
   retries: process.env.CI ? 1 : 0,
   reporter: "list",
   use: {
-    baseURL: "http://127.0.0.1:4173",
+    baseURL: "https://127.0.0.1:42732",
+    ignoreHTTPSErrors: true,
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: "npx vite preview",
-    url: "http://127.0.0.1:4173",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "firefox",
+      testMatch: "browser-smoke.spec.ts",
+      use: { ...devices["Desktop Firefox"] },
+    },
+    {
+      name: "webkit",
+      testMatch: "browser-smoke.spec.ts",
+      use: { ...devices["Desktop Safari"] },
+    },
+  ],
+  webServer: [
+    {
+      command: "npx vite preview --host 0.0.0.0 --port 42731 --strictPort",
+      url: "http://127.0.0.1:42731",
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+    {
+      command:
+        "VITE_HTTPS=1 npx vite preview --host 127.0.0.1 --port 42732 --strictPort",
+      url: "https://127.0.0.1:42732",
+      ignoreHTTPSErrors: true,
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+  ],
 });

@@ -9,7 +9,7 @@ readonly LIBRAW_COMMIT="0029e79482c3a133d3de72ff51117ca7d0a4ff43"
 readonly JPEG_COMMIT="4e151a4ad91001b3aa8c2ece2205c15f487ce320"
 readonly FMA_OVERRIDE_SHA256="4d17be3e69bd0995410c07181ea56f35353ee60aa47bfe2d874ff687f593a146"
 readonly BROWSER_WRAPPER_SHA256="$(sha256sum "$ROOT/crates/alchemy-libraw/src/browser_wrapper.cpp" | cut -d ' ' -f 1)"
-readonly BUILD_ID="libraw-${LIBRAW_COMMIT}-wrapper-${BROWSER_WRAPPER_SHA256:0:12}-jpeg-${JPEG_COMMIT}-fma-${FMA_OVERRIDE_SHA256:0:12}-emcc-5.0.7-single-portable"
+readonly BUILD_ID="libraw-${LIBRAW_COMMIT}-wrapper-${BROWSER_WRAPPER_SHA256:0:12}-jpeg-${JPEG_COMMIT}-fma-${FMA_OVERRIDE_SHA256:0:12}-emcc-5.0.7-fp-contract-off-single-portable"
 readonly JPEG_BUILD_DIR="$OUTPUT_DIR/.libjpeg-build"
 
 [[ "$(sha256sum "$ROOT/crates/alchemy-libraw/src/postprocessing_utils.cpp" | cut -d ' ' -f 1)" == "$FMA_OVERRIDE_SHA256" ]] \
@@ -65,6 +65,7 @@ rm -rf "$JPEG_BUILD_DIR"
   em++ \
     -std=c++17 \
     -O3 \
+    -ffp-contract=off \
     -DLIBRAW_NODLL \
     -DUSE_JPEG \
     -DUSE_JPEG8 \

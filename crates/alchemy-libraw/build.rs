@@ -27,10 +27,11 @@ fn main() {
     let mut build = cc::Build::new();
     build
         .cpp(true)
-        .std("c++11")
+        .std("c++17")
         // Decode parity is a numerical contract. Keep LibRaw's compilation
         // profile stable even when Rust tests use an unoptimized profile.
         .opt_level(3)
+        .flag("-ffp-contract=off")
         .include(&libraw)
         .include(jpeg.join("include"))
         .define("LIBRAW_NODLL", None)

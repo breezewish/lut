@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "id": "synthetic-linear-dng",
+      "path": "tests/fixtures/linear.dng",
+      "kind": "synthetic-linear-dng",
+      "sha256": "39de68b5c7620fd2967202fe07ff5a93bfaf71096b6139d61b72218fb3616561",
+      "width": 64,
+      "height": 48
+    },
+    {
+      "id": "synthetic-lossy-linear-dng",
+      "path": "vendor/LibRaw-Wasm/test/integration/lossy.dng",
+      "kind": "synthetic-lossy-linear-dng",
+      "sha256": "79bcc394fb79103022e314c5f841cbddf4f4acdcb2b1680c78d574719be7a85a",
+      "width": 256,
+      "height": 168
+    },
+    {
+      "id": "leica-m8-cfa-dng",
+      "path": "tests/fixtures/leica-m8.dng",
+      "kind": "real-camera-cfa-dng",
+      "sha256": "7fdcca2371bb07fbf9483fcb08e3b5ab093eca1ca3924cbc86d6863736c31153",
+      "source": "https://raw.pixls.us/data/Leica/M8/L1030132.DNG",
+      "license": "CC0-1.0",
+      "camera": "Leica Camera AG M8 Digital Camera",
+      "width": 3920,
+      "height": 2638
+    },
+    {
+      "id": "sony-ilme-fx30-arw",
+      "path": "vendor/LibRaw-Wasm/example-sony.ARW",
+      "kind": "real-camera-arw",
+      "sha256": "3b4dca9296944931a0deb4b6456685985e326aef884c32d9c5df4fc9f64d7e2c",
+      "camera": "SONY ILME-FX30",
+      "width": 6240,
+      "height": 4168
+    }
+  ]
+}
