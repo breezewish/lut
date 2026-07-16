@@ -98,6 +98,24 @@ impl Lut3d {
         self.size
     }
 
+    #[cfg(feature = "wasm")]
+    pub(crate) fn domain_min(&self) -> [f32; 3] {
+        self.domain_min
+    }
+
+    #[cfg(feature = "wasm")]
+    pub(crate) fn domain_max(&self) -> [f32; 3] {
+        self.domain_max
+    }
+
+    #[cfg(feature = "wasm")]
+    pub(crate) fn flattened_samples(&self) -> Vec<f32> {
+        self.samples
+            .iter()
+            .flat_map(|sample| sample.iter().copied())
+            .collect()
+    }
+
     /// Samples the LUT with tetrahedral interpolation and clamps only at the
     /// declared lookup domain boundary.
     #[must_use]

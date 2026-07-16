@@ -4,8 +4,14 @@ import createLibRaw from "../libraw/libraw.js";
 import initAlchemy, { PreviewRenderer, WasmLut } from "../wasm/alchemy_core.js";
 import { describeProcessingError } from "../lib/errors";
 import { sha256Hex } from "../lib/hash";
-import { renderTiffInStrips } from "../lib/tiff-export";
+import {
+  renderTiffInStrips,
+  renderTiffInWebGpuStrips,
+} from "../lib/tiff-export";
+import type { RenderedTiff } from "../lib/tiff-export";
+import { WebGpuColorRenderer } from "../lib/webgpu-color";
 import type {
+  ExportTimings,
   LibRawDecodeTimings,
   LutDefinition,
   PreviewResult,
@@ -131,19 +137,45 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
     const workerStartedAt = performance.now();
     const lut = await loadLut(data.lut);
     const exportRaw = new module.LibRaw();
+    let gpuRenderer: WebGpuColorRenderer | undefined;
     try {
       exportRaw.open(new Uint8Array(data.buffer), false);
       const image = exportRaw.imageInfo();
-      const rendered = renderTiffInStrips(
-        image.sampleCount,
-        (offset, length) => exportRaw.imageView(offset, length),
-        lut.create_tiff_encoder(image.width, image.height, data.ev),
-      );
-      const timings = {
+      const colorBackend = data.colorBackend === "webgpu" ? "webgpu" : "cpu";
+      let gpuTimings: Pick<
+        ExportTimings,
+        "gpuUploadMs" | "gpuComputeAndReadbackMs" | "gpuValidation"
+      > = {};
+      let rendered: RenderedTiff;
+      if (colorBackend === "webgpu") {
+        const result = await renderTiffInWebGpuStrips(
+          image.sampleCount,
+          (offset, length) => exportRaw.imageView(offset, length),
+          lut.create_tiff_encoder(image.width, image.height, data.ev),
+          (gpuRenderer = await WebGpuColorRenderer.create(lut)),
+          data.ev,
+          data.validateGpu === true,
+        );
+        rendered = result;
+        gpuTimings = {
+          gpuUploadMs: result.gpuUploadMs,
+          gpuComputeAndReadbackMs: result.gpuComputeAndReadbackMs,
+          gpuValidation: result.validation,
+        };
+      } else {
+        rendered = renderTiffInStrips(
+          image.sampleCount,
+          (offset, length) => exportRaw.imageView(offset, length),
+          lut.create_tiff_encoder(image.width, image.height, data.ev),
+        );
+      }
+      const timings: ExportTimings = {
         libraw: exportRaw.timings() as LibRawDecodeTimings,
+        colorBackend,
         colorProcessingMs: rendered.colorProcessingMs,
         deflateMs: rendered.deflateMs,
         workerTotalMs: performance.now() - workerStartedAt,
+        ...gpuTimings,
       };
       const reply: WorkerReply = {
         requestId: data.requestId,
@@ -155,6 +187,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       };
       context.postMessage(reply, [rendered.bytes.buffer]);
     } finally {
+      gpuRenderer?.destroy();
       exportRaw.delete();
     }
   } catch (error) {

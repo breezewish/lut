@@ -129,7 +129,7 @@ test("renders only after the exposure recipe changes", async () => {
     putImageData: (image: { data: Uint8ClampedArray }) => {
       paintedRedValues.push(image.data[0]);
     },
-  } as unknown as CanvasRenderingContext2D);
+  } as unknown as GPUCanvasContext);
   vi.stubGlobal(
     "ImageData",
     class {

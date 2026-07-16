@@ -41,6 +41,12 @@ export class ProcessingClient {
   private activeRender?: RenderBatch;
   private queuedRender?: RenderBatch;
   private stoppedError?: Error;
+  private readonly colorBackend =
+    new URLSearchParams(location.search).get("colorBackend") === "webgpu"
+      ? "webgpu"
+      : "cpu";
+  private readonly validateGpu =
+    new URLSearchParams(location.search).get("validateGpu") === "1";
 
   constructor() {
     this.worker.onmessage = ({ data }: MessageEvent<WorkerReply>) => {
@@ -135,9 +141,18 @@ export class ProcessingClient {
     this.rejectQueuedRender(
       new Error("Preview render was superseded by full-resolution export."),
     );
-    const reply = await this.send({ type: "export", fileId, buffer, ev, lut }, [
-      buffer,
-    ]);
+    const reply = await this.send(
+      {
+        type: "export",
+        fileId,
+        buffer,
+        ev,
+        lut,
+        colorBackend: this.colorBackend,
+        validateGpu: this.validateGpu,
+      },
+      [buffer],
+    );
     if (reply.ok && reply.type === "export") {
       return { tiff: reply.tiff, timings: reply.timings };
     }

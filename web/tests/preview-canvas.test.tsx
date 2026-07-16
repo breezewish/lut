@@ -14,7 +14,7 @@ test("renders the transferred RGBA buffer without another complete copy", async 
   const putImageData = vi.fn();
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
     putImageData,
-  } as unknown as CanvasRenderingContext2D);
+  } as unknown as GPUCanvasContext);
   vi.stubGlobal(
     "ImageData",
     class {

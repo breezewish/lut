@@ -15,7 +15,8 @@
       "node",
       "vite/client",
       "vitest/globals",
-      "@testing-library/jest-dom"
+      "@testing-library/jest-dom",
+      "@webgpu/types"
     ]
   },
   "include": ["web/src", "web/tests", "web/e2e"]

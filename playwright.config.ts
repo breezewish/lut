@@ -2,6 +2,16 @@ import { defineConfig, devices } from "@playwright/test";
 
 const httpPort = Number(process.env.PLAYWRIGHT_HTTP_PORT ?? "42731");
 const httpsPort = httpPort + 1;
+const hardwareWebGpuArgs =
+  process.env.WEBGPU_HARDWARE === "1"
+    ? [
+        "--enable-gpu",
+        "--use-angle=vulkan",
+        "--enable-features=Vulkan",
+        "--disable-vulkan-surface",
+        "--enable-unsafe-webgpu",
+      ]
+    : [];
 
 export default defineConfig({
   testDir: "web/e2e",
@@ -27,7 +37,13 @@ export default defineConfig({
       testMatch: "browser-smoke.spec.ts",
       use: { ...devices["Desktop Firefox"] },
     },
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        launchOptions: { args: hardwareWebGpuArgs },
+      },
+    },
   ],
   webServer: [
     {

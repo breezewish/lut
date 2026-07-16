@@ -37,6 +37,26 @@ impl WasmLut {
         renderer.set_lut(self.parsed.clone());
     }
 
+    /// Returns the LUT edge length for the experimental WebGPU renderer.
+    pub fn size(&self) -> u32 {
+        self.parsed.size() as u32
+    }
+
+    /// Returns the lower CUBE domain bound for the experimental WebGPU renderer.
+    pub fn domain_min(&self) -> Vec<f32> {
+        self.parsed.domain_min().to_vec()
+    }
+
+    /// Returns the upper CUBE domain bound for the experimental WebGPU renderer.
+    pub fn domain_max(&self) -> Vec<f32> {
+        self.parsed.domain_max().to_vec()
+    }
+
+    /// Returns RGB-interleaved CUBE samples for one GPU upload.
+    pub fn samples(&self) -> Vec<f32> {
+        self.parsed.flattened_samples()
+    }
+
     /// Creates a strip encoder with this parsed LUT.
     pub fn create_tiff_encoder(
         &self,
@@ -171,6 +191,23 @@ impl TiffEncoder {
         self.output.reserve(expected);
         self.pipeline.render_rgb16_strip(pixels, &mut self.output);
         Ok(())
+    }
+
+    /// Copies the last CPU-rendered strip for experimental GPU parity checks.
+    pub fn rendered_strip(&self) -> Vec<u16> {
+        self.output.clone()
+    }
+
+    /// Writes an externally rendered RGB16 strip without applying color again.
+    pub fn write_rendered_strip(&mut self, pixels: &[u16]) -> std::result::Result<(), JsError> {
+        let expected = self.writer.next_strip_samples();
+        if pixels.len() != expected {
+            return Err(to_js_error(AlchemyError::InvalidPixelCount {
+                actual: pixels.len(),
+                expected,
+            }));
+        }
+        self.writer.write_strip(pixels).map_err(to_js_error)
     }
 
     pub fn write_strip(&mut self) -> std::result::Result<(), JsError> {

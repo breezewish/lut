@@ -31,6 +31,7 @@ const exportTimings: ExportTimings = {
     rgb16Ms: 9,
     totalMs: 45,
   },
+  colorBackend: "cpu",
   colorProcessingMs: 10,
   deflateMs: 11,
   workerTotalMs: 66,

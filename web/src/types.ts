@@ -61,9 +61,19 @@ export interface PreviewTimings {
 
 export interface ExportTimings {
   libraw: LibRawDecodeTimings;
+  colorBackend: "cpu" | "webgpu";
   colorProcessingMs: number;
   deflateMs: number;
   workerTotalMs: number;
+  gpuUploadMs?: number;
+  gpuComputeAndReadbackMs?: number;
+  gpuValidation?: {
+    sampleCount: number;
+    differingSamples: number;
+    samplesOverTwoCodes: number;
+    maximumDifference: number;
+    meanAbsoluteDifference: number;
+  };
 }
 
 export interface ExportResult {
@@ -118,6 +128,8 @@ export type WorkerCommand =
       buffer: ArrayBuffer;
       ev: number;
       lut: LutDefinition;
+      colorBackend?: "cpu" | "webgpu";
+      validateGpu?: boolean;
     };
 
 export type WorkerReply =
