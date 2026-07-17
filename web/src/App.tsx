@@ -830,9 +830,7 @@ export default function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark" aria-hidden="true">
-            RA
-          </div>
+          <div className="brand-mark" aria-hidden="true" />
           <h1>RAW Alchemy</h1>
         </div>
         <div
@@ -1047,167 +1045,255 @@ export default function App() {
             {selected && selectedLut && (
               <section
                 className="control-panel"
-                aria-label="Processing controls"
+                aria-label="Adjustments and export"
               >
-                <div className="panel-heading">
-                  <div className="panel-heading-copy">
-                    <h2>Adjustments</h2>
-                  </div>
-                  <div className="panel-heading-actions">
-                    {isPreviewProcessing && (
-                      <span
-                        className="processing-indicator"
-                        role="status"
-                        aria-label="Preview processing"
-                      >
-                        <LoaderCircle
-                          className="processing-spinner"
-                          size={14}
-                          aria-hidden="true"
-                        />
-                        Processing
-                      </span>
-                    )}
-                    <Button
-                      size="icon"
-                      variant="quiet"
-                      aria-label="Reset exposure"
-                      onClick={() => setExposure(0)}
-                      disabled={exporting || ev === 0}
-                    >
-                      <RotateCcw size={15} aria-hidden="true" />
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="control-section">
-                  <label>Look</label>
-                  <div className="look-picker">
-                    <div className="look-current">
-                      <strong>{selectedLut.name}</strong>
-                      <span>{selectedLut.group} · built-in transform</span>
+                <div className="panel-section">
+                  <div className="panel-heading">
+                    <div className="panel-heading-copy">
+                      <h2>Adjustments</h2>
                     </div>
-                    {workingLuts.length > 1 && (
-                      <div
-                        className="look-working-set"
-                        aria-label="Recent looks"
+                    <div className="panel-heading-actions">
+                      {isPreviewProcessing && (
+                        <span
+                          className="processing-indicator"
+                          role="status"
+                          aria-label="Preview processing"
+                        >
+                          <LoaderCircle
+                            className="processing-spinner"
+                            size={14}
+                            aria-hidden="true"
+                          />
+                          Processing
+                        </span>
+                      )}
+                      <Button
+                        size="icon"
+                        variant="quiet"
+                        aria-label="Reset exposure"
+                        onClick={() => setExposure(0)}
+                        disabled={exporting || ev === 0}
                       >
-                        {workingLuts.map((lut) => (
-                          <button
-                            key={lut.id}
-                            type="button"
-                            className={lut.id === lutId ? "is-active" : ""}
-                            aria-pressed={lut.id === lutId}
-                            disabled={exporting}
-                            onClick={() => chooseLut(lut.id)}
-                          >
-                            {lut.name}
-                          </button>
-                        ))}
+                        <RotateCcw size={15} aria-hidden="true" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="control-section">
+                    <label>Look</label>
+                    <div className="look-picker">
+                      <div className="look-current">
+                        <strong>{selectedLut.name}</strong>
+                        <span>{selectedLut.group} · built-in transform</span>
                       </div>
-                    )}
-                    <Button
-                      size="compact"
-                      variant="secondary"
-                      aria-expanded={lookBrowserOpen}
-                      onClick={() => setLookBrowserOpen((open) => !open)}
-                      disabled={exporting}
-                    >
-                      <Search size={14} aria-hidden="true" />
-                      {lookBrowserOpen
-                        ? "Close look browser"
-                        : `Browse all ${manifest?.luts.length ?? 27} looks`}
-                    </Button>
-                    {lookBrowserOpen && (
-                      <div className="look-browser">
-                        <div className="search-control">
-                          <Search size={14} aria-hidden="true" />
-                          <input
-                            id="look-search"
-                            type="search"
-                            aria-label="Look"
-                            value={lookQuery}
+                      {workingLuts.length > 1 && (
+                        <div
+                          className="look-working-set"
+                          aria-label="Recent looks"
+                        >
+                          {workingLuts.map((lut) => (
+                            <button
+                              key={lut.id}
+                              type="button"
+                              className={lut.id === lutId ? "is-active" : ""}
+                              aria-pressed={lut.id === lutId}
+                              disabled={exporting}
+                              onClick={() => chooseLut(lut.id)}
+                            >
+                              {lut.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <Button
+                        size="compact"
+                        variant="secondary"
+                        aria-expanded={lookBrowserOpen}
+                        onClick={() => setLookBrowserOpen((open) => !open)}
+                        disabled={exporting}
+                      >
+                        <Search size={14} aria-hidden="true" />
+                        {lookBrowserOpen
+                          ? "Close look browser"
+                          : `Browse all ${manifest?.luts.length ?? 27} looks`}
+                      </Button>
+                      {lookBrowserOpen && (
+                        <div className="look-browser">
+                          <div className="search-control">
+                            <Search size={14} aria-hidden="true" />
+                            <input
+                              id="look-search"
+                              type="search"
+                              aria-label="Look"
+                              value={lookQuery}
+                              disabled={exporting}
+                              placeholder="Search by name or camera family"
+                              onChange={(event) =>
+                                setLookQuery(event.target.value)
+                              }
+                            />
+                          </div>
+                          <Select
+                            label="Built-in V-Log look"
+                            value={lutId}
+                            onValueChange={chooseLut}
+                            options={selectOptions}
                             disabled={exporting}
-                            placeholder="Search by name or camera family"
-                            onChange={(event) =>
-                              setLookQuery(event.target.value)
-                            }
                           />
                         </div>
-                        <Select
-                          label="Built-in V-Log look"
-                          value={lutId}
-                          onValueChange={chooseLut}
-                          options={selectOptions}
+                      )}
+                      <details className="control-help">
+                        <summary>How built-in looks work</summary>
+                        <p>
+                          RAW Alchemy converts camera color to V-Gamut and
+                          V-Log, then applies the selected display transform.
+                          Compare the result before export because each look
+                          responds differently to exposure and color.
+                        </p>
+                      </details>
+                    </div>
+                  </div>
+
+                  <div className="control-section exposure-control">
+                    <div className="control-label-row">
+                      <label htmlFor="exposure">Exposure</label>
+                      <label className="ev-value">
+                        <input
+                          ref={exposureInput}
+                          aria-label="Exposure value"
+                          type="number"
+                          min="-4"
+                          max="4"
+                          step="0.1"
+                          defaultValue={ev}
                           disabled={exporting}
+                          onChange={(event) => {
+                            const value = event.currentTarget.valueAsNumber;
+                            if (Number.isFinite(value)) {
+                              setExposure(value);
+                            }
+                          }}
+                          onBlur={(event) => {
+                            event.currentTarget.value = String(ev);
+                          }}
                         />
-                      </div>
-                    )}
-                    <details className="control-help">
-                      <summary>How built-in looks work</summary>
-                      <p>
-                        RAW Alchemy converts camera color to V-Gamut and V-Log,
-                        then applies the selected display transform. Compare the
-                        result before export because each look responds
-                        differently to exposure and color.
-                      </p>
-                    </details>
+                        <span>EV</span>
+                      </label>
+                    </div>
+                    <input
+                      ref={exposureRange}
+                      id="exposure"
+                      type="range"
+                      min="-4"
+                      max="4"
+                      step="0.1"
+                      defaultValue={ev}
+                      aria-valuetext={`${ev} EV`}
+                      disabled={exporting}
+                      style={
+                        {
+                          "--range-progress": `${((ev + 4) / 8) * 100}%`,
+                        } as CSSProperties
+                      }
+                      onInput={(event) =>
+                        scheduleExposurePreview(event.currentTarget)
+                      }
+                      onChange={(event) =>
+                        scheduleExposurePreview(event.currentTarget)
+                      }
+                    />
+                    <div className="range-scale" aria-hidden="true">
+                      <span>−4</span>
+                      <span>0</span>
+                      <span>+4</span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="control-section exposure-control">
-                  <div className="control-label-row">
-                    <label htmlFor="exposure">Exposure</label>
-                    <label className="ev-value">
-                      <input
-                        ref={exposureInput}
-                        aria-label="Exposure value"
-                        type="number"
-                        min="-4"
-                        max="4"
-                        step="0.1"
-                        defaultValue={ev}
-                        disabled={exporting}
-                        onChange={(event) => {
-                          const value = event.currentTarget.valueAsNumber;
-                          if (Number.isFinite(value)) {
-                            setExposure(value);
-                          }
-                        }}
-                        onBlur={(event) => {
-                          event.currentTarget.value = String(ev);
-                        }}
-                      />
-                      <span>EV</span>
-                    </label>
+                <div className="panel-section" aria-label="Export controls">
+                  <div className="panel-heading">
+                    <div className="panel-heading-copy">
+                      <h2>Output</h2>
+                      <p>16-bit uncompressed TIFF</p>
+                    </div>
                   </div>
-                  <input
-                    ref={exposureRange}
-                    id="exposure"
-                    type="range"
-                    min="-4"
-                    max="4"
-                    step="0.1"
-                    defaultValue={ev}
-                    aria-valuetext={`${ev} EV`}
-                    disabled={exporting}
-                    style={
-                      {
-                        "--range-progress": `${((ev + 4) / 8) * 100}%`,
-                      } as CSSProperties
-                    }
-                    onInput={(event) =>
-                      scheduleExposurePreview(event.currentTarget)
-                    }
-                    onChange={(event) =>
-                      scheduleExposurePreview(event.currentTarget)
-                    }
-                  />
-                  <div className="range-scale" aria-hidden="true">
-                    <span>−4</span>
-                    <span>0</span>
-                    <span>+4</span>
+                  <dl className="file-details">
+                    <div>
+                      <dt>Camera</dt>
+                      <dd>{selected.camera || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Size</dt>
+                      <dd>{selected.dimensions || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Look</dt>
+                      <dd>{selectedLut.name}</dd>
+                    </div>
+                  </dl>
+                  <details className="lut-assumption">
+                    <summary>
+                      Verify color space in your destination editor
+                    </summary>
+                    <p>
+                      This look does not declare an output color space, so
+                      another editor may interpret the TIFF differently. Check
+                      the result in your destination editor before production
+                      use.
+                    </p>
+                    <p>
+                      <strong>Why?</strong> The browser preview displays the LUT
+                      values as sRGB. The exported TIFF intentionally has no
+                      embedded profile rather than claiming one the source LUT
+                      does not provide.
+                    </p>
+                  </details>
+                  <div className="export-feedback" aria-live="polite">
+                    {selected.status === "export-error" ? (
+                      <span className="selected-error" role="alert">
+                        {selected.error}
+                      </span>
+                    ) : exportProgress ? (
+                      <strong>
+                        Exporting {exportProgress.current} of{" "}
+                        {exportProgress.total}
+                        <span> · {exportProgress.fileName}</span>
+                      </strong>
+                    ) : exportSummary ? (
+                      <span>{exportSummary}</span>
+                    ) : (
+                      <span>Full-resolution processing starts on export.</span>
+                    )}
                   </div>
+                  {exporting && exportProgress && exportProgress.total > 1 ? (
+                    <Button
+                      variant="quiet"
+                      disabled={exportProgress.stopRequested}
+                      onClick={() => {
+                        stopAfterCurrent.current = true;
+                        setExportProgress((current) =>
+                          current
+                            ? { ...current, stopRequested: true }
+                            : current,
+                        );
+                      }}
+                    >
+                      <CircleStop size={16} aria-hidden="true" />
+                      {exportProgress.stopRequested
+                        ? "Stopping after current…"
+                        : "Stop after current"}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant={items.length > 1 ? "secondary" : "primary"}
+                      onClick={() => void exportItems([selected])}
+                      disabled={
+                        isDecodeFailure(selected) || exporting || !canStartExport
+                      }
+                    >
+                      <ImageDown size={16} aria-hidden="true" /> Export selected
+                    </Button>
+                  )}
                 </div>
               </section>
             )}
@@ -1368,97 +1454,8 @@ export default function App() {
               </div>
             </section>
 
-            {selected && selectedLut && (
-              <section className="output-panel" aria-label="Export controls">
-                <div className="panel-heading">
-                  <div className="panel-heading-copy">
-                    <h2>Output</h2>
-                    <p>16-bit uncompressed TIFF</p>
-                  </div>
-                </div>
-                <dl className="file-details">
-                  <div>
-                    <dt>Camera</dt>
-                    <dd>{selected.camera || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Size</dt>
-                    <dd>{selected.dimensions || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Look</dt>
-                    <dd>{selectedLut.name}</dd>
-                  </div>
-                </dl>
-                <details className="lut-assumption">
-                  <summary>
-                    Verify color space in your destination editor
-                  </summary>
-                  <p>
-                    This look does not declare an output color space, so another
-                    editor may interpret the TIFF differently. Check the result
-                    in your destination editor before production use.
-                  </p>
-                  <p>
-                    <strong>Why?</strong> The browser preview displays the LUT
-                    values as sRGB. The exported TIFF intentionally has no
-                    embedded profile rather than claiming one the source LUT
-                    does not provide.
-                  </p>
-                </details>
-                <div className="export-feedback" aria-live="polite">
-                  {selected.status === "export-error" ? (
-                    <span className="selected-error" role="alert">
-                      {selected.error}
-                    </span>
-                  ) : exportProgress ? (
-                    <strong>
-                      Exporting {exportProgress.current} of{" "}
-                      {exportProgress.total}
-                      <span> · {exportProgress.fileName}</span>
-                    </strong>
-                  ) : exportSummary ? (
-                    <span>{exportSummary}</span>
-                  ) : (
-                    <span>Full-resolution processing starts on export.</span>
-                  )}
-                </div>
-                {exporting && exportProgress && exportProgress.total > 1 ? (
-                  <Button
-                    variant="quiet"
-                    disabled={exportProgress.stopRequested}
-                    onClick={() => {
-                      stopAfterCurrent.current = true;
-                      setExportProgress((current) =>
-                        current ? { ...current, stopRequested: true } : current,
-                      );
-                    }}
-                  >
-                    <CircleStop size={16} aria-hidden="true" />
-                    {exportProgress.stopRequested
-                      ? "Stopping after current…"
-                      : "Stop after current"}
-                  </Button>
-                ) : (
-                  <Button
-                    variant={items.length > 1 ? "secondary" : "primary"}
-                    onClick={() => void exportItems([selected])}
-                    disabled={
-                      isDecodeFailure(selected) || exporting || !canStartExport
-                    }
-                  >
-                    <ImageDown size={16} aria-hidden="true" /> Export selected
-                  </Button>
-                )}
-              </section>
-            )}
           </div>
 
-          <footer className="workspace-footer">
-            <span>Camera white balance + color matrix</span>
-            <span>Automatic boost off</span>
-            <span>Lens correction off</span>
-          </footer>
         </main>
       </div>
     </div>
