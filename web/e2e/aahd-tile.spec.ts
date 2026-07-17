@@ -32,4 +32,6 @@ test("tiled AAHD matches full-frame math across seams and CFA phases", async ({
       256 * 1024 * 1024,
     );
   }
+  expect(report.results[0].gradedValidation.differingSamples).toBe(0);
+  expect(report.results[0].gradedValidation.maximumDifference).toBe(0);
 });

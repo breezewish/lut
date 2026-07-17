@@ -11,7 +11,7 @@ export interface AahdTile {
   localCoreY: number;
 }
 
-export const AAHD_TILE_CORE_SIZE = 512;
+export const AAHD_TILE_CORE_SIZE = 1024;
 export const AAHD_TILE_HALO = 12;
 
 /**

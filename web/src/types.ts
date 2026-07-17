@@ -81,6 +81,7 @@ export interface PreviewTimings {
 
 export interface ExportTimings {
   libraw: LibRawDecodeTimings;
+  rawBackend?: "libraw" | "webgpu-aahd";
   colorBackend: "cpu" | "webgpu" | "onnx";
   colorProcessingMs: number;
   tiffEncodingMs: number;
@@ -88,6 +89,12 @@ export interface ExportTimings {
   gpuInputPreparationMs?: number;
   gpuExecutionAndReadbackMs?: number;
   gpuOutputPreparationMs?: number;
+  webGpuAahd?: {
+    timings: import("./lib/libraw-aahd").LibRawAahdTimings;
+    resources: NonNullable<
+      import("./lib/libraw-aahd").LibRawAahdResult["resources"]
+    >;
+  };
   gpuValidation?: {
     sampleCount: number;
     differingSamples: number;
@@ -152,6 +159,7 @@ export type WorkerCommand =
       ev: number;
       lut: LutDefinition;
       colorBackend?: "cpu" | "webgpu" | "onnx";
+      rawBackend?: "libraw" | "webgpu-aahd";
       validateGpu?: boolean;
     }
   | {

@@ -3,6 +3,7 @@ import {
   demosaicLibRawAahdWithWgsl,
 } from "./lib/libraw-aahd";
 import type { SensorImageInfo } from "./lib/onnx-demosaic";
+import { WebGpuColorRenderer } from "./lib/webgpu-color";
 
 const CFA_PHASES = [
   [0, 1, 1, 2],
@@ -27,12 +28,14 @@ export function mountAahdTileBenchmark(): void {
 }
 
 async function runFixtures() {
-  const width = 546;
-  const height = 530;
+  const width = 1058;
+  const height = 1042;
   const mosaic = createDependencyFixture(width, height);
   const results = [];
-  for (const cfaPattern of CFA_PHASES) {
-    results.push(await compareFixture(mosaic, width, height, cfaPattern));
+  for (const [index, cfaPattern] of CFA_PHASES.entries()) {
+    results.push(
+      await compareFixture(mosaic, width, height, cfaPattern, index === 0),
+    );
   }
   const smallWidth = 64;
   const smallHeight = 46;
@@ -52,6 +55,7 @@ async function compareFixture(
   width: number,
   height: number,
   cfaPattern: number[],
+  validateDirectColor = false,
 ) {
   const info = createSensorInfo(width, height, cfaPattern);
   const fullFrame = new Uint16Array(info.sampleCount * 3);
@@ -65,12 +69,43 @@ async function compareFixture(
     fullFrame,
   );
   const tiled = await demosaicLibRawAahdTiledWithWgsl(mosaic, info, fullFrame);
+  let gradedValidation;
+  if (validateDirectColor) {
+    const renderer = await WebGpuColorRenderer.create(createIdentityLut());
+    try {
+      const uploaded = await renderer.renderStrip(fullFrame, 0);
+      gradedValidation = (
+        await demosaicLibRawAahdTiledWithWgsl(
+          mosaic,
+          info,
+          uploaded.pixels,
+          undefined,
+          { renderer, ev: 0 },
+        )
+      ).validation;
+    } finally {
+      renderer.destroy();
+    }
+  }
   return {
     width,
     height,
     cfaPattern,
     validation: tiled.validation,
+    gradedValidation,
     resources: tiled.resources,
+  };
+}
+
+function createIdentityLut() {
+  return {
+    size: () => 2,
+    domain_min: () => new Float32Array([0, 0, 0]),
+    domain_max: () => new Float32Array([1, 1, 1]),
+    samples: () =>
+      new Float32Array([
+        0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1,
+      ]),
   };
 }
 
@@ -79,22 +114,22 @@ function createDependencyFixture(width: number, height: number): Uint16Array {
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       let value = (x * 193 + y * 977 + ((x ^ y) & 31) * 211) & 0x3fff;
-      if (x >= 512) value = 0x3fff - value;
-      if (y >= 512) value = (value + 7001) & 0x3fff;
+      if (x >= 1024) value = 0x3fff - value;
+      if (y >= 1024) value = (value + 7001) & 0x3fff;
       if (((x >> 2) + (y >> 2)) % 2 === 0) value >>= 3;
       mosaic[y * width + x] = value;
     }
   }
   for (const [x, y, value] of [
-    [510, 510, 0],
-    [512, 510, 0x3fff],
-    [514, 510, 1],
-    [510, 512, 0x3fff],
-    [512, 512, 0],
-    [514, 512, 0x3fff],
-    [510, 514, 1],
-    [512, 514, 0x3fff],
-    [514, 514, 0],
+    [1022, 1022, 0],
+    [1024, 1022, 0x3fff],
+    [1026, 1022, 1],
+    [1022, 1024, 0x3fff],
+    [1024, 1024, 0],
+    [1026, 1024, 0x3fff],
+    [1022, 1026, 1],
+    [1024, 1026, 0x3fff],
+    [1026, 1026, 0],
   ]) {
     if (x < width && y < height) mosaic[y * width + x] = value;
   }

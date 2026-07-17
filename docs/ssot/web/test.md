@@ -23,6 +23,11 @@
 - A valid-corrupt-valid batch exports only the two valid TIFFs, keeps their dimensions isolated, marks the corrupt file failed, continues to the later file, and reports the exact partial-success summary.
 - Stopping a multi-file export finishes the active file, omits the remaining files from the ZIP, and reports the partial count.
 - Browser export reads bounded zero-copy LibRaw views, transfers only those source strips into the color WASM, and fails if the encoder's requested strip sizes do not consume the image exactly.
+- An opt-in hardware test exports the Sony Bayer RAW through tiled WebGPU AAHD,
+  direct GPU corrected-v2 color/LUT processing, two bounded output readbacks,
+  and streamed TIFF encoding; every decoded RGB16 channel stays within two
+  codes of the default LibRaw export and the reported backend cannot be a
+  fallback.
 - An opt-in production Chromium benchmark records cold and warm file reading, embedded JPEG, first processed frame, settled processed frame, Canvas drawing, and phased LibRaw Preview without substituting a test decoder; after those samples it records one independent full LibRaw decode, color processing, TIFF encoding, Blob, and export boundary so Export cannot contaminate Preview timings.
 - An opt-in production Chromium benchmark measures at least 20 EV edits, every initially uncached built-in LUT, and at least 20 cached LUT changes from control input through Canvas drawing; it enforces the preview p95 budgets and records Worker LUT-load and color stages.
 - A 60-event EV burst scheduled at nominal 60 Hz in the production Chromium bundle finishes input dispatch within 1.1 seconds, paints at least 12 monotonically newer interaction frames, meets the first and final interaction latency budgets, and finishes with the exact current 1024px settled frame.

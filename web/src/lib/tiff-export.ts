@@ -51,6 +51,63 @@ export interface GpuRenderedTiff extends RenderedTiff {
 
 const MAX_GPU_RGB16_DIFFERENCE = 2;
 
+/** Writes already color-rendered row bands into the encoder's fixed strips. */
+export class RenderedTiffStream {
+  private pending = new Uint16Array(0);
+  private sampleCount = 0;
+  private tiffEncodingMs = 0;
+  private consumed = false;
+
+  constructor(private readonly encoder: GpuStripTiffEncoder) {}
+
+  write(pixels: Uint16Array): void {
+    if (this.consumed) throw new Error("TIFF stream is already finished.");
+    const available = new Uint16Array(this.pending.length + pixels.length);
+    available.set(this.pending);
+    available.set(pixels, this.pending.length);
+    let offset = 0;
+    for (;;) {
+      const requested = this.encoder.next_strip_samples();
+      if (requested === 0 || requested > available.length - offset) break;
+      const startedAt = performance.now();
+      this.encoder.write_rendered_strip(
+        available.subarray(offset, offset + requested),
+      );
+      this.tiffEncodingMs += performance.now() - startedAt;
+      offset += requested;
+      this.sampleCount += requested;
+    }
+    this.pending = available.slice(offset);
+  }
+
+  finish(expectedSamples: number): RenderedTiff {
+    if (this.pending.length !== 0 || this.sampleCount !== expectedSamples) {
+      throw new Error(
+        `TIFF stream consumed ${this.sampleCount} samples with ${this.pending.length} pending; expected ${expectedSamples}.`,
+      );
+    }
+    if (this.encoder.next_strip_samples() !== 0) {
+      throw new Error(
+        "TIFF encoder still expects pixels after the final band.",
+      );
+    }
+    const startedAt = performance.now();
+    this.consumed = true;
+    const bytes = this.encoder.finish();
+    this.tiffEncodingMs += performance.now() - startedAt;
+    return {
+      bytes,
+      colorProcessingMs: 0,
+      tiffEncodingMs: this.tiffEncodingMs,
+    };
+  }
+
+  free(): void {
+    if (!this.consumed) this.encoder.free();
+    this.consumed = true;
+  }
+}
+
 /**
  * Sends only bounded views of the decoded source into the color WASM. The
  * generated binding copies each view, so passing the complete image here would

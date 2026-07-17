@@ -28,6 +28,13 @@ Export selected downloads one uncompressed RGB16 TIFF. Export all processes nonf
 
 Export actions remain disabled until the selected processed preview matches the visible EV and LUT. This prevents an undecoded or stale recipe from being exported before the user has compared it.
 
+The default export uses pinned LibRaw. An explicit experimental
+`rawBackend=webgpu-aahd` query is available for supported Bayer RAW files. It
+uses tiled LibRaw-parity AAHD and corrected-v2 color/LUT processing on WebGPU,
+then streams bounded RGB16 bands into the TIFF encoder. Missing WebGPU,
+unsupported sensors, and adapter limits fail explicitly; the experimental
+route never changes decoder silently.
+
 A full-resolution export failure shows the concrete error, does not invalidate an already rendered preview, and does not mislabel the RAW as undecodable. The failed file remains eligible for an explicit retry. Removing the selected file or clearing the queue releases its persistent decoded preview cache.
 
 Import, queue selection, EV, and LUT controls are disabled while export is active. This keeps the visible recipe and serial Worker queue stable until the export finishes or stops after the current file.

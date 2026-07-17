@@ -375,11 +375,13 @@ This is the immediate required deliverable. Do not start Phase 3 until this
 gate is met and reported.
 
 Phase 2 completed on 2026-07-17. The `libraw-aahd-wgsl-tiled` benchmark route
-uses 512 x 512 cores, a conservative 12-pixel halo, two bounded tile sweeps
+uses 1024 x 1024 cores, a conservative 12-pixel halo, two bounded tile sweeps
 around the exact CPU row-order direction refinement, and reusable buffers.
 The 26 MP Sony oracle had zero final-channel differences in one cold and four
-warm runs. Peak WebGPU buffer allocation was 87,789,308 bytes and the maximum
-binding was 52,016,640 bytes. The full-frame parity oracle remained exact.
+warm runs. Phase 2 initially measured 87,789,308 bytes with 512-pixel cores;
+the final 1024-pixel export workspace uses 212,768,508 bytes after adding two
+bounded output readbacks. The maximum binding remains 52,016,640 bytes. The
+full-frame parity oracle remained exact.
 Hardware synthetic tests covered both seam axes, rectangular edges, all four
 Bayer phases, clustered seam defects, and an image smaller than one tile with
 zero tiled/full-frame differences. Phase 3 may now begin; it remains
@@ -423,6 +425,39 @@ stays bounded across repeated exports.
 Gate: unit, build, native workspace, and full browser end-to-end suites pass.
 The experimental path is covered by behavior-driven E2E tests on supported
 hardware and cannot silently fall back to a different decoder.
+
+### Phases 3-5 Completion
+
+Phases 3 through 5 completed on 2026-07-17 for full-resolution Bayer export.
+One shared adapter and device own AAHD and corrected-v2 color/LUT pipelines.
+Each final AAHD core enters color processing through a GPU buffer; no
+intermediate ProPhoto RGB16 image crosses the CPU boundary. The final quantized
+tile alone is read back.
+
+Export assembles bounded row bands into the TIFF encoder's fixed strips. Two
+reusable output readbacks overlap tile transfer and CPU TIFF work while one
+separate scratch readback preserves the exact compact Blend-highlight contract.
+No full-resolution RGB16 JavaScript allocation is created unless a diagnostic
+comparison explicitly requests one.
+
+The explicit `rawBackend=webgpu-aahd` query selects this route. Unsupported
+sensor geometry, unavailable WebGPU, and adapter-limit failures remain visible;
+the route never falls back to LibRaw processing. The default export continues
+to use production LibRaw.
+
+On the 6240 x 4168 Sony fixture, the experimental TIFF had 51,361 of
+78,024,960 channel samples differ from production, every difference was one
+code value, and MAE was 0.0006583. One cold and four warm T4 runs used
+212,768,508 bytes of WebGPU buffers with a 52,016,640-byte maximum binding.
+Warm Worker totals were 4.05-4.72 seconds and TIFF encoding was 308-338 ms.
+
+Preview keeps the display-sized production proxy integrated from `main`.
+Full-resolution parity AAHD takes several seconds after tiling and is the wrong
+dependency for first feedback. Hardware interaction tests measured 60.8 ms EV
+first-frame p95, 448.9 ms settled p95, and 137.2 ms warm-LUT first-frame p95,
+all within the product budgets. A single-invocation GPU experiment for the
+strict row-order direction scan was rejected after exceeding two minutes on
+the real fixture; the proven 0.1-0.3 second CPU boundary remains.
 
 ## Correctness Matrix
 

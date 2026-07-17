@@ -13,6 +13,8 @@ import {
   createAahdTiles,
   type AahdTile,
 } from "./aahd-tiles";
+import type { WebGpuColorRenderer } from "./webgpu-color";
+import { getWebGpuRuntime } from "./webgpu-runtime";
 
 export type AahdContract = "deterministic-parallel-candidate" | "libraw-parity";
 
@@ -88,7 +90,8 @@ export interface LibRawAahdResult {
     | "candidate-directions"
     | "aahd"
     | "highlight"
-    | "final";
+    | "final"
+    | "graded-final";
   adapterInfo: {
     vendor: string;
     architecture: string;
@@ -217,6 +220,15 @@ interface Runtime {
   pipelines: Record<EntryPoint, GPUComputePipeline>;
 }
 
+export interface TiledAahdColor {
+  renderer: WebGpuColorRenderer;
+  ev: number;
+}
+
+export type TiledAahdBandWriter = (
+  pixels: Uint16Array<ArrayBuffer>,
+) => void | Promise<void>;
+
 interface Workspace {
   width: number;
   height: number;
@@ -227,6 +239,14 @@ interface Workspace {
   coreHeight: number;
   resources: GPUBuffer[];
   readback: GPUBuffer;
+  outputReadbacks?: [GPUBuffer, GPUBuffer];
+}
+
+interface PendingRgbReadback {
+  buffer: GPUBuffer;
+  bytes: number;
+  ready: Promise<void>;
+  tile: AahdTile;
 }
 
 let runtimePromise: Promise<Runtime> | undefined;
@@ -609,6 +629,8 @@ export async function demosaicLibRawAahdTiledWithWgsl(
   info: SensorImageInfo,
   reference?: Uint16Array,
   capture?: Uint16Array,
+  color?: TiledAahdColor,
+  writeBand?: TiledAahdBandWriter,
 ): Promise<LibRawAahdResult> {
   validateInput(mosaic, info);
   const startedAt = performance.now();
@@ -699,12 +721,41 @@ export async function demosaicLibRawAahdTiledWithWgsl(
   );
   const serialDirectionMs = performance.now() - serialDirectionStartedAt;
 
-  const pixels = new Uint16Array(info.sampleCount * 3);
+  const pixels =
+    reference || capture ? new Uint16Array(info.sampleCount * 3) : undefined;
+  let band = writeBand
+    ? new Uint16Array(
+        info.width * Math.min(info.height, AAHD_TILE_CORE_SIZE) * 3,
+      )
+    : undefined;
+  let bandY = 0;
   let serialHighlightMs = 0;
   let highlightMs = 0;
   let colorMs = 0;
   let refineAndCombineMs = 0;
-  for (const tile of tiles) {
+  const outputReadbacks = workspace.outputReadbacks!;
+  let pendingReadback: PendingRgbReadback | undefined;
+  const consumeReadback = async (pending: PendingRgbReadback) => {
+    const readbackStartedAt = performance.now();
+    const tilePixels = await finishRgbReadback(pending);
+    readbackMs += performance.now() - readbackStartedAt;
+    if (pixels) {
+      writeRgbTile(tilePixels, pending.tile, pixels, info.width, 0);
+    }
+    if (band) {
+      writeRgbTile(tilePixels, pending.tile, band, info.width, bandY);
+      if (pending.tile.coreX + pending.tile.coreWidth === info.width) {
+        await writeBand!(band);
+        bandY += pending.tile.coreHeight;
+        const nextHeight = Math.min(AAHD_TILE_CORE_SIZE, info.height - bandY);
+        band =
+          nextHeight > 0
+            ? new Uint16Array(info.width * nextHeight * 3)
+            : undefined;
+      }
+    }
+  };
+  for (const [tileIndex, tile] of tiles.entries()) {
     prepareTile(runtime.device, workspace, mosaic, info, tile);
     submitPass(runtime, workspace, "clear_tile", true);
     submitPass(runtime, workspace, "initialize_parity");
@@ -742,22 +793,42 @@ export async function demosaicLibRawAahdTiledWithWgsl(
     const colorStartedAt = performance.now();
     submitPass(runtime, workspace, "write_final", false, true);
     await runtime.device.queue.onSubmittedWorkDone();
+    let output = workspace.resources[10];
+    if (color) {
+      color.renderer.renderBuffer(
+        workspace.resources[10],
+        workspace.resources[3],
+        tile.coreWidth * tile.coreHeight,
+        color.ev,
+      );
+      await runtime.device.queue.onSubmittedWorkDone();
+      output = workspace.resources[3];
+    }
     colorMs += performance.now() - colorStartedAt;
-    const readbackStartedAt = performance.now();
-    await readRgbCore(runtime.device, workspace, tile, pixels, info.width);
-    readbackMs += performance.now() - readbackStartedAt;
+    const nextReadback = scheduleRgbReadback(
+      runtime.device,
+      tile,
+      output,
+      outputReadbacks[tileIndex & 1],
+    );
+    if (pendingReadback) await consumeReadback(pendingReadback);
+    pendingReadback = nextReadback;
   }
+  if (pendingReadback) await consumeReadback(pendingReadback);
 
   const validationStartedAt = performance.now();
-  copyCapturedOutput(pixels, capture);
-  const validation = reference ? compareRgb16(pixels, reference) : undefined;
+  if (pixels) copyCapturedOutput(pixels, capture);
+  const validation =
+    reference && pixels ? compareRgb16(pixels, reference) : undefined;
   const validationMs = performance.now() - validationStartedAt;
-  const peakGpuBytes = workspace.resources.reduce(
-    (sum, buffer) => sum + buffer.size,
-    workspace.readback.size,
-  );
+  const peakGpuBytes = [
+    ...workspace.resources,
+    workspace.readback,
+    ...outputReadbacks,
+  ].reduce((sum, buffer) => sum + buffer.size, 0);
   const maximumBufferBytes = Math.max(
     workspace.readback.size,
+    ...outputReadbacks.map((buffer) => buffer.size),
     ...workspace.resources.map((buffer) => buffer.size),
   );
   return {
@@ -766,7 +837,7 @@ export async function demosaicLibRawAahdTiledWithWgsl(
     algorithm: "LibRaw AAHD parity",
     contract: "libraw-parity",
     backend: "native-wgsl",
-    outputStage: "final",
+    outputStage: color ? "graded-final" : "final",
     adapterInfo: {
       vendor: runtime.adapter.info.vendor,
       architecture: runtime.adapter.info.architecture,
@@ -844,27 +915,12 @@ function validateInput(
 }
 
 async function getRuntime(requiredBufferBytes: number): Promise<Runtime> {
-  if (runtimePromise) return runtimePromise;
+  if (runtimePromise) {
+    await getWebGpuRuntime(requiredBufferBytes);
+    return runtimePromise;
+  }
   runtimePromise = (async () => {
-    if (!("gpu" in navigator)) throw new Error("WebGPU is unavailable.");
-    const adapter = await navigator.gpu.requestAdapter({
-      powerPreference: "high-performance",
-    });
-    if (!adapter) throw new Error("No WebGPU adapter is available.");
-    if (
-      requiredBufferBytes > adapter.limits.maxBufferSize ||
-      requiredBufferBytes > adapter.limits.maxStorageBufferBindingSize
-    ) {
-      throw new Error(
-        `The WebGPU adapter cannot bind the required ${requiredBufferBytes}-byte AAHD buffer.`,
-      );
-    }
-    const device = await adapter.requestDevice({
-      requiredLimits: {
-        maxBufferSize: adapter.limits.maxBufferSize,
-        maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
-      },
-    });
+    const { adapter, device } = await getWebGpuRuntime(requiredBufferBytes);
     const module = device.createShaderModule({
       code: shader,
       label: "LibRaw AAHD",
@@ -1025,7 +1081,7 @@ function getTiledWorkspace(
     create(mosaicBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
     create(vectorBytes, GPUBufferUsage.STORAGE),
     create(vectorBytes, GPUBufferUsage.STORAGE),
-    create(vectorBytes, GPUBufferUsage.STORAGE),
+    create(vectorBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC),
     create(vectorBytes, GPUBufferUsage.STORAGE),
     create(scalarBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
     create(scalarBytes, GPUBufferUsage.STORAGE),
@@ -1071,6 +1127,10 @@ function getTiledWorkspace(
       outputBytes,
       GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
     ),
+    outputReadbacks: [
+      create(outputBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ),
+      create(outputBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ),
+    ],
   };
   return cachedTiledWorkspace;
 }
@@ -1131,6 +1191,7 @@ function prepareTile(
 function destroyWorkspace(workspace: Workspace): void {
   for (const buffer of workspace.resources) buffer.destroy();
   workspace.readback.destroy();
+  for (const buffer of workspace.outputReadbacks ?? []) buffer.destroy();
 }
 
 function submitParityInterpolation(
@@ -1173,27 +1234,52 @@ async function readDirectionCore(
   }
 }
 
-async function readRgbCore(
+function scheduleRgbReadback(
   device: GPUDevice,
-  workspace: Workspace,
   tile: AahdTile,
-  destination: Uint16Array,
-  imageWidth: number,
-): Promise<void> {
+  sourceBuffer: GPUBuffer,
+  buffer: GPUBuffer,
+): PendingRgbReadback {
   const rowSamples = tile.coreWidth * 3;
   const bytes = rowSamples * tile.coreHeight * Uint16Array.BYTES_PER_ELEMENT;
-  await copyToReadback(device, workspace, bytes);
-  await workspace.readback.mapAsync(GPUMapMode.READ, 0, bytes);
+  const encoder = device.createCommandEncoder();
+  encoder.copyBufferToBuffer(sourceBuffer, 0, buffer, 0, bytes);
+  device.queue.submit([encoder.finish()]);
+  return {
+    buffer,
+    bytes,
+    ready: buffer.mapAsync(GPUMapMode.READ, 0, bytes),
+    tile,
+  };
+}
+
+async function finishRgbReadback(
+  pending: PendingRgbReadback,
+): Promise<Uint16Array<ArrayBuffer>> {
+  await pending.ready;
   try {
-    const source = new Uint16Array(workspace.readback.getMappedRange(0, bytes));
-    for (let y = 0; y < tile.coreHeight; y += 1) {
-      destination.set(
-        source.subarray(y * rowSamples, (y + 1) * rowSamples),
-        ((tile.coreY + y) * imageWidth + tile.coreX) * 3,
-      );
-    }
+    const source = new Uint16Array(
+      pending.buffer.getMappedRange(0, pending.bytes),
+    );
+    return new Uint16Array(source);
   } finally {
-    workspace.readback.unmap();
+    pending.buffer.unmap();
+  }
+}
+
+function writeRgbTile(
+  source: Uint16Array,
+  tile: AahdTile,
+  destination: Uint16Array,
+  destinationWidth: number,
+  destinationY: number,
+): void {
+  const rowSamples = tile.coreWidth * 3;
+  for (let y = 0; y < tile.coreHeight; y += 1) {
+    destination.set(
+      source.subarray(y * rowSamples, (y + 1) * rowSamples),
+      ((tile.coreY - destinationY + y) * destinationWidth + tile.coreX) * 3,
+    );
   }
 }
 
@@ -1201,15 +1287,10 @@ async function copyToReadback(
   device: GPUDevice,
   workspace: Workspace,
   bytes: number,
+  source = workspace.resources[10],
 ): Promise<void> {
   const encoder = device.createCommandEncoder();
-  encoder.copyBufferToBuffer(
-    workspace.resources[10],
-    0,
-    workspace.readback,
-    0,
-    bytes,
-  );
+  encoder.copyBufferToBuffer(source, 0, workspace.readback, 0, bytes);
   device.queue.submit([encoder.finish()]);
 }
 

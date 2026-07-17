@@ -24,7 +24,7 @@
 - Tiled output matches the corresponding accepted full-frame output exactly,
   while the full-frame output is independently checked against LibRaw or the
   explicitly approved candidate CPU reference.
-- The 512-core, 12-halo tiled parity route compares all 78,024,960 Sony output
+- The 1024-core, 12-halo tiled parity route compares all 78,024,960 Sony output
   channels with the pinned LibRaw oracle in one cold and four warm runs, while
   reporting peak buffer allocation and maximum binding size.
 - A hardware synthetic dependency fixture crosses horizontal and vertical tile
@@ -37,6 +37,15 @@
 - Complete export correctness compares every decoded RGB16 TIFF sample with the
   current production browser/native CLI export; compressed TIFF byte identity
   is not used as the image-quality criterion.
+- The experimental browser export keeps AAHD and corrected-v2 color/LUT work on
+  one WebGPU device, streams final row bands through two bounded output
+  readbacks, and rejects unsupported input without falling back to LibRaw.
+- One cold and four warm complete experimental exports report TIFF encoding,
+  Worker wall time, every AAHD stage, peak GPU allocation, and maximum binding;
+  the decoded Sony TIFF rejects any channel difference above two codes.
+- Production Preview interaction benchmarks remain authoritative for first
+  feedback: they cover 20 EV edits, cold and warm LUT changes, continuous input,
+  and UI responsiveness while RAW decode is active.
 - The horizontal and vertical candidate comparisons check every RGB channel value and report counts, thresholds, maximum location, MAE, RMSE, and PSNR.
 - The direction comparison expands each captured direction to three channels and proves that the selected-candidate mismatch is independently measurable from candidate interpolation.
 - The selected-AAHD and final-ProPhoto comparisons check all 78,024,960 RGB16 channel values on the Sony fixture.

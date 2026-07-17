@@ -3,9 +3,37 @@ import { expect, test, vi } from "vitest";
 import {
   type GpuStripTiffEncoder,
   type StripTiffEncoder,
+  RenderedTiffStream,
   renderTiffInStrips,
   renderTiffInGpuStrips,
 } from "../src/lib/tiff-export";
+
+test("streams rendered bands across fixed TIFF strip boundaries", () => {
+  const sizes = [6, 6, 0];
+  const writes: Uint16Array[] = [];
+  const encoder: GpuStripTiffEncoder = {
+    next_strip_samples: () => sizes[0],
+    render_strip: vi.fn(),
+    rendered_strip: () => new Uint16Array(),
+    write_rendered_strip: (pixels) => {
+      writes.push(new Uint16Array(pixels));
+      sizes.shift();
+    },
+    write_strip: vi.fn(),
+    finish: () => new Uint8Array([73, 73, 42, 0]),
+    free: vi.fn(),
+  };
+  const stream = new RenderedTiffStream(encoder);
+
+  stream.write(new Uint16Array([1, 2, 3, 4]));
+  stream.write(new Uint16Array([5, 6, 7, 8, 9, 10, 11, 12]));
+  expect(stream.finish(12).bytes).toEqual(new Uint8Array([73, 73, 42, 0]));
+  expect(writes).toEqual([
+    new Uint16Array([1, 2, 3, 4, 5, 6]),
+    new Uint16Array([7, 8, 9, 10, 11, 12]),
+  ]);
+  expect(encoder.free).not.toHaveBeenCalled();
+});
 
 test("passes only bounded source views across the color-WASM boundary", () => {
   const pixels = new Uint16Array(600_000);

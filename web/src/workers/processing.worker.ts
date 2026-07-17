@@ -4,7 +4,11 @@ import createLibRaw from "../libraw/libraw.js";
 import initAlchemy, { PreviewRenderer, WasmLut } from "../wasm/alchemy_core.js";
 import { describeProcessingError } from "../lib/errors";
 import { sha256Hex } from "../lib/hash";
-import { renderTiffInGpuStrips, renderTiffInStrips } from "../lib/tiff-export";
+import {
+  RenderedTiffStream,
+  renderTiffInGpuStrips,
+  renderTiffInStrips,
+} from "../lib/tiff-export";
 import type { RenderedTiff } from "../lib/tiff-export";
 import { OnnxColorRenderer } from "../lib/onnx-color";
 import { demosaicOnWebGpu } from "../lib/onnx-demosaic";
@@ -371,6 +375,51 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
     const exportRaw = new module.LibRaw();
     let gpuRenderer: WebGpuColorRenderer | OnnxColorRenderer | undefined;
     try {
+      if (data.rawBackend === "webgpu-aahd") {
+        exportRaw.open(new Uint8Array(data.buffer), false);
+        const sensor = exportRaw.sensorInfo();
+        const mosaic = exportRaw.sensorView(0, sensor.sampleCount);
+        gpuRenderer = await WebGpuColorRenderer.create(lut);
+        const stream = new RenderedTiffStream(
+          lut.create_tiff_encoder(sensor.width, sensor.height, data.ev),
+        );
+        try {
+          const demosaic = await demosaicLibRawAahdTiledWithWgsl(
+            mosaic,
+            sensor,
+            undefined,
+            undefined,
+            { renderer: gpuRenderer, ev: data.ev },
+            (pixels) => stream.write(pixels),
+          );
+          const rendered = stream.finish(sensor.sampleCount * 3);
+          const sensorTimings = exportRaw.sensorTimings();
+          const reply: WorkerReply = {
+            requestId: data.requestId,
+            ok: true,
+            type: "export",
+            fileId: data.fileId,
+            tiff: rendered.bytes,
+            timings: {
+              libraw: sensorDecodeTimings(sensorTimings),
+              rawBackend: "webgpu-aahd",
+              colorBackend: "webgpu",
+              colorProcessingMs: demosaic.timings.colorMs,
+              tiffEncodingMs: rendered.tiffEncodingMs,
+              workerTotalMs: performance.now() - workerStartedAt,
+              gpuExecutionAndReadbackMs: demosaic.timings.totalMs,
+              webGpuAahd: {
+                timings: demosaic.timings,
+                resources: demosaic.resources!,
+              },
+            },
+          };
+          context.postMessage(reply, [rendered.bytes.buffer]);
+          return;
+        } finally {
+          stream.free();
+        }
+      }
       exportRaw.open(new Uint8Array(data.buffer), false);
       const image = exportRaw.imageInfo();
       const colorBackend =
@@ -418,6 +467,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       }
       const timings: ExportTimings = {
         libraw: exportRaw.timings() as LibRawDecodeTimings,
+        rawBackend: "libraw",
         colorBackend,
         colorProcessingMs: rendered.colorProcessingMs,
         tiffEncodingMs: rendered.tiffEncodingMs,
@@ -447,6 +497,25 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
     };
     context.postMessage(reply);
   }
+}
+
+function sensorDecodeTimings(
+  timings: import("../types").LibRawSensorTimings,
+): LibRawDecodeTimings {
+  return {
+    quality: 12,
+    inputCopyMs: timings.inputCopyMs,
+    openMs: timings.openMs,
+    unpackMs: timings.unpackMs,
+    preprocessMs: 0,
+    demosaicMs: 0,
+    postprocessMs: 0,
+    colorConversionMs: 0,
+    previewResizeMs: 0,
+    processRemainderMs: timings.mosaicCopyMs,
+    rgb16Ms: 0,
+    totalMs: timings.totalMs,
+  };
 }
 
 function createPreviewRenderer(

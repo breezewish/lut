@@ -53,6 +53,10 @@ export class ProcessingClient {
   })();
   private readonly validateGpu =
     new URLSearchParams(location.search).get("validateGpu") === "1";
+  private readonly rawBackend =
+    new URLSearchParams(location.search).get("rawBackend") === "webgpu-aahd"
+      ? "webgpu-aahd"
+      : "libraw";
 
   constructor() {
     this.worker.onmessage = ({ data }: MessageEvent<WorkerReply>) => {
@@ -177,6 +181,7 @@ export class ProcessingClient {
         ev,
         lut,
         colorBackend: this.colorBackend,
+        rawBackend: this.rawBackend,
         validateGpu: this.validateGpu,
       },
       [buffer],

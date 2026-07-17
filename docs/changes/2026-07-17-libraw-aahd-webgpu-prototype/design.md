@@ -285,6 +285,42 @@ refinement. Phase 3 must remove the final RGB core readback and combine work on
 one shared device before performance is judged against the post-unpack product
 target.
 
+### GPU-Resident Color and Streamed Export
+
+The productized experimental route uses 1024 x 1024 cores and one shared
+WebGPU adapter and device. AAHD writes its selected, highlighted ProPhoto RGB16
+core into a GPU buffer consumed directly by the existing corrected-v2 exposure
+and 3D LUT shader. Only the final quantized RGB16 core is read back. A bounded
+band assembler adapts core rows to the TIFF encoder's fixed strips without a
+full-frame JavaScript RGB allocation.
+
+Two reusable output readbacks form an explicit depth-two pipeline. While CPU
+prediction and Deflate consume one mapped result, the next tile can execute and
+transfer into the other. The exact compact Blend-highlight transform keeps a
+separate scratch buffer because its CPU row-order statement semantics are part
+of the accepted parity contract. The complete live WebGPU allocation is
+212,768,508 bytes and the largest binding is 52,016,640 bytes.
+
+On the 6240 x 4168 Sony fixture, the complete experimental TIFF differed from
+the default production export in 51,361 of 78,024,960 channel samples. Every
+difference was one code value, no sample exceeded the two-code corrected-v2
+contract, and MAE was 0.0006583. One cold and four warm T4 runs measured warm
+Worker totals of 4.05-4.72 seconds, GPU pipeline totals of 3.66-4.33 seconds,
+color of 129-144 ms, final readback waits of 234-239 ms, and TIFF work of
+308-338 ms.
+
+The route is selected only by `rawBackend=webgpu-aahd`. It rejects missing
+WebGPU, unsupported sensors, and insufficient adapter limits without changing
+decoder. Production export and Preview remain unchanged.
+
+Preview retains the display-sized proxy pipeline integrated from `main`.
+Full-resolution parity AAHD is slower than that first-feedback path and would
+add an unnecessary dependency. On the same T4, the production Preview measured
+60.8 ms EV first-frame p95, 448.9 ms settled p95, 137.2 ms warm-LUT first-frame
+p95, and 17 frames during a 60-event input burst. These results satisfy the
+Preview behavior contract without routing interactive feedback through the
+full-resolution export backend.
+
 ## Resource Trade-offs
 
 The full-frame workspace allocates approximately 2.19 GiB and its largest
