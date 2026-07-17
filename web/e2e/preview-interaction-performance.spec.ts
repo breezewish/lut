@@ -7,7 +7,6 @@ const fixture = resolve(
   process.env.RAW_PERF_FIXTURE ?? "vendor/LibRaw-Wasm/example-sony.ARW",
 );
 const minimumFixturePixels = Number(process.env.RAW_PERF_MIN_PIXELS ?? "0");
-const settledPreviewBudgetMs = minimumFixturePixels >= 33_000_000 ? 700 : 500;
 
 type Draw = {
   at: number;
@@ -83,6 +82,7 @@ test("records production preview interaction latency", async ({
   }
 
   const summary = {
+    previewBackend: ev[0].worker.at(-1)?.previewBackend,
     ev: summarize(ev),
     coldLuts: summarize(coldLuts),
     warmLuts: summarize(warmLuts),
@@ -104,9 +104,10 @@ test("records production preview interaction latency", async ({
     contentType: "application/json",
   });
 
-  expect(summary.ev.firstFrameP95Ms).toBeLessThan(200);
-  expect(summary.ev.settledFrameP95Ms).toBeLessThan(settledPreviewBudgetMs);
-  expect(summary.coldLuts.settledFrameP95Ms).toBeLessThan(500);
+  expect(summary.previewBackend).toBe("webgpu");
+  expect(summary.ev.firstFrameP95Ms).toBeLessThan(80);
+  expect(summary.ev.settledFrameP95Ms).toBeLessThan(80);
+  expect(summary.coldLuts.settledFrameP95Ms).toBeLessThan(200);
   expect(summary.warmLuts.firstFrameP95Ms).toBeLessThan(200);
 });
 
@@ -185,15 +186,24 @@ test("keeps painting fresh frames during continuous EV input", async ({
         ({ label }) => label === "Base preview",
       ) ?? [],
   );
-  const interactive = baseFrames.filter(({ width }) => width === 256);
-  const settled = [...baseFrames]
-    .reverse()
-    .find(({ width }) => width === 1_024);
+  const fullResolution = baseFrames.filter(({ width }) => width === 1_024);
+  const settled = [...fullResolution].reverse().at(0);
+  const previewBackend = await page.evaluate(() => {
+    const entry = performance
+      .getEntriesByName("raw-alchemy:preview-render")
+      .at(-1) as PerformanceMark | undefined;
+    return entry?.detail.previewBackend as "webgpu" | undefined;
+  });
+  const responsiveFrames = fullResolution;
+  if (responsiveFrames.length === 0) {
+    throw new Error("Continuous EV input produced no Preview frames.");
+  }
   const summary = {
+    previewBackend,
     inputDurationMs: burst.endedAt - burst.startedAt,
-    interactiveFrames: interactive.length,
-    firstFrameMs: interactive[0].at - burst.startedAt,
-    finalInteractiveMs: interactive.at(-1)!.at - burst.endedAt,
+    fullResolutionFrames: fullResolution.length,
+    firstFrameMs: responsiveFrames[0].at - burst.startedAt,
+    finalResponsiveFrameMs: responsiveFrames.at(-1)!.at - burst.endedAt,
     settledMs: settled ? settled.at - burst.endedAt : undefined,
   };
   const reportPath = testInfo.outputPath("continuous-ev-performance.json");
@@ -204,9 +214,10 @@ test("keeps painting fresh frames during continuous EV input", async ({
   });
 
   expect(burst.endedAt - burst.startedAt).toBeLessThan(1_100);
-  expect(interactive.length).toBeGreaterThanOrEqual(12);
-  expect(interactive[0].at - burst.startedAt).toBeLessThan(80);
-  expect(interactive.at(-1)!.at - burst.endedAt).toBeLessThan(100);
+  expect(previewBackend).toBe("webgpu");
+  expect(responsiveFrames.length).toBeGreaterThanOrEqual(30);
+  expect(responsiveFrames[0].at - burst.startedAt).toBeLessThan(80);
+  expect(responsiveFrames.at(-1)!.at - burst.endedAt).toBeLessThan(100);
   expect(settled).toBeDefined();
   expect(settled!.at - burst.endedAt).toBeLessThan(500);
 });

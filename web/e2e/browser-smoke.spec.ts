@@ -12,7 +12,15 @@ test("imports, previews, and exports from the HTTPS production bundle", async ({
 }) => {
   await page.goto("/");
   expect(await page.evaluate(() => isSecureContext)).toBe(true);
+  const hasWebGpu = await page.evaluate(() => "gpu" in navigator);
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
+  if (!hasWebGpu) {
+    await expect(page.getByRole("alert")).toContainText(
+      "WebGPU is required to process RAW files",
+    );
+    await expect(page.getByLabel("Base preview")).toHaveCount(0);
+    return;
+  }
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 20_000,
   });

@@ -9,6 +9,7 @@
 - A strict CUBE parser validates axis order, domain, scientific notation, finite values, sample count, and a non-affine LUT's distinct outputs for all six tetrahedral branches and their shared boundaries.
 - Corrected preview applies EV, including both supported boundaries, to both Base and LUT views while preserving the requested aspect ratio.
 - The browser preview source requests only contributing decoded rows, retains exactly the pixels used at the requested display size, and rejects incomplete or inconsistent rows.
+- The completed browser preview source can move exactly once into WebGPU ownership, after which the Rust source reports its missing pixels instead of retaining a duplicate allocation.
 - TIFF export produces a readable uncompressed RGB16 image with the requested dimensions.
 - A multi-strip TIFF render visits contiguous source ranges, bounds each quantized strip to approximately 1 MB, and produces contiguous uncompressed strips.
 - The browser export adapter reads contiguous source views of at most approximately 1 MB into the stateful color-WASM encoder and rejects inconsistent strip contracts.

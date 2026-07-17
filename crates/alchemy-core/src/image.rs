@@ -105,6 +105,11 @@ impl PreviewSource {
         }
         Ok(&self.pixels)
     }
+
+    pub(crate) fn take_pixels(&mut self) -> Result<Vec<u16>> {
+        self.pixels()?;
+        Ok(std::mem::take(&mut self.pixels))
+    }
 }
 
 #[cfg(test)]
@@ -148,6 +153,16 @@ mod tests {
             .render_preview(source.pixels().unwrap(), 2, 2, 2)
             .unwrap();
         assert_eq!(cached, direct);
+
+        let moved = source.take_pixels().unwrap();
+        assert_eq!(moved.len(), 12);
+        assert!(matches!(
+            source.pixels(),
+            Err(AlchemyError::InvalidPixelCount {
+                actual: 0,
+                expected: 12
+            })
+        ));
     }
 
     #[test]

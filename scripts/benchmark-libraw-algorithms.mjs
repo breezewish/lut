@@ -3,12 +3,19 @@ import { resolve } from "node:path";
 
 import createLibRaw from "../web/src/libraw/libraw.js";
 
-const algorithms = [
+const availableAlgorithms = [
   { name: "AHD", quality: 3 },
   { name: "DCB", quality: 4 },
   { name: "AAHD", quality: 12 },
 ];
 const arguments_ = process.argv.slice(2);
+const requestedAlgorithm = argumentValue("--algorithm")?.toUpperCase();
+const algorithms = requestedAlgorithm
+  ? availableAlgorithms.filter(({ name }) => name === requestedAlgorithm)
+  : availableAlgorithms;
+if (algorithms.length === 0) {
+  throw new Error("--algorithm must be AHD, DCB, or AAHD");
+}
 const fixture = resolve(
   argumentValue("--fixture") ?? "vendor/LibRaw-Wasm/example-sony.ARW",
 );

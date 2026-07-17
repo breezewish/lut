@@ -15,7 +15,17 @@ test("turns opaque Embind exceptions into an actionable RAW error", () => {
   ).toBe(
     "Unable to read this RAW. The file may be damaged, or its camera format may not be supported yet.",
   );
+  expect(
+    describeProcessingError(
+      new Error("LibRaw std::runtime_error: LibRaw could not open: I/O error"),
+    ),
+  ).toBe(
+    "Unable to read this RAW. The file may be damaged, or its camera format may not be supported yet.",
+  );
   expect(describeProcessingError(new Error("LUT integrity check failed"))).toBe(
     "LUT integrity check failed",
   );
+  expect(
+    describeProcessingError(new Error("LibRaw AAHD shader failed at line 42")),
+  ).toBe("LibRaw AAHD shader failed at line 42");
 });

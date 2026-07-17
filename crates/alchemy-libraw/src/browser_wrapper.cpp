@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -31,6 +32,14 @@ struct DecodeTimings {
   double preview_resize_ms = 0;
   double process_remainder_ms = 0;
   double rgb16_ms = 0;
+  double total_ms = 0;
+};
+
+struct SensorTimings {
+  double input_copy_ms = 0;
+  double open_ms = 0;
+  double unpack_ms = 0;
+  double mosaic_copy_ms = 0;
   double total_ms = 0;
 };
 
@@ -79,6 +88,152 @@ public:
     timings.preview_resize_ms = preview_resize_ms_;
   }
 
+  void enable_aahd_capture() {
+    capture_aahd_ = true;
+    aahd_input_.clear();
+    aahd_horizontal_.clear();
+    aahd_vertical_.clear();
+    aahd_chosen_directions_.clear();
+    aahd_horizontal_homogeneity_.clear();
+    aahd_vertical_homogeneity_.clear();
+    aahd_directions_.clear();
+    aahd_output_.clear();
+    aahd_highlight_.clear();
+    scale_multipliers_.fill(0);
+    output_matrix_.fill(0);
+    pre_multipliers_.fill(0);
+    yuv_matrix_.fill(0);
+    aahd_hot_pixel_ms_ = 0;
+  }
+
+  void disable_aahd_capture() {
+    capture_aahd_ = false;
+    std::vector<std::uint16_t>().swap(aahd_input_);
+    std::vector<std::uint16_t>().swap(aahd_horizontal_);
+    std::vector<std::uint16_t>().swap(aahd_vertical_);
+    std::vector<std::uint8_t>().swap(aahd_chosen_directions_);
+    std::vector<std::uint8_t>().swap(aahd_horizontal_homogeneity_);
+    std::vector<std::uint8_t>().swap(aahd_vertical_homogeneity_);
+    std::vector<std::uint8_t>().swap(aahd_directions_);
+    std::vector<std::uint16_t>().swap(aahd_output_);
+    std::vector<std::uint16_t>().swap(aahd_highlight_);
+  }
+
+  const std::vector<std::uint16_t> &aahd_input() const { return aahd_input_; }
+  const std::vector<std::uint16_t> &aahd_output() const { return aahd_output_; }
+  const std::vector<std::uint16_t> &aahd_highlight() const {
+    return aahd_highlight_;
+  }
+  const std::vector<std::uint16_t> &aahd_horizontal() const {
+    return aahd_horizontal_;
+  }
+  const std::vector<std::uint16_t> &aahd_vertical() const {
+    return aahd_vertical_;
+  }
+  const std::vector<std::uint8_t> &aahd_directions() const {
+    return aahd_directions_;
+  }
+  const std::vector<std::uint8_t> &aahd_chosen_directions() const {
+    return aahd_chosen_directions_;
+  }
+  const std::vector<std::uint8_t> &aahd_horizontal_homogeneity() const {
+    return aahd_horizontal_homogeneity_;
+  }
+  const std::vector<std::uint8_t> &aahd_vertical_homogeneity() const {
+    return aahd_vertical_homogeneity_;
+  }
+  const std::array<float, 4> &scale_multipliers() const {
+    return scale_multipliers_;
+  }
+  const std::array<float, 12> &output_matrix() const { return output_matrix_; }
+  const std::array<float, 4> &pre_multipliers() const {
+    return pre_multipliers_;
+  }
+  const std::array<float, 9> &yuv_matrix() const { return yuv_matrix_; }
+  const std::array<unsigned, 3> &channel_minimum() const {
+    return channel_minimum_;
+  }
+  const std::array<unsigned, 3> &channel_maximum() const {
+    return channel_maximum_;
+  }
+  double aahd_hot_pixel_ms() const { return aahd_hot_pixel_ms_; }
+
+  void mark_aahd_hot_stage(bool finished) {
+    if (!capture_aahd_) return;
+    if (finished) {
+      aahd_hot_pixel_ms_ = emscripten_get_now() - aahd_hot_started_at_;
+    } else {
+      aahd_hot_started_at_ = emscripten_get_now();
+    }
+  }
+
+  void capture_aahd_candidates(const void *horizontal, const void *vertical,
+                               const char *directions,
+                               int padded_width, int padded_height,
+                               int margin) {
+    if (!capture_aahd_) return;
+    const auto width = imgdata.sizes.iwidth;
+    const auto height = imgdata.sizes.iheight;
+    if (padded_width != int(width) + margin * 2 ||
+        padded_height != int(height) + margin * 2) {
+      throw std::runtime_error("LibRaw returned invalid AAHD capture geometry");
+    }
+    const auto *horizontal_rgb =
+        static_cast<const std::uint16_t *>(horizontal);
+    const auto *vertical_rgb = static_cast<const std::uint16_t *>(vertical);
+    const auto rgb_samples = static_cast<std::size_t>(width) * height * 3;
+    aahd_horizontal_.resize(rgb_samples);
+    aahd_vertical_.resize(rgb_samples);
+    copy_aahd_directions(aahd_directions_, directions, padded_width, margin);
+    for (unsigned row = 0; row < height; ++row) {
+      const auto padded_offset =
+          (static_cast<std::size_t>(row + margin) * padded_width + margin);
+      const auto rgb_offset = static_cast<std::size_t>(row) * width * 3;
+      std::memcpy(aahd_horizontal_.data() + rgb_offset,
+                  horizontal_rgb + padded_offset * 3,
+                  static_cast<std::size_t>(width) * 3 * sizeof(std::uint16_t));
+      std::memcpy(aahd_vertical_.data() + rgb_offset,
+                  vertical_rgb + padded_offset * 3,
+                  static_cast<std::size_t>(width) * 3 * sizeof(std::uint16_t));
+    }
+  }
+
+  void capture_aahd_chosen_directions(const char *directions,
+                                      const char *horizontal_homogeneity,
+                                      const char *vertical_homogeneity,
+                                      int padded_width, int padded_height,
+                                      int margin) {
+    if (!capture_aahd_)
+      return;
+    if (padded_width != int(imgdata.sizes.iwidth) + margin * 2 ||
+        padded_height != int(imgdata.sizes.iheight) + margin * 2) {
+      throw std::runtime_error("LibRaw returned invalid AAHD capture geometry");
+    }
+    copy_aahd_directions(aahd_chosen_directions_, directions, padded_width,
+                         margin);
+    copy_aahd_directions(aahd_horizontal_homogeneity_, horizontal_homogeneity,
+                         padded_width, margin);
+    copy_aahd_directions(aahd_vertical_homogeneity_, vertical_homogeneity,
+                         padded_width, margin);
+  }
+
+protected:
+  void scale_colors_loop(float scale_mul[4]) override {
+    if (capture_aahd_) {
+      std::copy(scale_mul, scale_mul + 4, scale_multipliers_.begin());
+    }
+    LibRaw::scale_colors_loop(scale_mul);
+  }
+
+  void convert_to_rgb_loop(float out_cam[3][4]) override {
+    if (capture_aahd_) {
+      std::copy(&out_cam[0][0], &out_cam[0][0] + 12,
+                output_matrix_.begin());
+      copy_current_image(aahd_highlight_);
+    }
+    LibRaw::convert_to_rgb_loop(out_cam);
+  }
+
 private:
   struct PreviewGeometry {
     unsigned source_width;
@@ -96,8 +251,93 @@ private:
   double demosaic_finished_at_ = 0;
   double color_started_at_ = 0;
   double color_finished_at_ = 0;
+  bool capture_aahd_ = false;
+  std::vector<std::uint16_t> aahd_input_;
+  std::vector<std::uint16_t> aahd_horizontal_;
+  std::vector<std::uint16_t> aahd_vertical_;
+  std::vector<std::uint8_t> aahd_chosen_directions_;
+  std::vector<std::uint8_t> aahd_horizontal_homogeneity_;
+  std::vector<std::uint8_t> aahd_vertical_homogeneity_;
+  std::vector<std::uint8_t> aahd_directions_;
+  std::vector<std::uint16_t> aahd_output_;
+  std::vector<std::uint16_t> aahd_highlight_;
+  std::array<float, 4> scale_multipliers_{};
+  std::array<float, 12> output_matrix_{};
+  std::array<float, 4> pre_multipliers_{};
+  std::array<float, 9> yuv_matrix_{};
+  std::array<unsigned, 3> channel_minimum_{};
+  std::array<unsigned, 3> channel_maximum_{};
+  double aahd_hot_started_at_ = 0;
+  double aahd_hot_pixel_ms_ = 0;
   double preview_resize_ms_ = 0;
   unsigned preview_max_edge_ = 0;
+
+  void copy_aahd_directions(std::vector<std::uint8_t> &destination,
+                            const char *source, int padded_width, int margin) {
+    const auto width = imgdata.sizes.iwidth;
+    const auto height = imgdata.sizes.iheight;
+    destination.resize(static_cast<std::size_t>(width) * height);
+    for (unsigned row = 0; row < height; ++row) {
+      const auto padded_offset =
+          static_cast<std::size_t>(row + margin) * padded_width + margin;
+      std::memcpy(destination.data() + static_cast<std::size_t>(row) * width,
+                  source + padded_offset, width);
+    }
+  }
+
+  void capture_aahd_input() {
+    static constexpr float yuv_coefficients[3][3] = {
+        {0.2627f, 0.6780f, 0.0593f},
+        {-0.13963f, -0.36037f, 0.5f},
+        {0.5034f, -0.4629f, -0.0405f},
+    };
+    const auto width = imgdata.sizes.iwidth;
+    const auto height = imgdata.sizes.iheight;
+    std::copy(std::begin(imgdata.color.pre_mul),
+              std::end(imgdata.color.pre_mul), pre_multipliers_.begin());
+    for (unsigned row = 0; row < 3; ++row) {
+      for (unsigned col = 0; col < 3; ++col) {
+        float value = 0;
+        for (unsigned term = 0; term < 3; ++term) {
+          value += yuv_coefficients[row][term] *
+                   imgdata.color.rgb_cam[term][col];
+        }
+        yuv_matrix_[row * 3 + col] = value;
+      }
+    }
+    aahd_input_.resize(static_cast<std::size_t>(width) * height);
+    for (unsigned channel = 0; channel < 3; ++channel) {
+      channel_minimum_[channel] = imgdata.image[0][channel];
+      channel_maximum_[channel] = 0;
+    }
+    for (unsigned row = 0; row < height; ++row) {
+      for (unsigned col = 0; col < width; ++col) {
+        unsigned channel = COLOR(row, col);
+        if (channel == 3) channel = 1;
+        const auto sample = imgdata.image[row * width + col][channel];
+        aahd_input_[static_cast<std::size_t>(row) * width + col] = sample;
+        if (sample != 0) {
+          channel_minimum_[channel] =
+              std::min(channel_minimum_[channel], unsigned(sample));
+          channel_maximum_[channel] =
+              std::max(channel_maximum_[channel], unsigned(sample));
+        }
+      }
+    }
+  }
+
+  void copy_current_image(std::vector<std::uint16_t> &destination) const {
+    const auto samples =
+        static_cast<std::size_t>(imgdata.sizes.iwidth) * imgdata.sizes.iheight;
+    destination.resize(samples * 3);
+    for (std::size_t index = 0; index < samples; ++index) {
+      for (unsigned channel = 0; channel < 3; ++channel) {
+        destination[index * 3 + channel] = imgdata.image[index][channel];
+      }
+    }
+  }
+
+  void capture_aahd_output() { copy_current_image(aahd_output_); }
 
   static std::size_t oriented_index(unsigned row, unsigned col,
                                     unsigned width, unsigned height,
@@ -286,16 +526,18 @@ private:
   static void start_demosaic(void *raw) {
     auto *processor = static_cast<TimedLibRaw *>(raw);
     processor->demosaic_started_at_ = emscripten_get_now();
-    if (processor->preview_max_edge_ == 0) {
-      return;
+    if (processor->capture_aahd_) processor->capture_aahd_input();
+    if (processor->preview_max_edge_ != 0) {
+      const double resize_started_at = emscripten_get_now();
+      processor->resize_preview();
+      processor->preview_resize_ms_ += emscripten_get_now() - resize_started_at;
     }
-    const double resize_started_at = emscripten_get_now();
-    processor->resize_preview();
-    processor->preview_resize_ms_ += emscripten_get_now() - resize_started_at;
   }
 
   static void finish_demosaic(void *raw) {
-    static_cast<TimedLibRaw *>(raw)->demosaic_finished_at_ = emscripten_get_now();
+    auto *processor = static_cast<TimedLibRaw *>(raw);
+    processor->demosaic_finished_at_ = emscripten_get_now();
+    if (processor->capture_aahd_) processor->capture_aahd_output();
   }
 
   static void start_color_conversion(void *raw) {
@@ -306,6 +548,25 @@ private:
     static_cast<TimedLibRaw *>(raw)->color_finished_at_ = emscripten_get_now();
   }
 };
+
+extern "C" void alchemy_capture_aahd_candidates(
+    LibRaw *raw, const void *horizontal, const void *vertical,
+    const char *directions, int padded_width, int padded_height,
+    int margin) {
+  static_cast<TimedLibRaw *>(raw)->capture_aahd_candidates(
+      horizontal, vertical, directions, padded_width, padded_height, margin);
+}
+
+extern "C" void alchemy_capture_aahd_chosen_directions(
+    LibRaw *raw, const char *directions, const char *horizontal,
+    const char *vertical, int padded_width, int padded_height, int margin) {
+  static_cast<TimedLibRaw *>(raw)->capture_aahd_chosen_directions(
+      directions, horizontal, vertical, padded_width, padded_height, margin);
+}
+
+extern "C" void alchemy_mark_aahd_hot_stage(LibRaw *raw, int finished) {
+  static_cast<TimedLibRaw *>(raw)->mark_aahd_hot_stage(finished != 0);
+}
 
 class BrowserLibRaw {
 public:
@@ -341,9 +602,14 @@ public:
           "LibRaw quality must be AHD (3), DCB (4), or AAHD (12)");
     }
     clear_image();
+    sensor_.clear();
+    processor_.disable_aahd_capture();
     processor_.recycle();
     timings_ = {};
+    sensor_timings_ = {};
+    unpacked_ = false;
     quality_ = quality;
+    half_size_ = half_size;
     total_started_at_ = emscripten_get_now();
     processor_.set_preview_max_edge(preview_max_edge);
     const double copy_started_at = emscripten_get_now();
@@ -431,9 +697,7 @@ public:
   val image_info() {
     if (image_ == nullptr) {
       require_opened();
-      const double unpack_started_at = emscripten_get_now();
-      int status = processor_.unpack();
-      timings_.unpack_ms = emscripten_get_now() - unpack_started_at;
+      int status = ensure_unpacked();
       if (status == LIBRAW_SUCCESS) {
         processor_.reset_process_timings();
         status = processor_.dcraw_process();
@@ -478,6 +742,198 @@ public:
     return result;
   }
 
+  bool supports_webgpu_aahd() {
+    require_opened();
+    const int status = ensure_unpacked();
+    if (status != LIBRAW_SUCCESS) {
+      release_decoder_state();
+      fail("unpack the sensor mosaic", status);
+    }
+
+    const auto &sizes = processor_.imgdata.sizes;
+    const auto &identity = processor_.imgdata.idata;
+    if (processor_.imgdata.rawdata.raw_image == nullptr ||
+        identity.filters <= 1000 || sizes.flip != 0 || sizes.width == 0 ||
+        sizes.height == 0 || sizes.width % 2 != 0 || sizes.height % 2 != 0) {
+      return false;
+    }
+    try {
+      adjusted_black_levels();
+    } catch (const std::runtime_error &error) {
+      if (std::string(error.what()) ==
+          "Spatially varying RAW black levels are not supported") {
+        return false;
+      }
+      throw;
+    }
+    return true;
+  }
+
+  val sensor_info() {
+    require_opened();
+    if (sensor_.empty()) {
+      const int status = ensure_unpacked();
+      if (status != LIBRAW_SUCCESS) {
+        release_decoder_state();
+        fail("unpack the sensor mosaic", status);
+      }
+
+      const auto &sizes = processor_.imgdata.sizes;
+      const auto &idata = processor_.imgdata.idata;
+      const auto &color = processor_.imgdata.rawdata.color;
+      if (processor_.imgdata.rawdata.raw_image == nullptr ||
+          (idata.filters != 9 && idata.filters <= 1000)) {
+        release_decoder_state();
+        throw std::runtime_error(
+            "LibRaw did not return a Bayer or X-Trans sensor mosaic");
+      }
+      if (sizes.width == 0 || sizes.height == 0 ||
+          sizes.left_margin + sizes.width > sizes.raw_width ||
+          sizes.top_margin + sizes.height > sizes.raw_height ||
+          sizes.raw_pitch < sizes.raw_width * sizeof(std::uint16_t)) {
+        release_decoder_state();
+        throw std::runtime_error("LibRaw returned invalid sensor geometry");
+      }
+
+      const auto black = adjusted_black_levels();
+      const double copy_started_at = emscripten_get_now();
+      sensor_.resize(static_cast<std::size_t>(sizes.width) * sizes.height);
+      const std::size_t source_stride = sizes.raw_pitch / sizeof(std::uint16_t);
+      unsigned data_maximum = 0;
+      for (unsigned row = 0; row < sizes.height; ++row) {
+        const auto *source = processor_.imgdata.rawdata.raw_image +
+                             (row + sizes.top_margin) * source_stride +
+                             sizes.left_margin;
+        auto *destination =
+            sensor_.data() + static_cast<std::size_t>(row) * sizes.width;
+        std::memcpy(destination, source, sizes.width * sizeof(std::uint16_t));
+        if (idata.filters != 9) {
+          for (unsigned col = 0; col < sizes.width; ++col) {
+            const unsigned channel = processor_.COLOR(row, col);
+            const unsigned sample =
+                destination[col] > black.channels[channel]
+                    ? destination[col] - black.channels[channel]
+                    : 0;
+            data_maximum = std::max(data_maximum, sample);
+          }
+        }
+      }
+      sensor_timings_.mosaic_copy_ms = emscripten_get_now() - copy_started_at;
+
+      val cfa = val::array();
+      const unsigned cfa_size = idata.filters == 9 ? 6 : 2;
+      for (unsigned row = 0; row < cfa_size; ++row) {
+        for (unsigned col = 0; col < cfa_size; ++col) {
+          cfa.set(row * cfa_size + col, processor_.COLOR(row, col));
+        }
+      }
+      sensor_metadata_ = val::object();
+      sensor_metadata_.set("width", sizes.width);
+      sensor_metadata_.set("height", sizes.height);
+      sensor_metadata_.set("sampleCount", sensor_.size());
+      sensor_metadata_.set("sensorType", idata.filters == 9 ? "xtrans" : "bayer");
+      sensor_metadata_.set("cfaSize", cfa_size);
+      sensor_metadata_.set("cfaPattern", cfa);
+      sensor_metadata_.set("whiteLevel", color.maximum);
+      unsigned scale_range = 0;
+      if (idata.filters != 9 && color.maximum > black.common) {
+        // Mirror LibRaw's adjust_maximum() policy. Its effective AAHD range can
+        // be lower than the advertised white level on cameras whose brightest
+        // meaningful sample is close enough to that level.
+        scale_range = color.maximum - black.common;
+        libraw_decoder_info_t decoder{};
+        processor_.get_decoder_info(&decoder);
+        float threshold = processor_.imgdata.params.adjust_maximum_thr;
+        if (threshold > 0.99999f) {
+          threshold = LIBRAW_DEFAULT_ADJUST_MAXIMUM_THRESHOLD;
+        }
+        if (!(decoder.decoder_flags & LIBRAW_DECODER_FIXEDMAXC) &&
+            threshold >= 0.00001f && data_maximum > 0 &&
+            data_maximum < scale_range &&
+            data_maximum > scale_range * threshold) {
+          scale_range = data_maximum;
+        }
+      }
+      sensor_metadata_.set("aahdScaleRange", scale_range);
+      const auto pre_multipliers =
+          aahd_pre_multipliers(black, scale_range);
+      val pre_multiplier_array = val::array();
+      for (unsigned channel = 0; channel < 4; ++channel) {
+        pre_multiplier_array.set(channel, pre_multipliers[channel]);
+      }
+      sensor_metadata_.set("aahdPreMultipliers", pre_multiplier_array);
+      sensor_metadata_.set("orientation", sizes.flip);
+
+      val black_levels = val::array();
+      val camera_white_balance = val::array();
+      for (unsigned channel = 0; channel < 4; ++channel) {
+        black_levels.set(channel, black.channels[channel]);
+        camera_white_balance.set(channel, color.cam_mul[channel]);
+      }
+      sensor_metadata_.set("blackLevels", black_levels);
+      sensor_metadata_.set("cameraWhiteBalance", camera_white_balance);
+
+      val xyz_to_camera = val::array();
+      for (unsigned channel = 0; channel < 4; ++channel) {
+        for (unsigned xyz = 0; xyz < 3; ++xyz) {
+          xyz_to_camera.set(channel * 3 + xyz, color.cam_xyz[channel][xyz]);
+        }
+      }
+      sensor_metadata_.set("xyzToCamera", xyz_to_camera);
+
+      static constexpr float yuv_coefficients[3][3] = {
+          {0.2627f, 0.6780f, 0.0593f},
+          {-0.13963f, -0.36037f, 0.5f},
+          {0.5034f, -0.4629f, -0.0405f},
+      };
+      val rgb_camera = val::array();
+      val aahd_yuv_matrix = val::array();
+      val prophoto_matrix = val::array();
+      for (unsigned row = 0; row < 3; ++row) {
+        for (unsigned col = 0; col < 4; ++col) {
+          rgb_camera.set(row * 4 + col, color.rgb_cam[row][col]);
+          float yuv = 0;
+          float prophoto = 0;
+          for (unsigned term = 0; term < 3; ++term) {
+            yuv += yuv_coefficients[row][term] * color.rgb_cam[term][col];
+            prophoto += float(LibRaw_constants::prophoto_rgb[row][term] *
+                              color.rgb_cam[term][col]);
+          }
+          if (col < 3) aahd_yuv_matrix.set(row * 3 + col, yuv);
+          prophoto_matrix.set(row * 4 + col, prophoto);
+        }
+      }
+      sensor_metadata_.set("rgbCamera", rgb_camera);
+      sensor_metadata_.set("aahdYuvMatrix", aahd_yuv_matrix);
+      sensor_metadata_.set("librawProPhotoMatrix", prophoto_matrix);
+      sensor_timings_.total_ms = emscripten_get_now() - total_started_at_;
+    }
+    return sensor_metadata_;
+  }
+
+  val sensor_timings() const {
+    if (sensor_.empty()) {
+      throw std::runtime_error("LibRaw sensor_info() must be called first");
+    }
+    val result = val::object();
+    result.set("inputCopyMs", sensor_timings_.input_copy_ms);
+    result.set("openMs", sensor_timings_.open_ms);
+    result.set("unpackMs", sensor_timings_.unpack_ms);
+    result.set("mosaicCopyMs", sensor_timings_.mosaic_copy_ms);
+    result.set("totalMs", sensor_timings_.total_ms);
+    return result;
+  }
+
+  val sensor_view(std::size_t offset, std::size_t length) const {
+    if (sensor_.empty()) {
+      throw std::runtime_error("LibRaw sensor_info() must be called first");
+    }
+    if (offset > sensor_.size() || length > sensor_.size() - offset) {
+      throw std::runtime_error("LibRaw sensor view exceeds the visible mosaic");
+    }
+    return val(typed_memory_view(length, sensor_.data() + offset));
+  }
+
   val timings() const {
     if (image_ == nullptr) {
       throw std::runtime_error("LibRaw image_info() must be called first");
@@ -510,14 +966,148 @@ public:
     return val(typed_memory_view(length, pixels + offset));
   }
 
+  val aahd_reference_info() {
+    if (image_ != nullptr) {
+      throw std::runtime_error(
+          "AAHD reference capture must be enabled before image_info()");
+    }
+    if (quality_ != 12 || half_size_) {
+      throw std::runtime_error(
+          "AAHD reference capture requires full-resolution quality 12");
+    }
+    processor_.enable_aahd_capture();
+    image_info();
+    if (processor_.aahd_input().empty() ||
+        processor_.aahd_horizontal().empty() ||
+        processor_.aahd_vertical().empty() ||
+        processor_.aahd_chosen_directions().empty() ||
+        processor_.aahd_horizontal_homogeneity().empty() ||
+        processor_.aahd_vertical_homogeneity().empty() ||
+        processor_.aahd_directions().empty() ||
+        processor_.aahd_output().empty() ||
+        processor_.aahd_highlight().empty()) {
+      throw std::runtime_error("LibRaw did not capture the AAHD boundaries");
+    }
+
+    val result = val::object();
+    result.set("width", image_->width);
+    result.set("height", image_->height);
+    result.set("inputSampleCount", processor_.aahd_input().size());
+    result.set("outputSampleCount", processor_.aahd_output().size());
+    result.set("highlightSampleCount", processor_.aahd_highlight().size());
+    result.set("candidateSampleCount", processor_.aahd_horizontal().size());
+    result.set("directionSampleCount", processor_.aahd_directions().size());
+    result.set("hotPixelMs", processor_.aahd_hot_pixel_ms());
+    result.set("scaleMultipliers", float_array(processor_.scale_multipliers()));
+    result.set("preMultipliers", float_array(processor_.pre_multipliers()));
+    result.set("yuvMatrix", float_array(processor_.yuv_matrix()));
+    result.set("outputMatrix", float_array(processor_.output_matrix()));
+
+    val minimum = val::array();
+    val maximum = val::array();
+    for (unsigned channel = 0; channel < 3; ++channel) {
+      minimum.set(channel, processor_.channel_minimum()[channel]);
+      maximum.set(channel, processor_.channel_maximum()[channel]);
+    }
+    result.set("channelMinimum", minimum);
+    result.set("channelMaximum", maximum);
+    return result;
+  }
+
+  val aahd_input_view(std::size_t offset, std::size_t length) const {
+    return reference_view(processor_.aahd_input(), offset, length,
+                          "AAHD input");
+  }
+
+  val aahd_output_view(std::size_t offset, std::size_t length) const {
+    return reference_view(processor_.aahd_output(), offset, length,
+                          "AAHD output");
+  }
+
+  val aahd_highlight_view(std::size_t offset, std::size_t length) const {
+    return reference_view(processor_.aahd_highlight(), offset, length,
+                          "AAHD highlight output");
+  }
+
+  val aahd_horizontal_view(std::size_t offset, std::size_t length) const {
+    return reference_view(processor_.aahd_horizontal(), offset, length,
+                          "AAHD horizontal candidate");
+  }
+
+  val aahd_vertical_view(std::size_t offset, std::size_t length) const {
+    return reference_view(processor_.aahd_vertical(), offset, length,
+                          "AAHD vertical candidate");
+  }
+
+  val aahd_direction_view(std::size_t offset, std::size_t length) const {
+    const auto &source = processor_.aahd_directions();
+    if (source.empty()) {
+      throw std::runtime_error("AAHD directions are unavailable");
+    }
+    if (offset > source.size() || length > source.size() - offset) {
+      throw std::runtime_error("AAHD direction view exceeds its buffer");
+    }
+    return val(typed_memory_view(length, source.data() + offset));
+  }
+
+  val aahd_chosen_direction_view(std::size_t offset, std::size_t length) const {
+    const auto &source = processor_.aahd_chosen_directions();
+    if (source.empty()) {
+      throw std::runtime_error("AAHD chosen directions are unavailable");
+    }
+    if (offset > source.size() || length > source.size() - offset) {
+      throw std::runtime_error("AAHD chosen direction view exceeds its buffer");
+    }
+    return val(typed_memory_view(length, source.data() + offset));
+  }
+
+  val aahd_horizontal_homogeneity_view(std::size_t offset,
+                                       std::size_t length) const {
+    return reference_view(processor_.aahd_horizontal_homogeneity(), offset,
+                          length, "AAHD horizontal homogeneity");
+  }
+
+  val aahd_vertical_homogeneity_view(std::size_t offset,
+                                     std::size_t length) const {
+    return reference_view(processor_.aahd_vertical_homogeneity(), offset,
+                          length, "AAHD vertical homogeneity");
+  }
+
 private:
   TimedLibRaw processor_;
   std::vector<std::uint8_t> input_;
+  std::vector<std::uint16_t> sensor_;
   libraw_processed_image_t *image_ = nullptr;
   bool opened_ = false;
+  bool unpacked_ = false;
+  bool half_size_ = false;
   int quality_ = 12;
   double total_started_at_ = 0;
   DecodeTimings timings_;
+  SensorTimings sensor_timings_;
+  val sensor_metadata_ = val::undefined();
+
+  template <std::size_t Size>
+  static val float_array(const std::array<float, Size> &source) {
+    val result = val::array();
+    for (std::size_t index = 0; index < Size; ++index) {
+      result.set(index, source[index]);
+    }
+    return result;
+  }
+
+  template <typename Sample>
+  static val reference_view(const std::vector<Sample> &source,
+                            std::size_t offset, std::size_t length,
+                            const char *name) {
+    if (source.empty()) {
+      throw std::runtime_error(std::string(name) + " is unavailable");
+    }
+    if (offset > source.size() || length > source.size() - offset) {
+      throw std::runtime_error(std::string(name) + " view exceeds its buffer");
+    }
+    return val(typed_memory_view(length, source.data() + offset));
+  }
 
   static std::vector<std::uint8_t> copy_bytes(const val &source) {
     const val uint8_array = val::global("Uint8Array");
@@ -550,6 +1140,188 @@ private:
     opened_ = false;
   }
 
+  int ensure_unpacked() {
+    if (unpacked_) {
+      return LIBRAW_SUCCESS;
+    }
+    const double started_at = emscripten_get_now();
+    const int status = processor_.unpack();
+    timings_.unpack_ms = emscripten_get_now() - started_at;
+    sensor_timings_.input_copy_ms = timings_.input_copy_ms;
+    sensor_timings_.open_ms = timings_.open_ms;
+    sensor_timings_.unpack_ms = timings_.unpack_ms;
+    unpacked_ = status == LIBRAW_SUCCESS;
+    return status;
+  }
+
+  struct AdjustedBlackLevels {
+    std::array<unsigned, 4> channels;
+    unsigned common;
+  };
+
+  std::array<float, 4>
+  aahd_pre_multipliers(const AdjustedBlackLevels &black,
+                       unsigned maximum) {
+    // Mirror scale_colors() through its final pre_mul normalization. Auto-WB
+    // alone needs another mosaic scan; camera metadata stays constant-time.
+    const auto &sizes = processor_.imgdata.sizes;
+    const auto &color = processor_.imgdata.rawdata.color;
+    std::array<float, 4> pre;
+    std::copy(std::begin(color.pre_mul), std::end(color.pre_mul), pre.begin());
+
+    if (color.cam_mul[0] < -0.5f ||
+        (color.cam_mul[0] <= 0.00001f &&
+         !(processor_.imgdata.rawparams.options &
+           LIBRAW_RAWOPTIONS_CAMERAWB_FALLBACK_TO_DAYLIGHT))) {
+      std::array<double, 8> totals{};
+      for (unsigned block_row = 0; block_row < sizes.height;
+           block_row += 8) {
+        for (unsigned block_col = 0; block_col < sizes.width;
+             block_col += 8) {
+          std::array<unsigned, 8> block{};
+          bool clipped = false;
+          for (unsigned row = block_row;
+               row < block_row + 8 && row < sizes.height && !clipped; ++row) {
+            for (unsigned col = block_col;
+                 col < block_col + 8 && col < sizes.width; ++col) {
+              const unsigned channel = processor_.COLOR(row, col);
+              const auto sample =
+                  sensor_[static_cast<std::size_t>(row) * sizes.width + col];
+              const int value = sample > black.channels[channel]
+                                    ? sample - black.channels[channel]
+                                    : 0;
+              if (value > static_cast<int>(maximum) - 25) {
+                clipped = true;
+                break;
+              }
+              block[channel] += value;
+              ++block[channel + 4];
+            }
+          }
+          if (!clipped) {
+            for (unsigned channel = 0; channel < 8; ++channel) {
+              totals[channel] += block[channel];
+            }
+          }
+        }
+      }
+      for (unsigned channel = 0; channel < 4; ++channel) {
+        if (totals[channel] != 0) {
+          pre[channel] =
+              static_cast<float>(totals[channel + 4] / totals[channel]);
+        }
+      }
+    }
+
+    if (color.cam_mul[0] > 0.00001f) {
+      std::array<unsigned, 8> white{};
+      for (unsigned row = 0; row < 8; ++row) {
+        for (unsigned col = 0; col < 8; ++col) {
+          const unsigned channel = processor_.COLOR(row, col);
+          if (color.white[row][col] != 0) {
+            white[channel] += color.white[row][col];
+          }
+          ++white[channel + 4];
+        }
+      }
+      if (color.as_shot_wb_applied) {
+        pre.fill(1);
+      } else if (white[0] && white[1] && white[2] && white[3]) {
+        for (unsigned channel = 0; channel < 4; ++channel) {
+          pre[channel] =
+              static_cast<float>(white[channel + 4]) / white[channel];
+        }
+      } else if (color.cam_mul[2] > 0.00001f) {
+        std::copy(std::begin(color.cam_mul), std::end(color.cam_mul),
+                  pre.begin());
+      }
+    }
+
+    if (pre[1] == 0) {
+      pre[1] = 1;
+    }
+    if (pre[3] == 0) {
+      pre[3] = processor_.imgdata.idata.colors < 4 ? pre[1] : 1;
+    }
+    const float largest = *std::max_element(pre.begin(), pre.end());
+    if (largest > 0.00001f) {
+      for (float &multiplier : pre) {
+        multiplier /= largest;
+      }
+    }
+    return pre;
+  }
+
+  AdjustedBlackLevels adjusted_black_levels() {
+    const auto &source = processor_.imgdata.rawdata.color;
+    std::array<unsigned, LIBRAW_CBLACK_SIZE> cblack;
+    std::copy(std::begin(source.cblack), std::end(source.cblack),
+              cblack.begin());
+    unsigned black = source.black;
+    const unsigned filters = processor_.imgdata.idata.filters;
+
+    if (filters > 1000 && (cblack[4] + 1) / 2 == 1 &&
+        (cblack[5] + 1) / 2 == 1) {
+      int colors[4];
+      int last_green = -1;
+      unsigned green_count = 0;
+      for (unsigned index = 0; index < 4; ++index) {
+        colors[index] = processor_.FC(index / 2, index % 2);
+        if (colors[index] == 1) {
+          ++green_count;
+          last_green = index;
+        }
+      }
+      if (green_count > 1 && last_green >= 0) {
+        colors[last_green] = 3;
+      }
+      for (unsigned index = 0; index < 4; ++index) {
+        cblack[colors[index]] +=
+            cblack[6 + index / 2 % cblack[4] * cblack[5] +
+                   index % 2 % cblack[5]];
+      }
+      cblack[4] = cblack[5] = 0;
+    } else if (filters <= 1000 && cblack[4] == 1 && cblack[5] == 1) {
+      for (unsigned channel = 0; channel < 4; ++channel) {
+        cblack[channel] += cblack[6];
+      }
+      cblack[4] = cblack[5] = 0;
+    }
+
+    unsigned common = cblack[3];
+    for (unsigned channel = 0; channel < 3; ++channel) {
+      common = std::min(common, cblack[channel]);
+    }
+    for (unsigned channel = 0; channel < 4; ++channel) {
+      cblack[channel] -= common;
+    }
+    black += common;
+
+    if (cblack[4] != 0 && cblack[5] != 0) {
+      common = cblack[6];
+      for (unsigned index = 1; index < cblack[4] * cblack[5]; ++index) {
+        common = std::min(common, cblack[6 + index]);
+      }
+      bool has_residual = false;
+      for (unsigned index = 0; index < cblack[4] * cblack[5]; ++index) {
+        cblack[6 + index] -= common;
+        has_residual |= cblack[6 + index] != 0;
+      }
+      black += common;
+      if (has_residual) {
+        throw std::runtime_error(
+            "Spatially varying RAW black levels are not supported");
+      }
+      cblack[4] = cblack[5] = 0;
+    }
+
+    std::array<unsigned, 4> result;
+    for (unsigned channel = 0; channel < 4; ++channel) {
+      result[channel] = cblack[channel] + black;
+    }
+    return {result, black};
+  }
+
   [[noreturn]] static void fail(const char *operation, int status) {
     throw std::runtime_error(std::string("LibRaw could not ") + operation +
                              ": " + LibRaw::strerror(status));
@@ -567,6 +1339,23 @@ EMSCRIPTEN_BINDINGS(raw_alchemy_libraw) {
       .function("metadata", &BrowserLibRaw::metadata)
       .function("thumbnailData", &BrowserLibRaw::thumbnail_data)
       .function("imageInfo", &BrowserLibRaw::image_info)
+      .function("supportsWebGpuAahd", &BrowserLibRaw::supports_webgpu_aahd)
       .function("timings", &BrowserLibRaw::timings)
-      .function("imageView", &BrowserLibRaw::image_view);
+      .function("imageView", &BrowserLibRaw::image_view)
+      .function("sensorInfo", &BrowserLibRaw::sensor_info)
+      .function("sensorTimings", &BrowserLibRaw::sensor_timings)
+      .function("sensorView", &BrowserLibRaw::sensor_view)
+      .function("aahdReferenceInfo", &BrowserLibRaw::aahd_reference_info)
+      .function("aahdInputView", &BrowserLibRaw::aahd_input_view)
+      .function("aahdHorizontalView", &BrowserLibRaw::aahd_horizontal_view)
+      .function("aahdVerticalView", &BrowserLibRaw::aahd_vertical_view)
+      .function("aahdChosenDirectionView",
+                &BrowserLibRaw::aahd_chosen_direction_view)
+      .function("aahdHorizontalHomogeneityView",
+                &BrowserLibRaw::aahd_horizontal_homogeneity_view)
+      .function("aahdVerticalHomogeneityView",
+                &BrowserLibRaw::aahd_vertical_homogeneity_view)
+      .function("aahdDirectionView", &BrowserLibRaw::aahd_direction_view)
+      .function("aahdOutputView", &BrowserLibRaw::aahd_output_view)
+      .function("aahdHighlightView", &BrowserLibRaw::aahd_highlight_view);
 }

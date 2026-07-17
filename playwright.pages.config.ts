@@ -11,6 +11,14 @@ export default defineConfig({
   reporter: "list",
   use: {
     ...devices["Desktop Chrome"],
+    launchOptions: {
+      args: [
+        "--enable-unsafe-webgpu",
+        "--use-angle=swiftshader",
+        "--enable-features=Vulkan",
+        "--disable-vulkan-surface",
+      ],
+    },
     baseURL: `http://127.0.0.1:42733${basePath}`,
     trace: "retain-on-failure",
   },

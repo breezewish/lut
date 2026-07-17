@@ -46,7 +46,6 @@ export class ProcessingClient {
   private activeRender?: RenderBatch;
   private queuedRender?: RenderBatch;
   private stoppedError?: Error;
-
   constructor() {
     this.worker.onmessage = ({ data }: MessageEvent<WorkerReply>) => {
       if (data.ok && data.type === "thumbnail") {
@@ -111,9 +110,16 @@ export class ProcessingClient {
     this.rejectQueuedRender(
       new Error("Preview render was superseded by a new RAW decode."),
     );
-    const reply = await this.send({ type: "decode", fileId, buffer, ev, lut }, [
-      buffer,
-    ]);
+    const reply = await this.send(
+      {
+        type: "decode",
+        fileId,
+        buffer,
+        ev,
+        lut,
+      },
+      [buffer],
+    );
     if (reply.ok && reply.type === "preview") {
       performance.mark("raw-alchemy:preview-worker", {
         detail: reply.result.timings,
@@ -162,9 +168,16 @@ export class ProcessingClient {
     this.rejectQueuedRender(
       new Error("Preview render was superseded by full-resolution export."),
     );
-    const reply = await this.send({ type: "export", fileId, buffer, ev, lut }, [
-      buffer,
-    ]);
+    const reply = await this.send(
+      {
+        type: "export",
+        fileId,
+        buffer,
+        ev,
+        lut,
+      },
+      [buffer],
+    );
     if (reply.ok && reply.type === "export") {
       return { tiff: reply.tiff, timings: reply.timings };
     }

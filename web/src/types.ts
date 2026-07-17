@@ -53,19 +53,40 @@ export interface LibRawDecodeTimings {
   totalMs: number;
 }
 
+export interface LibRawSensorTimings {
+  inputCopyMs: number;
+  openMs: number;
+  unpackMs: number;
+  mosaicCopyMs: number;
+  totalMs: number;
+}
+
 export interface PreviewTimings {
+  previewBackend: "webgpu";
   libraw: LibRawDecodeTimings;
   previewSourceMs: number;
   lutLoadMs: number;
   previewColorMs: number;
   workerTotalMs: number;
+  gpuExecutionAndReadbackMs?: number;
 }
 
 export interface ExportTimings {
   libraw: LibRawDecodeTimings;
+  rawBackend: "libraw" | "webgpu-aahd";
+  colorBackend: "webgpu";
   colorProcessingMs: number;
   tiffEncodingMs: number;
   workerTotalMs: number;
+  gpuInputPreparationMs?: number;
+  gpuExecutionAndReadbackMs?: number;
+  gpuOutputPreparationMs?: number;
+  webGpuAahd?: {
+    timings: import("./lib/libraw-aahd").LibRawAahdTimings;
+    resources: NonNullable<
+      import("./lib/libraw-aahd").LibRawAahdResult["resources"]
+    >;
+  };
 }
 
 export interface ExportResult {

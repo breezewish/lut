@@ -18,11 +18,32 @@ test("records phased production Worker performance", async ({
   test.setTimeout(10 * 60_000);
   const fixtureStat = await stat(fixture);
   const runs = [];
+  if (process.env.RAW_PERF_BROWSER_LOGS === "1") {
+    page.on("console", (message) =>
+      console.log(`[browser:${message.type()}] ${message.text()}`),
+    );
+    page.on("pageerror", (error) => console.log(`[browser:error] ${error}`));
+  }
   let exportRun:
     | { exportWallMs: number; worker: unknown; blob: unknown }
     | undefined;
 
   await page.goto("/");
+  const adapterInfo = await page.evaluate(async () => {
+    if (!("gpu" in navigator)) return undefined;
+    const adapter = await navigator.gpu.requestAdapter({
+      powerPreference: "high-performance",
+    });
+    return adapter
+      ? {
+          vendor: adapter.info.vendor,
+          architecture: adapter.info.architecture,
+          device: adapter.info.device,
+          description: adapter.info.description,
+          isFallbackAdapter: adapter.info.isFallbackAdapter,
+        }
+      : undefined;
+  });
   for (let index = 0; index < samples; index += 1) {
     await page.evaluate(() => performance.clearMarks());
     const previewStartedAt = performance.now();
@@ -46,8 +67,19 @@ test("records phased production Worker performance", async ({
     if (index === samples - 1) {
       const exportStartedAt = performance.now();
       const downloadPromise = page.waitForEvent("download");
+      const exportErrorPromise = page
+        .getByRole("alert")
+        .waitFor({ state: "visible", timeout: 10 * 60_000 })
+        .then(async () => {
+          throw new Error(
+            `Browser export failed: ${await page.getByRole("alert").textContent()}`,
+          );
+        });
       await page.getByRole("button", { name: "Export selected" }).click();
-      const download = await downloadPromise;
+      const download = await Promise.race([
+        downloadPromise,
+        exportErrorPromise,
+      ]);
       await download.path();
       exportRun = {
         exportWallMs: performance.now() - exportStartedAt,
@@ -68,6 +100,8 @@ test("records phased production Worker performance", async ({
         fixture,
         fixtureBytes: fixtureStat.size,
         samples,
+        colorBackend: "webgpu",
+        adapterInfo,
         coldRun: runs[0],
         warmRuns: runs.slice(1),
         exportRun,

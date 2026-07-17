@@ -1,11 +1,22 @@
 /// <reference lib="webworker" />
 
 import createLibRaw from "../libraw/libraw.js";
-import initAlchemy, { PreviewRenderer, WasmLut } from "../wasm/alchemy_core.js";
+import initAlchemy, {
+  PreviewRenderer,
+  TiffEncoder,
+  WasmLut,
+} from "../wasm/alchemy_core.js";
 import { describeProcessingError } from "../lib/errors";
 import { sha256Hex } from "../lib/hash";
-import { renderTiffInStrips } from "../lib/tiff-export";
+import { RenderedTiffStream, renderTiffInGpuStrips } from "../lib/tiff-export";
+import { demosaicLibRawAahdTiledWithWgsl } from "../lib/libraw-aahd";
+import { WebGpuColorRenderer } from "../lib/webgpu-color";
+import {
+  prepareWebGpuPreview,
+  WebGpuPreviewRenderer,
+} from "../lib/webgpu-preview";
 import type {
+  ExportTimings,
   LibRawDecodeTimings,
   LutDefinition,
   PreviewResult,
@@ -18,16 +29,18 @@ const context: DedicatedWorkerGlobalScope =
 const runtime = Promise.all([createLibRaw(), initAlchemy()]).then(
   ([module]) => ({ module }),
 );
+const previewGpuPreparation = prepareWebGpuPreview();
+void previewGpuPreparation.catch(() => undefined);
 
-let cached:
-  | {
-      fileId: string;
-      renderer: PreviewRenderer;
-      lutId: string;
-      metadata: PreviewResult["metadata"];
-      timings: PreviewResult["timings"];
-    }
-  | undefined;
+type CachedPreview = {
+  fileId: string;
+  lutId: string;
+  metadata: PreviewResult["metadata"];
+  timings: PreviewResult["timings"];
+  renderer: WebGpuPreviewRenderer;
+};
+
+let cached: CachedPreview | undefined;
 const cachedLuts = new Map<string, WasmLut>();
 let decodeCount = 0;
 
@@ -48,7 +61,7 @@ context.onmessage = ({ data }: MessageEvent<WorkerCommand>) => {
 async function handleCommand(data: WorkerCommand): Promise<void> {
   let module: Awaited<ReturnType<typeof createLibRaw>> | undefined;
   try {
-    ({ module } = await runtime);
+    module = (await runtime).module;
     if (data.type === "clear") {
       cached?.renderer.free();
       cached = undefined;
@@ -88,14 +101,15 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
         decodeCount += 1;
         const lut = await loadLut(data.lut);
         const previewSourceStartedAt = performance.now();
+        const renderer = await createCachedPreviewRenderer(
+          previewRaw,
+          image.width,
+          image.height,
+          lut,
+        );
         cached = {
           fileId: data.fileId,
-          renderer: createPreviewRenderer(
-            previewRaw,
-            image.width,
-            image.height,
-            lut,
-          ),
+          renderer,
           lutId: data.lut.id,
           metadata: {
             camera: [metadata.camera_make, metadata.camera_model]
@@ -105,6 +119,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
             height: metadata.height,
           },
           timings: {
+            previewBackend: "webgpu",
             libraw,
             previewSourceMs: 0,
             lutLoadMs: 0,
@@ -158,19 +173,71 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
     const workerStartedAt = performance.now();
     const lut = await loadLut(data.lut);
     const exportRaw = new module.LibRaw();
+    let gpuRenderer: WebGpuColorRenderer | undefined;
     try {
       exportRaw.open(new Uint8Array(data.buffer), false);
+      if (exportRaw.supportsWebGpuAahd()) {
+        const sensor = exportRaw.sensorInfo();
+        const mosaic = exportRaw.sensorView(0, sensor.sampleCount);
+        gpuRenderer = await WebGpuColorRenderer.create(lut);
+        const stream = new RenderedTiffStream(
+          new TiffEncoder(sensor.width, sensor.height),
+        );
+        try {
+          const demosaic = await demosaicLibRawAahdTiledWithWgsl(
+            mosaic,
+            sensor,
+            { renderer: gpuRenderer, ev: data.ev },
+            (pixels) => stream.write(pixels),
+          );
+          const rendered = stream.finish(sensor.sampleCount * 3);
+          const sensorTimings = exportRaw.sensorTimings();
+          const reply: WorkerReply = {
+            requestId: data.requestId,
+            ok: true,
+            type: "export",
+            fileId: data.fileId,
+            tiff: rendered.bytes,
+            timings: {
+              libraw: sensorDecodeTimings(sensorTimings),
+              rawBackend: "webgpu-aahd",
+              colorBackend: "webgpu",
+              colorProcessingMs: demosaic.timings.colorMs,
+              tiffEncodingMs: rendered.tiffEncodingMs,
+              workerTotalMs: performance.now() - workerStartedAt,
+              gpuExecutionAndReadbackMs: demosaic.timings.totalMs,
+              webGpuAahd: {
+                timings: demosaic.timings,
+                resources: demosaic.resources!,
+              },
+            },
+          };
+          context.postMessage(reply, [rendered.bytes.buffer]);
+          return;
+        } finally {
+          stream.free();
+        }
+      }
+
       const image = exportRaw.imageInfo();
-      const rendered = renderTiffInStrips(
+      gpuRenderer = await WebGpuColorRenderer.create(lut);
+      const rendered = await renderTiffInGpuStrips(
         image.sampleCount,
         (offset, length) => exportRaw.imageView(offset, length),
-        lut.create_tiff_encoder(image.width, image.height, data.ev),
+        new TiffEncoder(image.width, image.height),
+        gpuRenderer,
+        data.ev,
       );
-      const timings = {
+      const timings: ExportTimings = {
         libraw: exportRaw.timings() as LibRawDecodeTimings,
+        rawBackend: "libraw",
+        colorBackend: "webgpu",
         colorProcessingMs: rendered.colorProcessingMs,
         tiffEncodingMs: rendered.tiffEncodingMs,
         workerTotalMs: performance.now() - workerStartedAt,
+        gpuInputPreparationMs: rendered.gpuInputPreparationMs,
+        gpuExecutionAndReadbackMs: rendered.gpuExecutionAndReadbackMs,
+        gpuOutputPreparationMs: rendered.gpuOutputPreparationMs,
       };
       const reply: WorkerReply = {
         requestId: data.requestId,
@@ -182,6 +249,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       };
       context.postMessage(reply, [rendered.bytes.buffer]);
     } finally {
+      await gpuRenderer?.destroy();
       exportRaw.delete();
     }
   } catch (error) {
@@ -194,6 +262,25 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
     };
     context.postMessage(reply);
   }
+}
+
+function sensorDecodeTimings(
+  timings: import("../types").LibRawSensorTimings,
+): LibRawDecodeTimings {
+  return {
+    quality: 12,
+    inputCopyMs: timings.inputCopyMs,
+    openMs: timings.openMs,
+    unpackMs: timings.unpackMs,
+    preprocessMs: 0,
+    demosaicMs: 0,
+    postprocessMs: 0,
+    colorConversionMs: 0,
+    previewResizeMs: 0,
+    processRemainderMs: timings.mosaicCopyMs,
+    rgb16Ms: 0,
+    totalMs: timings.totalMs,
+  };
 }
 
 function createPreviewRenderer(
@@ -215,6 +302,31 @@ function createPreviewRenderer(
     renderer.free();
     throw error;
   }
+}
+
+async function createCachedPreviewRenderer(
+  raw: InstanceType<Awaited<ReturnType<typeof createLibRaw>>["LibRaw"]>,
+  width: number,
+  height: number,
+  lut: WasmLut,
+): Promise<WebGpuPreviewRenderer> {
+  const source = createPreviewRenderer(raw, width, height, lut);
+  try {
+    await previewGpuPreparation;
+  } catch (error) {
+    source.free();
+    throw error;
+  }
+
+  const sourceWidth = source.width;
+  const sourceHeight = source.height;
+  let pixels: Uint16Array;
+  try {
+    pixels = source.take_source_rgb16();
+  } finally {
+    source.free();
+  }
+  return WebGpuPreviewRenderer.create(pixels, sourceWidth, sourceHeight, lut);
 }
 
 function describeRuntimeError(
@@ -251,43 +363,28 @@ async function renderCached(
   const parsedLut = await loadLut(lut);
   const lutLoadMs = performance.now() - lutStartedAt;
   if (cached.lutId !== lut.id) {
-    parsedLut.apply_to_renderer(cached.renderer);
+    cached.renderer.setLut(parsedLut);
     cached.lutId = lut.id;
   }
   const startedAt = performance.now();
-  const preview = cached.renderer.render(ev, maxEdge, includeBase);
+  const preview = await cached.renderer.render(ev, maxEdge, includeBase);
   const previewColorMs = performance.now() - startedAt;
-  try {
-    return {
-      fileId,
-      width: preview.width,
-      height: preview.height,
-      base: includeBase
-        ? transferablePreviewView(preview.take_base_rgba(), "Base")
-        : undefined,
-      lut: transferablePreviewView(preview.take_lut_rgba(), "LUT"),
-      metadata: cached.metadata,
-      decodeCount,
-      timings: {
-        ...cached.timings,
-        lutLoadMs,
-        previewColorMs,
-        workerTotalMs: performance.now() - workerStartedAt,
-      },
-    };
-  } finally {
-    preview.free();
-  }
-}
-
-function transferablePreviewView(
-  bytes: Uint8Array,
-  label: string,
-): Uint8Array<ArrayBuffer> {
-  if (!(bytes.buffer instanceof ArrayBuffer)) {
-    throw new Error(`${label} preview returned unsupported shared memory.`);
-  }
-  return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return {
+    fileId,
+    width: preview.width,
+    height: preview.height,
+    base: preview.base,
+    lut: preview.lut,
+    metadata: cached.metadata,
+    decodeCount,
+    timings: {
+      ...cached.timings,
+      lutLoadMs,
+      previewColorMs,
+      workerTotalMs: performance.now() - workerStartedAt,
+      gpuExecutionAndReadbackMs: preview.executionAndReadbackMs,
+    },
+  };
 }
 
 async function loadLut(lut: LutDefinition): Promise<WasmLut> {

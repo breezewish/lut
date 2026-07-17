@@ -12,9 +12,12 @@ test("renders the transferred RGBA buffer without another complete copy", async 
   const pixels = new Uint8Array(new ArrayBuffer(4));
   let imagePixels: Uint8ClampedArray<ArrayBuffer> | undefined;
   const putImageData = vi.fn();
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    putImageData,
-  } as unknown as CanvasRenderingContext2D);
+  vi.spyOn(
+    HTMLCanvasElement.prototype as unknown as {
+      getContext(contextId: "2d"): CanvasRenderingContext2D | null;
+    },
+    "getContext",
+  ).mockReturnValue({ putImageData } as unknown as CanvasRenderingContext2D);
   vi.stubGlobal(
     "ImageData",
     class {
@@ -40,7 +43,12 @@ test("renders the transferred RGBA buffer without another complete copy", async 
 });
 
 test("positions preview pixels around a shared normalized inspection focus", async () => {
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+  vi.spyOn(
+    HTMLCanvasElement.prototype as unknown as {
+      getContext(contextId: "2d"): CanvasRenderingContext2D | null;
+    },
+    "getContext",
+  ).mockReturnValue({
     putImageData: vi.fn(),
   } as unknown as CanvasRenderingContext2D);
   vi.stubGlobal("ImageData", class {});

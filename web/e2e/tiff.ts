@@ -8,6 +8,12 @@ interface TiffComparison {
   width: number;
   height: number;
   maxCodeDifference: number;
+  differingSamples: number;
+  samplesOverTwoCodes: number;
+  maximumDifferenceSample: number;
+  actualAtMaximum: number;
+  expectedAtMaximum: number;
+  meanAbsoluteDifference: number;
 }
 
 interface TiffLayout {
@@ -56,6 +62,12 @@ export function compareRgb16Tiffs(
   }
 
   let maxCodeDifference = 0;
+  let differingSamples = 0;
+  let samplesOverTwoCodes = 0;
+  let maximumDifferenceSample = 0;
+  let actualAtMaximum = 0;
+  let expectedAtMaximum = 0;
+  let absoluteDifference = 0;
   let comparedBytes = 0;
   for (let index = 0; index < actual.stripOffsets.length; index += 1) {
     const actualStrip = decodeStrip(actualBytes, actual, index);
@@ -64,10 +76,18 @@ export function compareRgb16Tiffs(
       throw new Error(`TIFF strip ${index} decoded to different lengths.`);
     }
     for (let offset = 0; offset < actualStrip.length; offset += 2) {
-      const difference = Math.abs(
-        actualStrip.readUInt16LE(offset) - expectedStrip.readUInt16LE(offset),
-      );
-      maxCodeDifference = Math.max(maxCodeDifference, difference);
+      const actualSample = actualStrip.readUInt16LE(offset);
+      const expectedSample = expectedStrip.readUInt16LE(offset);
+      const difference = Math.abs(actualSample - expectedSample);
+      absoluteDifference += difference;
+      if (difference !== 0) differingSamples += 1;
+      if (difference > 2) samplesOverTwoCodes += 1;
+      if (difference > maxCodeDifference) {
+        maxCodeDifference = difference;
+        maximumDifferenceSample = (comparedBytes + offset) / 2;
+        actualAtMaximum = actualSample;
+        expectedAtMaximum = expectedSample;
+      }
     }
     comparedBytes += actualStrip.length;
   }
@@ -78,6 +98,13 @@ export function compareRgb16Tiffs(
     width: actual.width,
     height: actual.height,
     maxCodeDifference,
+    differingSamples,
+    samplesOverTwoCodes,
+    maximumDifferenceSample,
+    actualAtMaximum,
+    expectedAtMaximum,
+    meanAbsoluteDifference:
+      absoluteDifference / (actual.width * actual.height * 3),
   };
 }
 

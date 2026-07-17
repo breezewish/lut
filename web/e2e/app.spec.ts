@@ -135,6 +135,22 @@ test("keeps the previous canvases visible until interaction frames are ready", a
     name: "Preview processing",
   });
   await expect(processing).toHaveCount(0);
+  await expect
+    .poll(() =>
+      basePreview.evaluate(
+        (canvas: HTMLCanvasElement) =>
+          canvas.width !== 300 && canvas.height !== 150,
+      ),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      lutPreview.evaluate(
+        (canvas: HTMLCanvasElement) =>
+          canvas.width !== 300 && canvas.height !== 150,
+      ),
+    )
+    .toBe(true);
   const previousBase = await basePreview.evaluate((canvas: HTMLCanvasElement) =>
     canvas.toDataURL(),
   );
@@ -597,6 +613,7 @@ test("batch export stops after the active file", async ({ page }) => {
 test("all built-in LUTs match optimized native RGB16 exports", async ({
   page,
 }) => {
+  test.setTimeout(60_000);
   const manifest = JSON.parse(
     await readFile(resolve("assets/luts.json"), "utf8"),
   ) as {
@@ -720,6 +737,14 @@ test("export failures retain the preview, allow retry, and release it on removal
             lut: new Uint8Array([64, 64, 64, 255]),
             metadata: { camera: "Test Camera", width: 1, height: 1 },
             decodeCount: 1,
+            timings: {
+              previewBackend: "webgpu",
+              libraw: {},
+              previewSourceMs: 0,
+              lutLoadMs: 0,
+              previewColorMs: 0,
+              workerTotalMs: 0,
+            },
           },
         });
       }

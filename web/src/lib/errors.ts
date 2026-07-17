@@ -20,7 +20,7 @@ export function describeProcessingError(error: unknown): string {
 }
 
 function describeMessage(message: string): string {
-  return /LibRaw|open_buffer|unsupported file format|decode this RAW/i.test(
+  return /open_buffer|unsupported file format|decode this RAW|LibRaw could not (?:open|unpack|decode)/i.test(
     message,
   )
     ? "Unable to read this RAW. The file may be damaged, or its camera format may not be supported yet."

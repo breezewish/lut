@@ -26,9 +26,8 @@ const previewConstructor = methodBody(
 const previewWrite = methodBody("write_source_row(pixels)");
 const lutConstructor = methodBody("constructor(bytes)");
 const previewRender = methodBody("render(ev, max_edge, include_base)");
-const tiffConstructor = methodBody("create_tiff_encoder(width, height, ev)");
-const tiffRender = methodBody("render_strip(pixels)");
-const tiffWrite = methodBody("write_strip()");
+const tiffConstructor = methodBody("constructor(width, height)");
+const tiffWrite = methodBody("write_rendered_strip(pixels)");
 
 if (
   previewConstructor.includes("passArray8ToWasm0") ||
@@ -57,13 +56,16 @@ if (previewRender.includes("passArray16ToWasm0")) {
 if (previewRender.includes("passStringToWasm0")) {
   throw new Error("Preview EV rerender unexpectedly reparses the current LUT.");
 }
-if (!tiffRender.includes("passArray16ToWasm0(pixels")) {
+if (!tiffWrite.includes("passArray16ToWasm0(pixels")) {
   throw new Error(
-    "TIFF strip renderer no longer receives bounded RGB16 views.",
+    "TIFF encoder no longer receives bounded GPU-rendered RGB16 views.",
   );
 }
-if (tiffWrite.includes("passArray16ToWasm0")) {
-  throw new Error("TIFF writing unexpectedly copies another RGB16 strip.");
+if (
+  binding.includes("render_strip(pixels)") ||
+  binding.includes("write_strip()")
+) {
+  throw new Error("CPU color rendering must not be exposed to the browser.");
 }
 if (binding.includes("export function render_tiff(")) {
   throw new Error("The whole-image TIFF WASM binding must not be exported.");
@@ -113,5 +115,5 @@ if (
 }
 
 console.log(
-  "Verified zero-copy LibRaw and Canvas views, row-only preview, and strip-only TIFF WASM bindings.",
+  "Verified zero-copy LibRaw and Canvas views, row-only preview, and GPU-only strip TIFF bindings.",
 );

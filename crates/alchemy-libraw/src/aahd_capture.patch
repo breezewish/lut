@@ -1,0 +1,35 @@
+--- aahd_demosaic.cpp
++++ aahd_demosaic.cpp
+@@ -19,0 +20,12 @@
++#ifdef ALCHEMY_AAHD_CAPTURE
++extern "C" void alchemy_capture_aahd_candidates(
++    LibRaw *raw, const void *horizontal, const void *vertical,
++    const char *directions, int padded_width, int padded_height,
++    int margin);
++extern "C" void alchemy_capture_aahd_chosen_directions(
++    LibRaw *raw, const char *directions, const char *horizontal_homogeneity,
++    const char *vertical_homogeneity, int padded_width, int padded_height,
++    int margin);
++extern "C" void alchemy_mark_aahd_hot_stage(LibRaw *raw, int finished);
++#endif
++
+@@ -773,0 +786,3 @@
++#ifdef ALCHEMY_AAHD_CAPTURE
++  alchemy_mark_aahd_hot_stage(this, 0);
++#endif
+@@ -774,0 +790,3 @@
++#ifdef ALCHEMY_AAHD_CAPTURE
++  alchemy_mark_aahd_hot_stage(this, 1);
++#endif
+@@ -777,0 +796,5 @@
++#ifdef ALCHEMY_AAHD_CAPTURE
++  alchemy_capture_aahd_chosen_directions(
++      this, aahd.ndir, aahd.homo[0], aahd.homo[1], aahd.nr_width,
++      aahd.nr_height, AAHD::nr_margin);
++#endif
+@@ -778,0 +802,5 @@
++#ifdef ALCHEMY_AAHD_CAPTURE
++  alchemy_capture_aahd_candidates(
++      this, aahd.rgb_ahd[0], aahd.rgb_ahd[1], aahd.ndir, aahd.nr_width,
++      aahd.nr_height, AAHD::nr_margin);
++#endif

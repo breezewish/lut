@@ -5,9 +5,16 @@
 /target/
 /test-results/
 /playwright-report/
+/tests/fixtures/webgpu-camera-matrix/
 /web/public/luts/
 /web/src/libraw/
 /web/src/wasm/
 /.venv/
 **/.venv/
 *.tsbuildinfo
+# Branch-local GPU development VM state and credentials.
+docs/local_dev/dev_vm.md
+docs/local_dev/id
+docs/local_dev/id.pub
+docs/local_dev/user-data.sh
+docs/local_dev/*-performance.json
