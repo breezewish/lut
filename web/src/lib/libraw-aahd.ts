@@ -7,6 +7,12 @@ import {
   createLibRawGammaLut,
   refineLibRawSerialDirections,
 } from "./aahd-parity-cpu";
+import {
+  AAHD_TILE_CORE_SIZE,
+  AAHD_TILE_HALO,
+  createAahdTiles,
+  type AahdTile,
+} from "./aahd-tiles";
 
 export type AahdContract = "deterministic-parallel-candidate" | "libraw-parity";
 
@@ -90,12 +96,20 @@ export interface LibRawAahdResult {
     description: string;
     isFallbackAdapter: boolean;
   };
+  resources?: {
+    tileCoreSize: number;
+    tileHalo: number;
+    tileCount: number;
+    peakGpuBytes: number;
+    maximumBufferBytes: number;
+  };
   timings: LibRawAahdTimings;
   validation?: LibRawAahdValidation;
 }
 
 const ENTRY_POINTS = [
   "clear",
+  "clear_tile",
   "initialize",
   "initialize_parity",
   "hide_hot_pixels",
@@ -150,7 +164,8 @@ const LINEAR_DISPATCH_WIDTH = 65535;
 
 const BINDINGS: Record<EntryPoint, number[]> = {
   clear: [5, 6, 7, 11],
-  initialize: [0, 1, 2, 8, 11, 12],
+  clear_tile: [1, 2, 3, 4, 5, 6, 7, 11],
+  initialize: [1, 2, 8, 11, 12, 13],
   initialize_parity: [0, 1, 2, 5, 11, 12],
   hide_hot_pixels: [1, 2, 5, 11, 12],
   copy_corrected: [1, 2, 11],
@@ -183,7 +198,7 @@ const BINDINGS: Record<EntryPoint, number[]> = {
   refine_checker_odd: [5, 11],
   refine_isolated: [5, 6, 11],
   copy_refined_directions: [5, 6, 11],
-  combine: [0, 1, 2, 5, 11],
+  combine: [1, 2, 5, 11, 13],
   write_horizontal: [1, 10, 11],
   write_vertical: [2, 10, 11],
   write_directions: [5, 10, 11],
@@ -191,7 +206,7 @@ const BINDINGS: Record<EntryPoint, number[]> = {
   load_direction_plane: [0, 5, 11],
   write_aahd: [1, 10, 11],
   blend_highlights: [1, 11],
-  collect_highlights: [1, 10, 11, 12],
+  collect_highlights: [1, 10, 11, 14],
   apply_highlights: [1, 10, 11],
   write_final: [1, 10, 11],
 };
@@ -208,12 +223,15 @@ interface Workspace {
   paddedWidth: number;
   paddedHeight: number;
   packedBytes: number;
+  coreWidth: number;
+  coreHeight: number;
   resources: GPUBuffer[];
   readback: GPUBuffer;
 }
 
 let runtimePromise: Promise<Runtime> | undefined;
 let cachedWorkspace: Workspace | undefined;
+let cachedTiledWorkspace: Workspace | undefined;
 
 /** Runs the deterministic parallel AAHD candidate in WGSL. */
 export async function demosaicLibRawAahdWithWgsl(
@@ -238,6 +256,7 @@ export async function demosaicLibRawAahdWithWgsl(
     | "final",
   reference?: Uint16Array,
   referenceInfo?: AahdReferenceInfo,
+  capture?: Uint16Array,
 ): Promise<LibRawAahdResult> {
   validateInput(mosaic, info, referenceInfo);
   if (contract === "libraw-parity" && outputStage === "candidate-directions") {
@@ -270,6 +289,13 @@ export async function demosaicLibRawAahdWithWgsl(
     const scaleStartedAt = performance.now();
     runtime.device.queue.writeBuffer(
       workspace.resources[0],
+      0,
+      mosaic.buffer,
+      mosaic.byteOffset,
+      mosaic.byteLength,
+    );
+    runtime.device.queue.writeBuffer(
+      workspace.resources[13],
       0,
       mosaic.buffer,
       mosaic.byteOffset,
@@ -431,16 +457,6 @@ export async function demosaicLibRawAahdWithWgsl(
       }
       runtime.device.queue.writeBuffer(workspace.resources[0], 0, refined);
       submitPass(runtime, workspace, "load_direction_plane");
-      // LibRaw restores each HOT pixel's original scaled CFA sample during
-      // combine. Resource 0 held the refined direction plane, so restore the
-      // original mosaic after that plane has been consumed.
-      runtime.device.queue.writeBuffer(
-        workspace.resources[0],
-        0,
-        mosaic.buffer,
-        mosaic.byteOffset,
-        mosaic.byteLength,
-      );
     } else if (!stopsBeforeRefinement) {
       submitPass(runtime, workspace, "refine_isolated");
       submitPass(runtime, workspace, "copy_refined_directions");
@@ -532,6 +548,7 @@ export async function demosaicLibRawAahdWithWgsl(
     try {
       const pixels = new Uint16Array(info.sampleCount * 3);
       pixels.set(new Uint16Array(workspace.readback.getMappedRange()));
+      copyCapturedOutput(pixels, capture);
       const readbackMs = performance.now() - readbackStartedAt;
       const validationStartedAt = performance.now();
       validation = candidateDirections
@@ -584,6 +601,218 @@ export async function demosaicLibRawAahdWithWgsl(
     cachedWorkspace = undefined;
     throw error;
   }
+}
+
+/** Runs the exact LibRaw-parity AAHD route with a bounded reusable tile workspace. */
+export async function demosaicLibRawAahdTiledWithWgsl(
+  mosaic: Uint16Array,
+  info: SensorImageInfo,
+  reference?: Uint16Array,
+  capture?: Uint16Array,
+): Promise<LibRawAahdResult> {
+  validateInput(mosaic, info);
+  const startedAt = performance.now();
+  const tiles = createAahdTiles(info.width, info.height);
+  const deviceStartedAt = performance.now();
+  const runtime = await getRuntime(
+    Math.max(mosaic.byteLength, tiledVectorBytes(info)),
+  );
+  const deviceCreateMs = performance.now() - deviceStartedAt;
+  const workspaceStartedAt = performance.now();
+  const workspace = getTiledWorkspace(runtime.device, info, mosaic.byteLength);
+  const workspaceCreateMs = performance.now() - workspaceStartedAt;
+  const baseParameters = createTiledParameters(info, workspace, tiles[0]);
+  const scaleMultipliers = new Float32Array(
+    baseParameters.buffer,
+    12 * Uint32Array.BYTES_PER_ELEMENT,
+    4,
+  );
+  const preMultipliers = new Float32Array(
+    baseParameters.buffer,
+    16 * Uint32Array.BYTES_PER_ELEMENT,
+    4,
+  );
+
+  const serialDefectStartedAt = performance.now();
+  const correction = correctLibRawSerialDefects(
+    mosaic,
+    info.width,
+    info.height,
+    info.cfaPattern,
+    info.blackLevels,
+    scaleMultipliers,
+  );
+  const serialDefectMs = performance.now() - serialDefectStartedAt;
+  const scaleStartedAt = performance.now();
+  const extrema = calculateChannelExtrema(mosaic, info, scaleMultipliers);
+  runtime.device.queue.writeBuffer(
+    workspace.resources[0],
+    0,
+    correction.corrected,
+  );
+  runtime.device.queue.writeBuffer(workspace.resources[8], 0, extrema);
+  runtime.device.queue.writeBuffer(
+    workspace.resources[12],
+    0,
+    correction.defects,
+  );
+  const scaleAndInitializeMs = performance.now() - scaleStartedAt;
+
+  const chosenDirections = new Uint16Array(info.sampleCount);
+  let interpolateMs = 0;
+  let homogeneityMs = 0;
+  let readbackMs = 0;
+  for (const tile of tiles) {
+    prepareTile(runtime.device, workspace, mosaic, info, tile);
+    submitPass(runtime, workspace, "clear_tile", true);
+    submitPass(runtime, workspace, "initialize_parity");
+
+    const interpolateStartedAt = performance.now();
+    submitParityInterpolation(runtime, workspace);
+    await runtime.device.queue.onSubmittedWorkDone();
+    interpolateMs += performance.now() - interpolateStartedAt;
+
+    const homogeneityStartedAt = performance.now();
+    submitPass(runtime, workspace, "evaluate_homogeneity");
+    submitPass(runtime, workspace, "choose_direction");
+    submitPass(runtime, workspace, "refine_checker_even");
+    submitPass(runtime, workspace, "refine_checker_odd");
+    submitPass(runtime, workspace, "write_direction_plane", false, true);
+    await runtime.device.queue.onSubmittedWorkDone();
+    const readbackStartedAt = performance.now();
+    await readDirectionCore(
+      runtime.device,
+      workspace,
+      tile,
+      chosenDirections,
+      info.width,
+    );
+    readbackMs += performance.now() - readbackStartedAt;
+    homogeneityMs += readbackStartedAt - homogeneityStartedAt;
+  }
+
+  const serialDirectionStartedAt = performance.now();
+  const refinedDirections = refineLibRawSerialDirections(
+    chosenDirections,
+    info.width,
+    info.height,
+  );
+  const serialDirectionMs = performance.now() - serialDirectionStartedAt;
+
+  const pixels = new Uint16Array(info.sampleCount * 3);
+  let serialHighlightMs = 0;
+  let highlightMs = 0;
+  let colorMs = 0;
+  let refineAndCombineMs = 0;
+  for (const tile of tiles) {
+    prepareTile(runtime.device, workspace, mosaic, info, tile);
+    submitPass(runtime, workspace, "clear_tile", true);
+    submitPass(runtime, workspace, "initialize_parity");
+    const interpolateStartedAt = performance.now();
+    submitParityInterpolation(runtime, workspace);
+    await runtime.device.queue.onSubmittedWorkDone();
+    interpolateMs += performance.now() - interpolateStartedAt;
+
+    const combineStartedAt = performance.now();
+    runtime.device.queue.writeBuffer(
+      workspace.resources[5],
+      0,
+      createTileDirectionStorage(
+        refinedDirections,
+        info.width,
+        workspace,
+        tile,
+      ),
+    );
+    submitPass(runtime, workspace, "combine");
+    await runtime.device.queue.onSubmittedWorkDone();
+    refineAndCombineMs += performance.now() - combineStartedAt;
+
+    const highlightStartedAt = performance.now();
+    const serialMs = await blendLibRawHighlightsWithCpu(
+      runtime,
+      workspace,
+      preMultipliers,
+      true,
+    );
+    serialHighlightMs += serialMs;
+    await runtime.device.queue.onSubmittedWorkDone();
+    highlightMs += performance.now() - highlightStartedAt;
+
+    const colorStartedAt = performance.now();
+    submitPass(runtime, workspace, "write_final", false, true);
+    await runtime.device.queue.onSubmittedWorkDone();
+    colorMs += performance.now() - colorStartedAt;
+    const readbackStartedAt = performance.now();
+    await readRgbCore(runtime.device, workspace, tile, pixels, info.width);
+    readbackMs += performance.now() - readbackStartedAt;
+  }
+
+  const validationStartedAt = performance.now();
+  copyCapturedOutput(pixels, capture);
+  const validation = reference ? compareRgb16(pixels, reference) : undefined;
+  const validationMs = performance.now() - validationStartedAt;
+  const peakGpuBytes = workspace.resources.reduce(
+    (sum, buffer) => sum + buffer.size,
+    workspace.readback.size,
+  );
+  const maximumBufferBytes = Math.max(
+    workspace.readback.size,
+    ...workspace.resources.map((buffer) => buffer.size),
+  );
+  return {
+    width: info.width,
+    height: info.height,
+    algorithm: "LibRaw AAHD parity",
+    contract: "libraw-parity",
+    backend: "native-wgsl",
+    outputStage: "final",
+    adapterInfo: {
+      vendor: runtime.adapter.info.vendor,
+      architecture: runtime.adapter.info.architecture,
+      device: runtime.adapter.info.device,
+      description: runtime.adapter.info.description,
+      isFallbackAdapter: runtime.adapter.info.isFallbackAdapter,
+    },
+    resources: {
+      tileCoreSize: AAHD_TILE_CORE_SIZE,
+      tileHalo: AAHD_TILE_HALO,
+      tileCount: tiles.length,
+      peakGpuBytes,
+      maximumBufferBytes,
+    },
+    timings: {
+      deviceCreateMs,
+      workspaceCreateMs,
+      scaleAndInitializeMs,
+      hotPixelMs: serialDefectMs,
+      serialDefectMs,
+      interpolateMs,
+      homogeneityMs,
+      refineAndCombineMs,
+      serialDirectionMs,
+      serialHighlightMs,
+      highlightMs,
+      colorMs,
+      readbackMs,
+      validationMs,
+      totalMs: performance.now() - startedAt,
+    },
+    ...(validation ? { validation } : {}),
+  };
+}
+
+function copyCapturedOutput(
+  pixels: Uint16Array,
+  capture: Uint16Array | undefined,
+): void {
+  if (!capture) return;
+  if (capture.length !== pixels.length) {
+    throw new Error(
+      `AAHD capture has ${capture.length} samples; expected ${pixels.length}.`,
+    );
+  }
+  capture.set(pixels);
 }
 
 function validateInput(
@@ -729,6 +958,16 @@ function getWorkspace(
         GPUBufferUsage.COPY_SRC |
         GPUBufferUsage.COPY_DST,
     ),
+    create(
+      Math.ceil(mosaicBytes / 4) * 4,
+      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    ),
+    create(
+      Uint32Array.BYTES_PER_ELEMENT,
+      GPUBufferUsage.STORAGE |
+        GPUBufferUsage.COPY_SRC |
+        GPUBufferUsage.COPY_DST,
+    ),
   ];
   device.queue.writeBuffer(resources[9], 0, gamma);
   cachedWorkspace = {
@@ -737,6 +976,8 @@ function getWorkspace(
     paddedWidth,
     paddedHeight,
     packedBytes,
+    coreWidth: info.width,
+    coreHeight: info.height,
     resources,
     readback: create(
       packedBytes,
@@ -746,27 +987,304 @@ function getWorkspace(
   return cachedWorkspace;
 }
 
+function getTiledWorkspace(
+  device: GPUDevice,
+  info: SensorImageInfo,
+  mosaicBytes: number,
+): Workspace {
+  const width = Math.min(info.width, AAHD_TILE_CORE_SIZE + AAHD_TILE_HALO * 2);
+  const height = Math.min(
+    info.height,
+    AAHD_TILE_CORE_SIZE + AAHD_TILE_HALO * 2,
+  );
+  if (
+    cachedTiledWorkspace?.paddedWidth === width + 8 &&
+    cachedTiledWorkspace.paddedHeight === height + 8 &&
+    cachedTiledWorkspace.resources[0].size === Math.ceil(mosaicBytes / 4) * 4
+  ) {
+    return cachedTiledWorkspace;
+  }
+  if (cachedTiledWorkspace) destroyWorkspace(cachedTiledWorkspace);
+  const paddedWidth = width + 8;
+  const paddedHeight = height + 8;
+  const paddedSamples = paddedWidth * paddedHeight;
+  const vectorBytes = paddedSamples * 4 * Uint32Array.BYTES_PER_ELEMENT;
+  const scalarBytes = paddedSamples * Uint32Array.BYTES_PER_ELEMENT;
+  const coreSamples =
+    Math.min(info.width, AAHD_TILE_CORE_SIZE) *
+    Math.min(info.height, AAHD_TILE_CORE_SIZE);
+  const outputBytes = Math.max(
+    coreSamples * 3 * Uint16Array.BYTES_PER_ELEMENT,
+    width * height * 4 * Uint32Array.BYTES_PER_ELEMENT,
+  );
+  const originalTileBytes = width * height * Uint16Array.BYTES_PER_ELEMENT;
+  const create = (size: number, usage: GPUBufferUsageFlags) =>
+    device.createBuffer({ size: Math.ceil(size / 4) * 4, usage });
+  const gamma = createLibRawGammaLut();
+  const resources = [
+    create(mosaicBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
+    create(vectorBytes, GPUBufferUsage.STORAGE),
+    create(vectorBytes, GPUBufferUsage.STORAGE),
+    create(vectorBytes, GPUBufferUsage.STORAGE),
+    create(vectorBytes, GPUBufferUsage.STORAGE),
+    create(scalarBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
+    create(scalarBytes, GPUBufferUsage.STORAGE),
+    create(scalarBytes, GPUBufferUsage.STORAGE),
+    create(
+      6 * Uint32Array.BYTES_PER_ELEMENT,
+      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    ),
+    create(gamma.byteLength, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
+    create(
+      outputBytes,
+      GPUBufferUsage.STORAGE |
+        GPUBufferUsage.COPY_SRC |
+        GPUBufferUsage.COPY_DST,
+    ),
+    create(
+      64 * Uint32Array.BYTES_PER_ELEMENT,
+      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    ),
+    create(
+      Math.ceil(info.sampleCount / 32) * Uint32Array.BYTES_PER_ELEMENT,
+      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    ),
+    create(originalTileBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
+    create(
+      Uint32Array.BYTES_PER_ELEMENT,
+      GPUBufferUsage.STORAGE |
+        GPUBufferUsage.COPY_SRC |
+        GPUBufferUsage.COPY_DST,
+    ),
+  ];
+  device.queue.writeBuffer(resources[9], 0, gamma);
+  cachedTiledWorkspace = {
+    width,
+    height,
+    paddedWidth,
+    paddedHeight,
+    packedBytes: outputBytes,
+    coreWidth: Math.min(info.width, AAHD_TILE_CORE_SIZE),
+    coreHeight: Math.min(info.height, AAHD_TILE_CORE_SIZE),
+    resources,
+    readback: create(
+      outputBytes,
+      GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    ),
+  };
+  return cachedTiledWorkspace;
+}
+
+function tiledVectorBytes(info: SensorImageInfo): number {
+  const width = Math.min(info.width, AAHD_TILE_CORE_SIZE + AAHD_TILE_HALO * 2);
+  const height = Math.min(
+    info.height,
+    AAHD_TILE_CORE_SIZE + AAHD_TILE_HALO * 2,
+  );
+  return (width + 8) * (height + 8) * 4 * Uint32Array.BYTES_PER_ELEMENT;
+}
+
+function createTiledParameters(
+  info: SensorImageInfo,
+  workspace: Workspace,
+  tile: AahdTile,
+): Uint32Array<ArrayBuffer> {
+  const parameters = createParameters(info, workspace);
+  parameters[0] = tile.inputWidth;
+  parameters[1] = tile.inputHeight;
+  parameters[6] = tile.inputX;
+  parameters[7] = tile.inputY;
+  parameters[56] = tile.localCoreX;
+  parameters[57] = tile.localCoreY;
+  parameters[58] = tile.coreWidth;
+  parameters[59] = tile.coreHeight;
+  return parameters;
+}
+
+function prepareTile(
+  device: GPUDevice,
+  workspace: Workspace,
+  mosaic: Uint16Array,
+  info: SensorImageInfo,
+  tile: AahdTile,
+): void {
+  workspace.width = tile.inputWidth;
+  workspace.height = tile.inputHeight;
+  workspace.coreWidth = tile.coreWidth;
+  workspace.coreHeight = tile.coreHeight;
+  const source = new Uint16Array(tile.inputWidth * tile.inputHeight);
+  for (let y = 0; y < tile.inputHeight; y += 1) {
+    const row = (tile.inputY + y) * info.width + tile.inputX;
+    source.set(
+      mosaic.subarray(row, row + tile.inputWidth),
+      y * tile.inputWidth,
+    );
+  }
+  device.queue.writeBuffer(workspace.resources[13], 0, source);
+  device.queue.writeBuffer(
+    workspace.resources[11],
+    0,
+    createTiledParameters(info, workspace, tile),
+  );
+}
+
 function destroyWorkspace(workspace: Workspace): void {
   for (const buffer of workspace.resources) buffer.destroy();
   workspace.readback.destroy();
+}
+
+function submitParityInterpolation(
+  runtime: Runtime,
+  workspace: Workspace,
+): void {
+  submitPass(runtime, workspace, "interpolate_green");
+  submitPass(runtime, workspace, "interpolate_rb_at_green");
+  submitPass(runtime, workspace, "interpolate_remaining_rb");
+  submitPass(runtime, workspace, "initialize_yuv_first_products", true);
+  for (const component of [0, 1, 2] as const) {
+    submitPass(runtime, workspace, `store_yuv_second_${component}`, true);
+    submitPass(runtime, workspace, `add_yuv_second_${component}`, true);
+    submitPass(runtime, workspace, `store_yuv_third_${component}`, true);
+    submitPass(runtime, workspace, `finish_yuv_${component}`, true);
+  }
+}
+
+async function readDirectionCore(
+  device: GPUDevice,
+  workspace: Workspace,
+  tile: AahdTile,
+  destination: Uint16Array,
+  imageWidth: number,
+): Promise<void> {
+  const bytes =
+    tile.coreWidth * tile.coreHeight * Uint16Array.BYTES_PER_ELEMENT;
+  await copyToReadback(device, workspace, bytes);
+  await workspace.readback.mapAsync(GPUMapMode.READ, 0, bytes);
+  try {
+    const source = new Uint16Array(workspace.readback.getMappedRange(0, bytes));
+    for (let y = 0; y < tile.coreHeight; y += 1) {
+      destination.set(
+        source.subarray(y * tile.coreWidth, (y + 1) * tile.coreWidth),
+        (tile.coreY + y) * imageWidth + tile.coreX,
+      );
+    }
+  } finally {
+    workspace.readback.unmap();
+  }
+}
+
+async function readRgbCore(
+  device: GPUDevice,
+  workspace: Workspace,
+  tile: AahdTile,
+  destination: Uint16Array,
+  imageWidth: number,
+): Promise<void> {
+  const rowSamples = tile.coreWidth * 3;
+  const bytes = rowSamples * tile.coreHeight * Uint16Array.BYTES_PER_ELEMENT;
+  await copyToReadback(device, workspace, bytes);
+  await workspace.readback.mapAsync(GPUMapMode.READ, 0, bytes);
+  try {
+    const source = new Uint16Array(workspace.readback.getMappedRange(0, bytes));
+    for (let y = 0; y < tile.coreHeight; y += 1) {
+      destination.set(
+        source.subarray(y * rowSamples, (y + 1) * rowSamples),
+        ((tile.coreY + y) * imageWidth + tile.coreX) * 3,
+      );
+    }
+  } finally {
+    workspace.readback.unmap();
+  }
+}
+
+async function copyToReadback(
+  device: GPUDevice,
+  workspace: Workspace,
+  bytes: number,
+): Promise<void> {
+  const encoder = device.createCommandEncoder();
+  encoder.copyBufferToBuffer(
+    workspace.resources[10],
+    0,
+    workspace.readback,
+    0,
+    bytes,
+  );
+  device.queue.submit([encoder.finish()]);
+}
+
+function createTileDirectionStorage(
+  directions: Uint16Array,
+  imageWidth: number,
+  workspace: Workspace,
+  tile: AahdTile,
+): Uint32Array<ArrayBuffer> {
+  const storage = new Uint32Array(
+    workspace.paddedWidth * workspace.paddedHeight,
+  );
+  for (let y = 0; y < tile.inputHeight; y += 1) {
+    const sourceRow = (tile.inputY + y) * imageWidth + tile.inputX;
+    const destinationRow = (y + 4) * workspace.paddedWidth + 4;
+    for (let x = 0; x < tile.inputWidth; x += 1) {
+      storage[destinationRow + x] = directions[sourceRow + x];
+    }
+  }
+  return storage;
+}
+
+function calculateChannelExtrema(
+  mosaic: Uint16Array,
+  info: SensorImageInfo,
+  scaleMultipliers: Float32Array,
+): Uint32Array<ArrayBuffer> {
+  const extrema = new Uint32Array(6);
+  const firstChannel = normalizedCfa(info.cfaPattern[0]);
+  extrema[firstChannel] = scaleSample(
+    mosaic[0],
+    info.blackLevels[firstChannel],
+    scaleMultipliers[firstChannel],
+  );
+  for (let y = 0; y < info.height; y += 1) {
+    for (let x = 0; x < info.width; x += 1) {
+      const channel = normalizedCfa(info.cfaPattern[(y & 1) * 2 + (x & 1)]);
+      const sample = scaleSample(
+        mosaic[y * info.width + x],
+        info.blackLevels[channel],
+        scaleMultipliers[channel],
+      );
+      if (sample === 0) continue;
+      extrema[channel] = Math.min(extrema[channel], sample);
+      extrema[channel + 3] = Math.max(extrema[channel + 3], sample);
+    }
+  }
+  return extrema;
 }
 
 async function blendLibRawHighlightsWithCpu(
   runtime: Runtime,
   workspace: Workspace,
   preMultipliers: Float32Array,
+  core = false,
 ): Promise<number> {
   runtime.device.queue.writeBuffer(
-    workspace.resources[12],
+    workspace.resources[14],
     0,
     new Uint32Array([0]),
   );
-  submitPass(runtime, workspace, "collect_highlights");
+  submitPass(
+    runtime,
+    workspace,
+    "collect_highlights",
+    false,
+    false,
+    undefined,
+    core,
+  );
   await runtime.device.queue.onSubmittedWorkDone();
 
   const countEncoder = runtime.device.createCommandEncoder();
   countEncoder.copyBufferToBuffer(
-    workspace.resources[12],
+    workspace.resources[14],
     0,
     workspace.readback,
     0,
@@ -790,7 +1308,7 @@ async function blendLibRawHighlightsWithCpu(
   const recordBytes = recordCount * 4 * Uint32Array.BYTES_PER_ELEMENT;
   if (recordBytes > workspace.resources[10].size) {
     throw new Error(
-      `LibRaw highlight collection exceeded the ${workspace.resources[10].size}-byte scratch buffer.`,
+      `LibRaw highlight collection produced ${recordCount} records, exceeding the ${workspace.resources[10].size}-byte scratch buffer.`,
     );
   }
   if (recordCount === 0) return 0;
@@ -834,6 +1352,7 @@ function submitPass(
   padded = false,
   paired = false,
   linearWorkgroups?: number,
+  core = false,
 ): void {
   const pipeline = runtime.pipelines[entryPoint];
   const bindGroup = runtime.device.createBindGroup({
@@ -847,8 +1366,16 @@ function submitPass(
   const pass = encoder.beginComputePass();
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bindGroup);
-  const width = padded ? workspace.paddedWidth : workspace.width;
-  const height = padded ? workspace.paddedHeight : workspace.height;
+  const width = padded
+    ? workspace.paddedWidth
+    : core || paired
+      ? workspace.coreWidth
+      : workspace.width;
+  const height = padded
+    ? workspace.paddedHeight
+    : core || paired
+      ? workspace.coreHeight
+      : workspace.height;
   if (linearWorkgroups === undefined) {
     pass.dispatchWorkgroups(
       Math.ceil((paired ? width / 2 : width) / 16),
@@ -876,6 +1403,8 @@ function createParameters(
   parameters[1] = info.height;
   parameters[2] = workspace.paddedWidth;
   parameters[3] = workspace.paddedHeight;
+  parameters[4] = info.width;
+  parameters[5] = info.height;
   for (let channel = 0; channel < 4; channel += 1) {
     floats[8 + channel] = info.blackLevels[channel];
   }
@@ -887,6 +1416,8 @@ function createParameters(
   floats.set(reference?.yuvMatrix ?? info.aahdYuvMatrix, 20);
   floats.set(reference?.outputMatrix ?? info.librawProPhotoMatrix, 32);
   parameters.set(info.cfaPattern, 48);
+  parameters[58] = workspace.coreWidth;
+  parameters[59] = workspace.coreHeight;
   return parameters;
 }
 

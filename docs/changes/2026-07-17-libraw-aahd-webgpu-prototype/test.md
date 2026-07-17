@@ -24,6 +24,13 @@
 - Tiled output matches the corresponding accepted full-frame output exactly,
   while the full-frame output is independently checked against LibRaw or the
   explicitly approved candidate CPU reference.
+- The 512-core, 12-halo tiled parity route compares all 78,024,960 Sony output
+  channels with the pinned LibRaw oracle in one cold and four warm runs, while
+  reporting peak buffer allocation and maximum binding size.
+- A hardware synthetic dependency fixture crosses horizontal and vertical tile
+  seams, uses rectangular edge tiles and clustered extreme defects, and
+  bit-matches full-frame output for all four Bayer phases; a smaller-than-tile
+  fixture covers the single-tile path.
 - WebGPU exposure and LUT output compares against the current Rust corrected-v2
   CPU/WASM renderer for the same ProPhoto input and rejects any sample more than
   two code values away.

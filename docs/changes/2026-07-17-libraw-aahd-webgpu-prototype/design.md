@@ -246,14 +246,51 @@ LibRaw captures exactly. The final cold run and two warm runs each compared all
 establish feasibility and numerical authority; they are not the final tiled
 performance target.
 
+### Bounded Tiled Parity Route
+
+The accepted parity math now runs in a serial 512 x 512 core tile loop with a
+12-pixel input halo. Shader coordinates distinguish local workspace positions
+from global sensor positions. CFA phase and packed corrected-CFA reads use
+global coordinates, while each tile writes only its rectangular core.
+
+The row-ordered direction contract requires two tile sweeps. The first sweep
+assembles checker-refined directions into one CPU `u16` plane. The existing
+scalar LibRaw scan refines that plane. The second sweep recomputes bounded
+candidates, loads the refined directions for the halo region, combines the
+selected camera RGB, applies compact CPU Blend highlights, and reads back only
+the final core. The GPU keeps one full corrected packed CFA and one full defect
+bitset; the original CFA is uploaded per tile. Candidate, YUV, homogeneity,
+direction, output, and readback buffers are reused.
+
+On the 6240 x 4168 Sony fixture, 117 tiles produced zero differences across all
+78,024,960 final ProPhoto RGB16 channels in one cold and four warm oracle runs.
+The generalized full-frame route also retained zero differences after the
+coordinate change. The measured tiled buffer allocation was 87,789,308 bytes,
+and the largest binding was the 52,016,640-byte corrected CFA. This replaces
+the prototype's 2.19 GiB allocation and 417 MB binding without a full-frame
+runtime fallback.
+
+An adversarial 546 x 530 synthetic fixture crosses both 512-pixel seams, ends
+in rectangular edge tiles, places clustered extreme defects around the seam,
+and exercises all four Bayer phases. Each tiled result bit-matched the accepted
+full-frame result. A 64 x 46 fixture covers the single-tile path. The 12-pixel
+halo remains deliberately conservative; it was not reduced based on these
+tests.
+
+Tiling trades memory for dispatch and bounded-readback overhead. Tiled demosaic
+totals were 4.64-6.26 seconds in the five-run oracle process, compared with
+2.43-2.58 seconds for the full-frame route. The tiled route performs 117 small
+direction and RGB readbacks and recomputes interpolation after serial direction
+refinement. Phase 3 must remove the final RGB core readback and combine work on
+one shared device before performance is judged against the post-unpack product
+target.
+
 ## Resource Trade-offs
 
 The full-frame workspace allocates approximately 2.19 GiB and its largest
-buffer is 417 MB. It is unsuitable for product use and will be rejected by
-adapters whose storage-binding limit is below 417 MB. A roughly 1024-square
-tile with the required halo would reduce live AAHD storage to roughly 100 MB.
-Tiling must preserve candidate and homogeneity neighborhoods and must occur
-after the hot/dead-pixel contract is resolved.
+buffer is 417 MB. The bounded 512-core parity route instead measures 87.8 MB of
+live WebGPU buffers with a 52.0 MB maximum binding. This count includes its
+reusable readback buffer and excludes CPU direction and final output arrays.
 
 Handwritten WGSL is required for this path. AAHD uses mutable neighborhoods,
 integer wrapping, atomic homogeneity accumulation, and discrete refinements.

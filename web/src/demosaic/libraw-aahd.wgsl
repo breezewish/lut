@@ -11,6 +11,8 @@
 @group(0) @binding(10) var<storage, read_write> output: array<u32>;
 @group(0) @binding(11) var<storage, read> parameters: array<u32>;
 @group(0) @binding(12) var<storage, read_write> defect_mask: array<atomic<u32>>;
+@group(0) @binding(13) var<storage, read> original_mosaic: array<u32>;
+@group(0) @binding(14) var<storage, read_write> highlight_count: atomic<u32>;
 
 const MARGIN: u32 = 4u;
 const HOR: u32 = 2u;
@@ -23,8 +25,18 @@ fn width() -> u32 { return parameters[0]; }
 fn height() -> u32 { return parameters[1]; }
 fn padded_width() -> u32 { return parameters[2]; }
 fn padded_height() -> u32 { return parameters[3]; }
+fn global_width() -> u32 { return parameters[4]; }
+fn origin_x() -> u32 { return parameters[6]; }
+fn origin_y() -> u32 { return parameters[7]; }
+fn core_x() -> u32 { return parameters[56]; }
+fn core_y() -> u32 { return parameters[57]; }
+fn core_width() -> u32 { return parameters[58]; }
+fn core_height() -> u32 { return parameters[59]; }
 fn parameter(index: u32) -> f32 { return bitcast<f32>(parameters[index]); }
-fn image_index(x: u32, y: u32) -> u32 { return y * width() + x; }
+fn image_index(x: u32, y: u32) -> u32 {
+  return (origin_y() + y) * global_width() + origin_x() + x;
+}
+fn local_image_index(x: u32, y: u32) -> u32 { return y * width() + x; }
 fn padded_index(x: i32, y: i32) -> u32 {
   return u32(y + i32(MARGIN)) * padded_width() + u32(x + i32(MARGIN));
 }
@@ -37,7 +49,7 @@ fn in_padded(id: vec3u) -> bool {
 }
 
 fn cfa_color(x: u32, y: u32) -> u32 {
-  let channel = parameters[48u + (y & 1u) * 2u + (x & 1u)];
+  let channel = parameters[48u + ((origin_y() + y) & 1u) * 2u + ((origin_x() + x) & 1u)];
   return select(channel, 1u, channel == 3u);
 }
 
@@ -46,9 +58,14 @@ fn sensor_sample(index: u32) -> u32 {
   return select(word >> 16u, word & 0xffffu, index % 2u == 0u);
 }
 
+fn original_sample(index: u32) -> u32 {
+  let word = original_mosaic[index / 2u];
+  return select(word >> 16u, word & 0xffffu, index % 2u == 0u);
+}
+
 fn scaled_sample(x: u32, y: u32) -> u32 {
   let channel = cfa_color(x, y);
-  let value = max(f32(sensor_sample(image_index(x, y))) - parameter(8u + channel), 0.0);
+  let value = max(f32(original_sample(local_image_index(x, y))) - parameter(8u + channel), 0.0);
   return u32(clamp(value * parameter(12u + channel), 0.0, 65535.0));
 }
 
@@ -84,6 +101,19 @@ fn square_wrapped(value: i32) -> i32 { return value * value; }
 fn clear(@builtin(global_invocation_id) id: vec3u) {
   if !in_padded(id) { return; }
   let index = id.y * padded_width() + id.x;
+  directions[index] = 0u;
+  atomicStore(&horizontal_homogeneity[index], 0u);
+  atomicStore(&vertical_homogeneity[index], 0u);
+}
+
+@compute @workgroup_size(16, 16)
+fn clear_tile(@builtin(global_invocation_id) id: vec3u) {
+  if !in_padded(id) { return; }
+  let index = id.y * padded_width() + id.x;
+  horizontal_rgb[index] = vec4u(0u);
+  vertical_rgb[index] = vec4u(0u);
+  horizontal_yuv[index] = vec4i(0);
+  vertical_yuv[index] = vec4i(0);
   directions[index] = 0u;
   atomicStore(&horizontal_homogeneity[index], 0u);
   atomicStore(&vertical_homogeneity[index], 0u);
@@ -138,7 +168,7 @@ fn hide_hot_pixels(@builtin(global_invocation_id) id: vec3u) {
   if !in_image(id) { return; }
   let index = padded_index(i32(id.x), i32(id.y));
   let channel = cfa_color(id.x, id.y);
-  let row_color = cfa_color(id.x ^ 1u, id.y);
+  let row_color = cfa_color(id.x + 1u, id.y);
   let known = channel;
   let center = rgb_channel(0u, index, known);
   let west2 = rgb_channel(0u, padded_offset(index, -2, 0), known);
@@ -244,7 +274,7 @@ fn interpolate_green(@builtin(global_invocation_id) id: vec3u) {
 fn interpolate_rb_at_green(@builtin(global_invocation_id) id: vec3u) {
   if !in_image(id) || cfa_color(id.x, id.y) != 1u { return; }
   let index = padded_index(i32(id.x), i32(id.y));
-  let row_color = cfa_color(id.x ^ 1u, id.y);
+  let row_color = cfa_color(id.x + 1u, id.y);
   for (var direction = 0u; direction < 2u; direction += 1u) {
     let dx = select(0, 1, direction == 0u);
     let dy = select(1, 0, direction == 0u);
@@ -272,7 +302,7 @@ fn interpolate_remaining_rb(@builtin(global_invocation_id) id: vec3u) {
   if !in_image(id) { return; }
   let index = padded_index(i32(id.x), i32(id.y));
   let site_color = cfa_color(id.x, id.y);
-  let row_color = select(site_color, cfa_color(id.x ^ 1u, id.y), site_color == 1u);
+  let row_color = select(site_color, cfa_color(id.x + 1u, id.y), site_color == 1u);
   for (var direction = 0u; direction < 2u; direction += 1u) {
     var color = row_color ^ 2u;
     if site_color == 1u { color ^= direction << 1u; }
@@ -577,14 +607,14 @@ fn refined_direction(index: u32, require_coding_neighbor: bool) -> u32 {
 
 @compute @workgroup_size(16, 16)
 fn refine_checker_even(@builtin(global_invocation_id) id: vec3u) {
-  if !in_image(id) || (id.x & 1u) != (id.y & 1u) { return; }
+  if !in_image(id) || ((origin_x() + id.x) & 1u) != ((origin_y() + id.y) & 1u) { return; }
   let index = padded_index(i32(id.x), i32(id.y));
   directions[index] = refined_direction(index, true);
 }
 
 @compute @workgroup_size(16, 16)
 fn refine_checker_odd(@builtin(global_invocation_id) id: vec3u) {
-  if !in_image(id) || (id.x & 1u) == (id.y & 1u) { return; }
+  if !in_image(id) || ((origin_x() + id.x) & 1u) == ((origin_y() + id.y) & 1u) { return; }
   let index = padded_index(i32(id.x), i32(id.y));
   directions[index] = refined_direction(index, true);
 }
@@ -625,44 +655,48 @@ fn pack_pair(first: vec3u, second: vec3u, pair: u32) {
   output[word + 2u] = second.y | (second.z << 16u);
 }
 
+fn core_position(id: vec3u) -> vec2u {
+  return vec2u(core_x() + id.x * 2u, core_y() + id.y);
+}
+
+fn in_core_pairs(id: vec3u) -> bool {
+  return id.x < core_width() / 2u && id.y < core_height();
+}
+
 @compute @workgroup_size(16, 16)
 fn write_horizontal(@builtin(global_invocation_id) id: vec3u) {
-  let pairs_per_row = width() / 2u;
-  if id.x >= pairs_per_row || id.y >= height() { return; }
-  let x = id.x * 2u;
-  let first = horizontal_rgb[padded_index(i32(x), i32(id.y))].xyz;
-  let second = horizontal_rgb[padded_index(i32(x + 1u), i32(id.y))].xyz;
-  pack_pair(first, second, id.y * pairs_per_row + id.x);
+  if !in_core_pairs(id) { return; }
+  let position = core_position(id);
+  let first = horizontal_rgb[padded_index(i32(position.x), i32(position.y))].xyz;
+  let second = horizontal_rgb[padded_index(i32(position.x + 1u), i32(position.y))].xyz;
+  pack_pair(first, second, id.y * (core_width() / 2u) + id.x);
 }
 
 @compute @workgroup_size(16, 16)
 fn write_vertical(@builtin(global_invocation_id) id: vec3u) {
-  let pairs_per_row = width() / 2u;
-  if id.x >= pairs_per_row || id.y >= height() { return; }
-  let x = id.x * 2u;
-  let first = vertical_rgb[padded_index(i32(x), i32(id.y))].xyz;
-  let second = vertical_rgb[padded_index(i32(x + 1u), i32(id.y))].xyz;
-  pack_pair(first, second, id.y * pairs_per_row + id.x);
+  if !in_core_pairs(id) { return; }
+  let position = core_position(id);
+  let first = vertical_rgb[padded_index(i32(position.x), i32(position.y))].xyz;
+  let second = vertical_rgb[padded_index(i32(position.x + 1u), i32(position.y))].xyz;
+  pack_pair(first, second, id.y * (core_width() / 2u) + id.x);
 }
 
 @compute @workgroup_size(16, 16)
 fn write_directions(@builtin(global_invocation_id) id: vec3u) {
-  let pairs_per_row = width() / 2u;
-  if id.x >= pairs_per_row || id.y >= height() { return; }
-  let x = id.x * 2u;
-  let first = directions[padded_index(i32(x), i32(id.y))] & 15u;
-  let second = directions[padded_index(i32(x + 1u), i32(id.y))] & 15u;
-  pack_pair(vec3u(first), vec3u(second), id.y * pairs_per_row + id.x);
+  if !in_core_pairs(id) { return; }
+  let position = core_position(id);
+  let first = directions[padded_index(i32(position.x), i32(position.y))] & 15u;
+  let second = directions[padded_index(i32(position.x + 1u), i32(position.y))] & 15u;
+  pack_pair(vec3u(first), vec3u(second), id.y * (core_width() / 2u) + id.x);
 }
 
 @compute @workgroup_size(16, 16)
 fn write_direction_plane(@builtin(global_invocation_id) id: vec3u) {
-  let pairs_per_row = width() / 2u;
-  if id.x >= pairs_per_row || id.y >= height() { return; }
-  let x = id.x * 2u;
-  let first = directions[padded_index(i32(x), i32(id.y))] & 15u;
-  let second = directions[padded_index(i32(x + 1u), i32(id.y))] & 15u;
-  output[id.y * pairs_per_row + id.x] = first | (second << 16u);
+  if !in_core_pairs(id) { return; }
+  let position = core_position(id);
+  let first = directions[padded_index(i32(position.x), i32(position.y))] & 15u;
+  let second = directions[padded_index(i32(position.x + 1u), i32(position.y))] & 15u;
+  output[id.y * (core_width() / 2u) + id.x] = first | (second << 16u);
 }
 
 @compute @workgroup_size(16, 16)
@@ -674,12 +708,11 @@ fn load_direction_plane(@builtin(global_invocation_id) id: vec3u) {
 
 @compute @workgroup_size(16, 16)
 fn write_aahd(@builtin(global_invocation_id) id: vec3u) {
-  let pairs_per_row = width() / 2u;
-  if id.x >= pairs_per_row || id.y >= height() { return; }
-  let x = id.x * 2u;
-  let first = horizontal_rgb[padded_index(i32(x), i32(id.y))].xyz;
-  let second = horizontal_rgb[padded_index(i32(x + 1u), i32(id.y))].xyz;
-  pack_pair(first, second, id.y * pairs_per_row + id.x);
+  if !in_core_pairs(id) { return; }
+  let position = core_position(id);
+  let first = horizontal_rgb[padded_index(i32(position.x), i32(position.y))].xyz;
+  let second = horizontal_rgb[padded_index(i32(position.x + 1u), i32(position.y))].xyz;
+  pack_pair(first, second, id.y * (core_width() / 2u) + id.x);
 }
 
 @compute @workgroup_size(16, 16)
@@ -715,13 +748,15 @@ fn highlight_clip() -> u32 {
 
 @compute @workgroup_size(16, 16)
 fn collect_highlights(@builtin(global_invocation_id) id: vec3u) {
-  if !in_image(id) { return; }
-  let source = horizontal_rgb[padded_index(i32(id.x), i32(id.y))].xyz;
+  if id.x >= core_width() || id.y >= core_height() { return; }
+  let x = core_x() + id.x;
+  let y = core_y() + id.y;
+  let source = horizontal_rgb[padded_index(i32(x), i32(y))].xyz;
   if all(source <= vec3u(highlight_clip())) { return; }
-  let record = atomicAdd(&defect_mask[0], 1u);
+  let record = atomicAdd(&highlight_count, 1u);
   let base = record * 4u;
   if base + 3u >= arrayLength(&output) { return; }
-  output[base] = image_index(id.x, id.y);
+  output[base] = local_image_index(x, y);
   output[base + 1u] = source.x;
   output[base + 2u] = source.y;
   output[base + 3u] = source.z;
@@ -749,10 +784,9 @@ fn prophoto(rgb: vec3u) -> vec3u {
 
 @compute @workgroup_size(16, 16)
 fn write_final(@builtin(global_invocation_id) id: vec3u) {
-  let pairs_per_row = width() / 2u;
-  if id.x >= pairs_per_row || id.y >= height() { return; }
-  let x = id.x * 2u;
-  let first = prophoto(horizontal_rgb[padded_index(i32(x), i32(id.y))].xyz);
-  let second = prophoto(horizontal_rgb[padded_index(i32(x + 1u), i32(id.y))].xyz);
-  pack_pair(first, second, id.y * pairs_per_row + id.x);
+  if !in_core_pairs(id) { return; }
+  let position = core_position(id);
+  let first = prophoto(horizontal_rgb[padded_index(i32(position.x), i32(position.y))].xyz);
+  let second = prophoto(horizontal_rgb[padded_index(i32(position.x + 1u), i32(position.y))].xyz);
+  pack_pair(first, second, id.y * (core_width() / 2u) + id.x);
 }

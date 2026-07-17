@@ -14,7 +14,7 @@ const outputStage =
   process.env.DEMOSAIC_PERF_OUTPUT_STAGE ??
   (backend === "native-wgsl"
     ? "identity-lut"
-    : backend === "libraw-aahd-wgsl"
+    : backend === "libraw-aahd-wgsl" || backend === "libraw-aahd-wgsl-tiled"
       ? "final"
       : "demosaic");
 const completeExport = process.env.DEMOSAIC_PERF_COMPLETE_EXPORT === "1";

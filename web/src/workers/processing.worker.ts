@@ -11,6 +11,7 @@ import { demosaicOnWebGpu } from "../lib/onnx-demosaic";
 import { demosaicRcdWithNativeWgsl } from "../lib/native-rcd";
 import {
   demosaicLibRawAahdWithWgsl,
+  demosaicLibRawAahdTiledWithWgsl,
   type AahdReferenceInfo,
 } from "../lib/libraw-aahd";
 import { correctImmutableDefects } from "../lib/aahd-candidate-reference";
@@ -65,6 +66,15 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       const workerStartedAt = performance.now();
       const raw = new module.LibRaw();
       try {
+        if (
+          data.demosaicBackend === "libraw-aahd-wgsl-tiled" &&
+          (data.demosaicContract !== "libraw-parity" ||
+            data.demosaicOutputStage !== "final")
+        ) {
+          throw new Error(
+            "Tiled AAHD currently supports only the final LibRaw-parity contract.",
+          );
+        }
         raw.open(new Uint8Array(data.buffer), false);
         const sensor = raw.sensorInfo();
         if (
@@ -104,7 +114,10 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
                 : expandDefectMask(candidate.defects, input.length);
           }
         } else if (data.librawReference) {
-          if (data.demosaicBackend !== "libraw-aahd-wgsl") {
+          if (
+            data.demosaicBackend !== "libraw-aahd-wgsl" &&
+            data.demosaicBackend !== "libraw-aahd-wgsl-tiled"
+          ) {
             throw new Error("The internal LibRaw oracle requires WGSL AAHD.");
           }
           referenceInfo = raw.aahdReferenceInfo();
@@ -191,43 +204,45 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
             )
           : undefined;
         const demosaic =
-          data.demosaicBackend === "libraw-aahd-wgsl"
-            ? await demosaicLibRawAahdWithWgsl(
-                mosaic,
-                sensor,
-                data.demosaicContract,
-                data.demosaicOutputStage === "scaled" ||
-                  data.demosaicOutputStage === "corrected" ||
-                  data.demosaicOutputStage === "defects" ||
-                  data.demosaicOutputStage === "horizontal" ||
-                  data.demosaicOutputStage === "vertical" ||
-                  data.demosaicOutputStage === "horizontal-yuv" ||
-                  data.demosaicOutputStage === "vertical-yuv" ||
-                  data.demosaicOutputStage === "horizontal-homogeneity" ||
-                  data.demosaicOutputStage === "vertical-homogeneity" ||
-                  data.demosaicOutputStage === "chosen-directions" ||
-                  data.demosaicOutputStage === "directions" ||
-                  data.demosaicOutputStage === "candidate-directions" ||
-                  data.demosaicOutputStage === "aahd" ||
-                  data.demosaicOutputStage === "highlight"
-                  ? data.demosaicOutputStage
-                  : "final",
-                reference,
-                data.demosaicOutputStage === "scaled"
-                  ? undefined
-                  : referenceInfo,
-              )
-            : data.demosaicBackend === "native-wgsl"
-              ? await demosaicRcdWithNativeWgsl(
+          data.demosaicBackend === "libraw-aahd-wgsl-tiled"
+            ? await demosaicLibRawAahdTiledWithWgsl(mosaic, sensor, reference)
+            : data.demosaicBackend === "libraw-aahd-wgsl"
+              ? await demosaicLibRawAahdWithWgsl(
                   mosaic,
                   sensor,
+                  data.demosaicContract,
+                  data.demosaicOutputStage === "scaled" ||
+                    data.demosaicOutputStage === "corrected" ||
+                    data.demosaicOutputStage === "defects" ||
+                    data.demosaicOutputStage === "horizontal" ||
+                    data.demosaicOutputStage === "vertical" ||
+                    data.demosaicOutputStage === "horizontal-yuv" ||
+                    data.demosaicOutputStage === "vertical-yuv" ||
+                    data.demosaicOutputStage === "horizontal-homogeneity" ||
+                    data.demosaicOutputStage === "vertical-homogeneity" ||
+                    data.demosaicOutputStage === "chosen-directions" ||
+                    data.demosaicOutputStage === "directions" ||
+                    data.demosaicOutputStage === "candidate-directions" ||
+                    data.demosaicOutputStage === "aahd" ||
+                    data.demosaicOutputStage === "highlight"
+                    ? data.demosaicOutputStage
+                    : "final",
                   reference,
-                  data.demosaicOutputStage === "demosaic"
-                    ? "demosaic"
-                    : "identity-lut",
-                  benchmarkEncoder,
+                  data.demosaicOutputStage === "scaled"
+                    ? undefined
+                    : referenceInfo,
                 )
-              : await demosaicOnWebGpu(mosaic, sensor, reference);
+              : data.demosaicBackend === "native-wgsl"
+                ? await demosaicRcdWithNativeWgsl(
+                    mosaic,
+                    sensor,
+                    reference,
+                    data.demosaicOutputStage === "demosaic"
+                      ? "demosaic"
+                      : "identity-lut",
+                    benchmarkEncoder,
+                  )
+                : await demosaicOnWebGpu(mosaic, sensor, reference);
         const reply: WorkerReply = {
           requestId: data.requestId,
           ok: true,

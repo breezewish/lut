@@ -195,7 +195,8 @@ export class ProcessingClient {
     const requestedBackend = search.get("demosaicBackend");
     const demosaicBackend =
       requestedBackend === "native-wgsl" ||
-      requestedBackend === "libraw-aahd-wgsl"
+      requestedBackend === "libraw-aahd-wgsl" ||
+      requestedBackend === "libraw-aahd-wgsl-tiled"
         ? requestedBackend
         : "onnx";
     const requestedStage = search.get("demosaicOutputStage");
@@ -204,7 +205,8 @@ export class ProcessingClient {
         ? "libraw-parity"
         : "deterministic-parallel-candidate";
     const demosaicOutputStage =
-      demosaicBackend === "libraw-aahd-wgsl"
+      demosaicBackend === "libraw-aahd-wgsl" ||
+      demosaicBackend === "libraw-aahd-wgsl-tiled"
         ? requestedStage === "scaled" ||
           requestedStage === "corrected" ||
           requestedStage === "defects" ||

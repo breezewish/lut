@@ -374,6 +374,17 @@ most 256 MB and no storage binding exceeds the intended browser limit.
 This is the immediate required deliverable. Do not start Phase 3 until this
 gate is met and reported.
 
+Phase 2 completed on 2026-07-17. The `libraw-aahd-wgsl-tiled` benchmark route
+uses 512 x 512 cores, a conservative 12-pixel halo, two bounded tile sweeps
+around the exact CPU row-order direction refinement, and reusable buffers.
+The 26 MP Sony oracle had zero final-channel differences in one cold and four
+warm runs. Peak WebGPU buffer allocation was 87,789,308 bytes and the maximum
+binding was 52,016,640 bytes. The full-frame parity oracle remained exact.
+Hardware synthetic tests covered both seam axes, rectangular edges, all four
+Bayer phases, clustered seam defects, and an image smaller than one tile with
+zero tiled/full-frame differences. Phase 3 may now begin; it remains
+unimplemented in this change.
+
 ### Phase 3: Keep color and LUT processing on the GPU
 
 - Introduce the shared WebGPU runtime.

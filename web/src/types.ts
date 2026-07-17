@@ -159,7 +159,11 @@ export type WorkerCommand =
       type: "benchmark-demosaic";
       buffer: ArrayBuffer;
       referenceRgb16?: ArrayBuffer;
-      demosaicBackend: "onnx" | "native-wgsl" | "libraw-aahd-wgsl";
+      demosaicBackend:
+        | "onnx"
+        | "native-wgsl"
+        | "libraw-aahd-wgsl"
+        | "libraw-aahd-wgsl-tiled";
       demosaicContract: "deterministic-parallel-candidate" | "libraw-parity";
       demosaicOutputStage:
         | "demosaic"
