@@ -837,7 +837,7 @@ export default function App() {
         <div className="topbar-actions">
           <div className="privacy-badge">
             <LockKeyhole size={12} aria-hidden="true" />
-            <span>Local</span>
+            <span>Files stay on this device</span>
           </div>
           <Button
             size="icon"
@@ -894,7 +894,11 @@ export default function App() {
           ) : (
             <>
               <div className="queue-meta">
-                <span>{items.length} file{items.length !== 1 ? "s" : ""}</span>
+                <span>
+                  {items.length === 1
+                    ? "1 local file"
+                    : `${items.length} local files`}
+                </span>
                 <Button
                   size="icon"
                   variant="quiet"
@@ -1020,7 +1024,7 @@ export default function App() {
             {selected && selectedLut && (
               <section
                 className="control-panel"
-                aria-label="Adjustments and export"
+                aria-label="Processing controls"
               >
                 <div className="panel-section">
                   <div className="panel-heading">
