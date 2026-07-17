@@ -101,15 +101,15 @@ test("a dropped RAW is decoded and a removed selection can be restored", async (
     stat(linearFixture),
   ]);
   await page.goto("/");
-  await page.evaluate(
-    ({ contents, lastModified }) => {
+  await page.getByLabel("RAW queue").evaluate(
+    (queue, { contents, lastModified }) => {
       const file = new File([new Uint8Array(contents)], "dropped.dng", {
         type: "image/x-adobe-dng",
         lastModified,
       });
       const transfer = new DataTransfer();
       transfer.items.add(file);
-      document.querySelector(".drop-zone")!.dispatchEvent(
+      queue.dispatchEvent(
         new DragEvent("drop", {
           bubbles: true,
           dataTransfer: transfer,

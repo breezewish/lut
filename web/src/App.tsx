@@ -1,4 +1,7 @@
 import {
+  Circle,
+  CircleAlert,
+  CircleCheck,
   CircleStop,
   FileImage,
   FolderOpen,
@@ -94,6 +97,21 @@ interface DisplayedPreview {
 
 function isDecodeFailure(item: QueueItem): boolean {
   return item.status === "decode-error";
+}
+
+function StatusIcon({ status }: { status: QueueItem["status"] }) {
+  switch (status) {
+    case "decoding":
+    case "exporting":
+      return <LoaderCircle size={13} aria-hidden="true" />;
+    case "done":
+      return <CircleCheck size={13} aria-hidden="true" />;
+    case "decode-error":
+    case "export-error":
+      return <CircleAlert size={13} aria-hidden="true" />;
+    default:
+      return <Circle size={13} aria-hidden="true" />;
+  }
 }
 
 function hasUsablePreview(item: QueueItem): boolean {
@@ -822,14 +840,14 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell">
-      <header className="topbar">
+    <div className="shell">
+      <header className="titlebar">
         <div className="brand">
           <div className="brand-mark" aria-hidden="true" />
-          <h1>RAW Alchemy</h1>
+          <h1 className="brand-name">RAW Alchemy</h1>
         </div>
-        <div className="topbar-spacer" />
-        <div className="topbar-actions">
+        <div className="titlebar-spacer" />
+        <div className="titlebar-end">
           <div className="privacy-badge">
             <LockKeyhole size={12} aria-hidden="true" />
             <span>Files stay on this device</span>
@@ -869,9 +887,9 @@ export default function App() {
         </div>
       </header>
 
-      <div className="app-grid">
+      <div className="workbench">
         <aside
-          className="queue-panel"
+          className="rail"
           aria-label="RAW queue"
           onDragOver={(event) => event.preventDefault()}
           onDrop={onDrop}
@@ -883,7 +901,7 @@ export default function App() {
               </span>
               <button
                 type="button"
-                className="drop-zone"
+                className="rail-empty"
                 onClick={() => fileInput.current?.click()}
               >
                 <FolderOpen size={20} aria-hidden="true" />
@@ -893,7 +911,7 @@ export default function App() {
             </>
           ) : (
             <>
-              <div className="queue-meta">
+              <div className="rail-header">
                 <span>
                   {items.length === 1
                     ? "1 local file"
@@ -909,22 +927,24 @@ export default function App() {
                   <Trash2 size={13} />
                 </Button>
               </div>
-              <div className="queue-list">
+              <div className="rail-list">
                 {items.map((item) => (
                   <div
                     key={item.id}
-                    className={`queue-item status-${item.status} ${item.id === selectedId ? "is-selected" : ""}`}
+                    className={`rail-item status-${item.status} ${item.id === selectedId ? "is-selected" : ""}`}
                   >
                     <button
-                      className="queue-select"
+                      className="rail-item-select"
                       aria-current={item.id === selectedId ? "true" : undefined}
                       disabled={exporting}
                       onClick={() => setSelectedId(item.id)}
                     >
-                      <span className="queue-item-bar" aria-hidden="true" />
-                      <span className="queue-copy">
-                        <strong>{item.file.name}</strong>
-                        <span>
+                      <span className="rail-item-status" aria-hidden="true">
+                        <StatusIcon status={item.status} />
+                      </span>
+                      <span className="rail-item-copy">
+                        <span className="rail-item-name">{item.file.name}</span>
+                        <span className="rail-item-meta">
                           {item.status === "decode-error"
                             ? "Could not decode"
                             : item.status === "export-error"
@@ -938,7 +958,7 @@ export default function App() {
                       </span>
                     </button>
                     <button
-                      className="remove-file"
+                      className="rail-item-remove"
                       aria-label={`Remove ${item.file.name}`}
                       disabled={exporting}
                       onClick={() => removeItem(item.id)}
@@ -962,10 +982,10 @@ export default function App() {
           />
         </aside>
 
-        <main className="workspace">
-          <div className="notification-stack">
+        <main className="stage">
+          <div className="notices">
             {manifestError && (
-              <div className="error-banner" role="alert">
+              <div className="notice notice-error" role="alert">
                 <span>{manifestError}</span>
                 <Button variant="secondary" onClick={() => location.reload()}>
                   Reload
@@ -973,9 +993,9 @@ export default function App() {
               </div>
             )}
             {globalError && (
-              <div className="error-banner" role="alert">
+              <div className="notice notice-error" role="alert">
                 <span>{globalError}</span>
-                <div className="banner-actions">
+                <div className="notice-actions">
                   {selected && isDecodeFailure(selected) && (
                     <>
                       <Button
@@ -1004,9 +1024,9 @@ export default function App() {
               </div>
             )}
             {queueUndo && (
-              <div className="undo-banner" role="status">
+              <div className="notice notice-undo" role="status">
                 <span>{queueUndo.message}</span>
-                <div className="banner-actions">
+                <div className="notice-actions">
                   <Button variant="secondary" onClick={restoreQueue}>
                     Undo
                   </Button>
@@ -1023,29 +1043,20 @@ export default function App() {
             )}
           </div>
 
-          <div className={`workspace-layout ${selected ? "" : "is-empty"}`}>
+          <div className={`editor ${selected ? "" : "is-empty"}`}>
             {selected && selectedLut && (
-              <section
-                className="control-panel"
-                aria-label="Processing controls"
-              >
-                <div className="panel-section">
-                  <div className="panel-heading">
-                    <div className="panel-heading-copy">
-                      <h2>Adjustments</h2>
-                    </div>
-                    <div className="panel-heading-actions">
+              <section className="inspector" aria-label="Processing controls">
+                <div className="inspector-section">
+                  <div className="section-heading">
+                    <span className="section-title">Adjustments</span>
+                    <div className="section-actions">
                       {isPreviewProcessing && (
                         <span
-                          className="processing-indicator"
+                          className="badge-processing"
                           role="status"
                           aria-label="Preview processing"
                         >
-                          <LoaderCircle
-                            className="processing-spinner"
-                            size={14}
-                            aria-hidden="true"
-                          />
+                          <LoaderCircle size={13} aria-hidden="true" />
                           Processing
                         </span>
                       )}
@@ -1061,18 +1072,19 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="control-section">
-                    <label>Look</label>
-                    <div className="look-picker">
+                  <div className="field">
+                    <span className="field-label">Look</span>
+                    <div className="look">
                       <div className="look-current">
-                        <strong>{selectedLut.name}</strong>
-                        <span>{selectedLut.group} · built-in transform</span>
+                        <span className="look-current-name">
+                          {selectedLut.name}
+                        </span>
+                        <span className="look-current-meta">
+                          {selectedLut.group} · built-in transform
+                        </span>
                       </div>
                       {workingLuts.length > 1 && (
-                        <div
-                          className="look-working-set"
-                          aria-label="Recent looks"
-                        >
+                        <div className="look-recents" aria-label="Recent looks">
                           {workingLuts.map((lut) => (
                             <button
                               key={lut.id}
@@ -1100,8 +1112,8 @@ export default function App() {
                           : `Browse all ${manifest?.luts.length ?? 27} looks`}
                       </Button>
                       {lookBrowserOpen && (
-                        <div className="look-browser">
-                          <div className="search-control">
+                        <div className="look-panel">
+                          <div className="search">
                             <Search size={14} aria-hidden="true" />
                             <input
                               id="look-search"
@@ -1124,7 +1136,7 @@ export default function App() {
                           />
                         </div>
                       )}
-                      <details className="control-help">
+                      <details className="help">
                         <summary>How built-in looks work</summary>
                         <p>
                           RAW Alchemy converts camera color to V-Gamut and
@@ -1136,10 +1148,10 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="control-section exposure-control">
-                    <div className="control-label-row">
+                  <div className="field exposure">
+                    <div className="field-row">
                       <label htmlFor="exposure">Exposure</label>
-                      <label className="ev-value">
+                      <label className="exposure-value">
                         <input
                           ref={exposureInput}
                           aria-label="Exposure value"
@@ -1184,7 +1196,12 @@ export default function App() {
                         scheduleExposurePreview(event.currentTarget)
                       }
                     />
-                    <div className="range-scale" aria-hidden="true">
+                    <div className="exposure-ticks" aria-hidden="true">
+                      {Array.from({ length: 9 }, (_, index) => (
+                        <span key={index} />
+                      ))}
+                    </div>
+                    <div className="exposure-scale" aria-hidden="true">
                       <span>−4</span>
                       <span>0</span>
                       <span>+4</span>
@@ -1192,14 +1209,16 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="panel-section" aria-label="Export controls">
-                  <div className="panel-heading">
-                    <div className="panel-heading-copy">
-                      <h2>Output</h2>
-                      <p>16-bit uncompressed TIFF</p>
+                <div className="inspector-section" aria-label="Export controls">
+                  <div className="section-heading">
+                    <div>
+                      <span className="section-title">Output</span>
+                      <p className="section-subtitle">
+                        16-bit uncompressed TIFF
+                      </p>
                     </div>
                   </div>
-                  <dl className="file-details">
+                  <dl className="details">
                     <div>
                       <dt>Camera</dt>
                       <dd>{selected.camera || "—"}</dd>
@@ -1213,7 +1232,7 @@ export default function App() {
                       <dd>{selectedLut.name}</dd>
                     </div>
                   </dl>
-                  <details className="lut-assumption">
+                  <details className="assumption">
                     <summary>
                       Verify color space in your destination editor
                     </summary>
@@ -1230,9 +1249,9 @@ export default function App() {
                       does not provide.
                     </p>
                   </details>
-                  <div className="export-feedback" aria-live="polite">
+                  <div className="export-status" aria-live="polite">
                     {selected.status === "export-error" ? (
-                      <span className="selected-error" role="alert">
+                      <span className="export-error-text" role="alert">
                         {selected.error}
                       </span>
                     ) : exportProgress ? (
@@ -1283,18 +1302,16 @@ export default function App() {
             )}
 
             <section
-              className="comparison"
+              className="canvas"
               aria-label="Base and LUT comparison"
               aria-busy={selected ? isPreviewProcessing : undefined}
               data-decode-count={preview?.decodeCount}
             >
               <div className="canvas-bar">
-                <div className="canvas-file-info" aria-live="polite">
+                <div className="canvas-meta" aria-live="polite">
                   {selected ? (
                     <>
-                      <span className="canvas-filename">
-                        {selected.file.name}
-                      </span>
+                      <span className="canvas-name">{selected.file.name}</span>
                       {selected.dimensions && (
                         <span className="canvas-dims">
                           {selected.dimensions}
@@ -1302,16 +1319,14 @@ export default function App() {
                       )}
                     </>
                   ) : (
-                    <span className="canvas-bar-label">
-                      Local RAW processing
-                    </span>
+                    <span className="canvas-label">Local RAW processing</span>
                   )}
                 </div>
-                <div className="canvas-actions">
+                <div className="canvas-controls">
                   {selected && (
                     <>
                       <div
-                        className="mobile-preview-switch"
+                        className="canvas-switch mobile-only"
                         aria-label="Mobile comparison view"
                       >
                         <button
@@ -1329,10 +1344,7 @@ export default function App() {
                           Look
                         </button>
                       </div>
-                      <div
-                        className="preview-view-switch"
-                        aria-label="Preview zoom"
-                      >
+                      <div className="canvas-switch" aria-label="Preview zoom">
                         <button
                           type="button"
                           aria-pressed={previewView === "fit"}
@@ -1361,14 +1373,14 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="canvas-stage">
+              <div className="canvas-viewport">
                 {!selected ? (
-                  <div className="workspace-empty">
-                    <div className="empty-icon">
+                  <div className="state">
+                    <div className="state-icon">
                       <FileImage size={28} />
                     </div>
-                    <h2>Start with a camera RAW</h2>
-                    <p>
+                    <h2 className="state-title">Start with a camera RAW</h2>
+                    <p className="state-copy">
                       Compare a neutral rendering with a curated look, then
                       export a 16-bit TIFF. Everything stays in this browser.
                     </p>
@@ -1376,40 +1388,44 @@ export default function App() {
                       <FolderOpen size={17} aria-hidden="true" /> Choose RAW
                       files
                     </Button>
-                    <span className="empty-detail">
+                    <span className="state-detail">
                       Multiple files supported · sequential local export
                     </span>
                   </div>
                 ) : !selectedLut ? (
-                  <div className="processing-error-state" role="status">
-                    <FileImage size={28} aria-hidden="true" />
-                    <h2>
+                  <div className="state" role="status">
+                    <div className="state-icon">
+                      <FileImage size={28} aria-hidden="true" />
+                    </div>
+                    <h2 className="state-title">
                       {manifestError
                         ? "Built-in looks unavailable"
                         : "Loading looks…"}
                     </h2>
-                    <p>
+                    <p className="state-copy">
                       {manifestError
                         ? "Reload after the application assets are available. This RAW has not been decoded."
                         : "The selected RAW will be decoded when its processing assets are ready."}
                     </p>
                   </div>
                 ) : isDecodeFailure(selected) ? (
-                  <div className="processing-error-state">
-                    <FileImage size={28} aria-hidden="true" />
-                    <h2>Preview unavailable</h2>
-                    <p>
+                  <div className="state">
+                    <div className="state-icon">
+                      <FileImage size={28} aria-hidden="true" />
+                    </div>
+                    <h2 className="state-title">Preview unavailable</h2>
+                    <p className="state-copy">
                       Remove this file or choose another RAW to continue. Other
                       ready files can still be exported.
                     </p>
                   </div>
                 ) : !preview && cameraPreview?.fileId === selected.id ? (
-                  <figure className="camera-preview">
+                  <figure className="camera-frame">
                     <figcaption>
                       <strong>Camera preview</strong>
                       <span>Embedded JPEG · color not processed</span>
                     </figcaption>
-                    <div className="camera-preview-image">
+                    <div className="camera-frame-image">
                       <img
                         src={cameraPreview.url}
                         alt="Embedded camera preview"
@@ -1419,7 +1435,7 @@ export default function App() {
                 ) : (
                   <div
                     ref={previewGrid}
-                    className={`preview-grid mobile-show-${mobilePreview} ${selected.status === "decoding" ? "is-loading" : ""}`}
+                    className={`panes mobile-show-${mobilePreview} ${selected.status === "decoding" ? "is-loading" : ""}`}
                   >
                     <PreviewCanvas
                       label="Base"
@@ -1444,7 +1460,7 @@ export default function App() {
                       onFocusChange={updatePreviewFocus}
                     />
                     {selected.status === "decoding" && (
-                      <div className="loading-label" role="status">
+                      <div className="pane-loading" role="status">
                         Decoding preview…
                       </div>
                     )}

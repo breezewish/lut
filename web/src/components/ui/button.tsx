@@ -1,39 +1,28 @@
-import { cva, type VariantProps } from "class-variance-authority";
 import type { ButtonHTMLAttributes } from "react";
 
 import { cn } from "../../lib/cn";
 
-const buttonVariants = cva("button", {
-  variants: {
-    variant: {
-      primary: "button-primary",
-      secondary: "button-secondary",
-      quiet: "button-quiet",
-      danger: "button-danger",
-    },
-    size: {
-      default: "button-size-default",
-      compact: "button-size-compact",
-      icon: "button-size-icon",
-    },
-  },
-  defaultVariants: { variant: "primary", size: "default" },
-});
+type Variant = "primary" | "secondary" | "quiet";
+type Size = "default" | "compact" | "icon";
 
-type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> &
-  VariantProps<typeof buttonVariants>;
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: Variant;
+  size?: Size;
+};
 
 export function Button({
   className,
-  variant,
-  size,
+  variant = "primary",
+  size = "default",
   type = "button",
   ...props
 }: ButtonProps) {
   return (
     <button
       type={type}
-      className={cn(buttonVariants({ variant, size }), className)}
+      data-variant={variant}
+      data-size={size}
+      className={cn("btn", className)}
       {...props}
     />
   );

@@ -18,11 +18,11 @@ Desktop uses a stable editing shell:
 - The right inspector owns adjustments first and output second.
 - A compact status bar discloses processing assumptions without competing with the images.
 
-The DOM follows the task order: adjust, compare, then export. Empty state keeps one primary import action in the canvas and a secondary queue drop target.
+The task order is adjust, compare, then export in visual flow; the canvas stays the dominant surface regardless of DOM position. Adjust and export controls form one contiguous inspector landmark ahead of the canvas in DOM order, so keyboard and screen-reader users traverse them as a single group. Empty state keeps one primary import action in the canvas and a secondary queue drop target.
 
 ## Color
 
-All color tokens use OKLCH. Neutral surfaces carry structure through value differences rather than outlines. Spectral blue is limited to primary actions, selection, and active state. Green indicates local privacy or completion, red indicates failure, and amber indicates an unverified color assumption. Text and placeholders meet WCAG AA contrast.
+All color tokens use OKLCH. Neutral surfaces carry structure through value differences rather than outlines. Text uses exactly two tones (ink, muted) verified at or above 4.5:1 contrast against every surface; a third neutral is reserved for non-text decoration (hairlines, ticks) and never carries text. Spectral blue is limited to primary actions, selection, and active state. Green indicates local privacy or completion, red indicates failure, and amber indicates an unverified color assumption. Text and placeholders meet WCAG AA contrast.
 
 ## Typography
 
@@ -30,7 +30,7 @@ Use one Inter-compatible system sans family. Meaningful UI labels and metadata u
 
 ## Components
 
-Buttons use a consistent 6 px radius and 32–36 px desktop body; coarse-pointer targets expand to 44 px. Inputs use a compact 30–34 px body inside clear labeled groups. Search, selection, numeric entry, and range controls share dedicated control tokens and authored hover, focus, active, and disabled states instead of browser defaults. Menus render through a portal. A visible spinner in the adjustment header communicates whenever the displayed recipe is still processing. Surfaces use fill changes instead of borders or shadows.
+Buttons use a consistent 6 px radius and 32–36 px desktop body; coarse-pointer targets expand to 44 px. Inputs use a compact 30–34 px body inside clear labeled groups. Search, selection, numeric entry, and range controls share dedicated control tokens and authored hover, focus, active, and disabled states instead of browser defaults. Menus render through a portal. A visible spinner in the adjustment header communicates whenever the displayed recipe is still processing. Surfaces use fill changes instead of borders or shadows. Queue status is conveyed per-item by an icon and row fill, not a colored accent stripe.
 
 Look discovery shows the current transform and at most four recent working choices before progressively revealing the searchable full catalog. Inline explanations translate the V-Log pipeline and unverified output color space into task guidance.
 

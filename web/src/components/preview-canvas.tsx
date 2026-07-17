@@ -140,14 +140,14 @@ export function PreviewCanvas({
   };
 
   return (
-    <figure className="preview-pane">
-      <figcaption className="preview-caption">
+    <figure className="pane">
+      <figcaption className="pane-caption">
         <strong>{label}</strong>
         <span>{detail}</span>
       </figcaption>
       <div
         ref={imageWell}
-        className={`preview-image is-${viewMode} ${pannable ? "can-pan" : ""}`}
+        className={`pane-well is-${viewMode} ${pannable ? "can-pan" : ""}`}
         tabIndex={viewMode === "actual" && pannable ? 0 : undefined}
         role={viewMode === "actual" && pannable ? "group" : undefined}
         aria-label={
@@ -193,7 +193,7 @@ export function PreviewCanvas({
             }
           />
         ) : (
-          <div className="preview-placeholder" aria-hidden="true" />
+          <div className="pane-placeholder" aria-hidden="true" />
         )}
       </div>
     </figure>
