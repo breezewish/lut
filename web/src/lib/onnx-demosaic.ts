@@ -14,6 +14,8 @@ export interface SensorImageInfo {
   cfaPattern: number[];
   blackLevels: number[];
   whiteLevel: number;
+  /** Effective post-black range used by LibRaw's AAHD scaling. */
+  aahdScaleRange: number;
   cameraWhiteBalance: number[];
   xyzToCamera: number[];
   rgbCamera: number[];

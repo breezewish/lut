@@ -312,7 +312,7 @@ export async function demosaicLibRawAahdWithWgsl(
   referenceInfo?: AahdReferenceInfo,
   capture?: Uint16Array,
 ): Promise<LibRawAahdResult> {
-  validateInput(mosaic, info, referenceInfo);
+  validateInput(mosaic, info);
   if (contract === "libraw-parity" && outputStage === "candidate-directions") {
     throw new Error("Candidate directions require the deterministic contract.");
   }
@@ -441,9 +441,11 @@ export async function demosaicLibRawAahdWithWgsl(
 
     const refineStartedAt = performance.now();
     const stopsBeforeRefinement =
-      outputStage === "horizontal-homogeneity" ||
-      outputStage === "vertical-homogeneity" ||
-      outputStage === "chosen-directions";
+      outputStage !== "candidate-directions" &&
+      outputStage !== "directions" &&
+      outputStage !== "aahd" &&
+      outputStage !== "highlight" &&
+      outputStage !== "final";
     if (!stopsBeforeRefinement) {
       submitPass(runtime, workspace, "refine_checker_even");
       submitPass(runtime, workspace, "refine_checker_odd");
@@ -1115,11 +1117,7 @@ function copyCapturedOutput(
   capture.set(pixels);
 }
 
-function validateInput(
-  mosaic: Uint16Array,
-  info: SensorImageInfo,
-  referenceInfo?: AahdReferenceInfo,
-): void {
+function validateInput(mosaic: Uint16Array, info: SensorImageInfo): void {
   if (info.sensorType !== "bayer" || info.cfaSize !== 2) {
     throw new Error("The LibRaw AAHD benchmark requires a Bayer RAW.");
   }
@@ -1131,14 +1129,6 @@ function validateInput(
   ) {
     throw new Error(
       "The LibRaw AAHD benchmark requires an even, unrotated, complete mosaic.",
-    );
-  }
-  if (
-    !referenceInfo &&
-    !info.blackLevels.every((value) => value === info.blackLevels[0])
-  ) {
-    throw new Error(
-      "The AAHD performance path currently requires one common black level.",
     );
   }
 }
@@ -1690,7 +1680,7 @@ function calculateScale(info: SensorImageInfo): {
   const maximum = Math.max(...camera);
   const pre = new Float32Array(4);
   const scale = new Float32Array(4);
-  const sensorRange = info.whiteLevel - info.blackLevels[0];
+  const sensorRange = info.aahdScaleRange;
   for (let channel = 0; channel < 4; channel += 1) {
     pre[channel] = Math.fround(camera[channel] / maximum);
     scale[channel] = Math.fround(

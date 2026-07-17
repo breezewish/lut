@@ -768,15 +768,31 @@ public:
         throw std::runtime_error("LibRaw returned invalid sensor geometry");
       }
 
+      const auto black = adjusted_black_levels();
       const double copy_started_at = emscripten_get_now();
       sensor_.resize(static_cast<std::size_t>(sizes.width) * sizes.height);
       const std::size_t source_stride = sizes.raw_pitch / sizeof(std::uint16_t);
+      unsigned data_maximum = 0;
       for (unsigned row = 0; row < sizes.height; ++row) {
         const auto *source = processor_.imgdata.rawdata.raw_image +
                              (row + sizes.top_margin) * source_stride +
                              sizes.left_margin;
-        std::memcpy(sensor_.data() + static_cast<std::size_t>(row) * sizes.width,
-                    source, sizes.width * sizeof(std::uint16_t));
+        auto *destination =
+            sensor_.data() + static_cast<std::size_t>(row) * sizes.width;
+        std::memcpy(destination, source, sizes.width * sizeof(std::uint16_t));
+        if (idata.filters != 9) {
+          for (unsigned col = 0; col < sizes.width; ++col) {
+            unsigned channel = processor_.COLOR(row, col);
+            if (channel == 3) {
+              channel = 1;
+            }
+            const unsigned sample =
+                destination[col] > black.channels[channel]
+                    ? destination[col] - black.channels[channel]
+                    : 0;
+            data_maximum = std::max(data_maximum, sample);
+          }
+        }
       }
       sensor_timings_.mosaic_copy_ms = emscripten_get_now() - copy_started_at;
       sensor_timings_.total_ms = emscripten_get_now() - total_started_at_;
@@ -796,13 +812,32 @@ public:
       sensor_metadata_.set("cfaSize", cfa_size);
       sensor_metadata_.set("cfaPattern", cfa);
       sensor_metadata_.set("whiteLevel", color.maximum);
+      unsigned scale_range = 0;
+      if (idata.filters != 9 && color.maximum > black.common) {
+        // Mirror LibRaw's adjust_maximum() policy. Its effective AAHD range can
+        // be lower than the advertised white level on cameras whose brightest
+        // meaningful sample is close enough to that level.
+        scale_range = color.maximum - black.common;
+        libraw_decoder_info_t decoder{};
+        processor_.get_decoder_info(&decoder);
+        float threshold = processor_.imgdata.params.adjust_maximum_thr;
+        if (threshold > 0.99999f) {
+          threshold = LIBRAW_DEFAULT_ADJUST_MAXIMUM_THRESHOLD;
+        }
+        if (!(decoder.decoder_flags & LIBRAW_DECODER_FIXEDMAXC) &&
+            threshold >= 0.00001f && data_maximum > 0 &&
+            data_maximum < scale_range &&
+            data_maximum > scale_range * threshold) {
+          scale_range = data_maximum;
+        }
+      }
+      sensor_metadata_.set("aahdScaleRange", scale_range);
       sensor_metadata_.set("orientation", sizes.flip);
 
       val black_levels = val::array();
       val camera_white_balance = val::array();
-      const auto adjusted_black = adjusted_black_levels();
       for (unsigned channel = 0; channel < 4; ++channel) {
-        black_levels.set(channel, adjusted_black[channel]);
+        black_levels.set(channel, black.channels[channel]);
         camera_white_balance.set(channel, color.cam_mul[channel]);
       }
       sensor_metadata_.set("blackLevels", black_levels);
@@ -1088,7 +1123,12 @@ private:
     return status;
   }
 
-  std::array<unsigned, 4> adjusted_black_levels() {
+  struct AdjustedBlackLevels {
+    std::array<unsigned, 4> channels;
+    unsigned common;
+  };
+
+  AdjustedBlackLevels adjusted_black_levels() {
     const auto &source = processor_.imgdata.rawdata.color;
     std::array<unsigned, LIBRAW_CBLACK_SIZE> cblack;
     std::copy(std::begin(source.cblack), std::end(source.cblack),
@@ -1155,7 +1195,7 @@ private:
     for (unsigned channel = 0; channel < 4; ++channel) {
       result[channel] = cblack[channel] + black;
     }
-    return result;
+    return {result, black};
   }
 
   [[noreturn]] static void fail(const char *operation, int status) {

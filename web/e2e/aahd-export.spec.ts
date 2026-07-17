@@ -6,6 +6,7 @@ import { expect, test } from "@playwright/test";
 import { compareRgb16Tiffs } from "./tiff";
 
 const fixture = resolve("vendor/LibRaw-Wasm/example-sony.ARW");
+const secondCameraFixture = resolve("tests/fixtures/leica-m8.dng");
 
 test("experimental tiled AAHD streams an aligned RGB16 export", async ({
   page,
@@ -73,4 +74,50 @@ test("experimental tiled AAHD streams an aligned RGB16 export", async ({
     path: reportPath,
     contentType: "application/json",
   });
+});
+
+test("experimental tiled AAHD aligns on a second Bayer camera", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    process.env.AAHD_EXPORT_MATRIX_E2E !== "1",
+    "Set AAHD_EXPORT_MATRIX_E2E=1 on a hardware WebGPU runner.",
+  );
+  test.setTimeout(3 * 60_000);
+
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(secondCameraFixture);
+  await expect(
+    page.getByRole("button", { name: /leica-m8\.dng.*Ready/ }),
+  ).toBeVisible({ timeout: 30_000 });
+  let downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export selected" }).click();
+  const productionDownload = await downloadPromise;
+  const productionOutput = await productionDownload.path();
+  expect(productionOutput).not.toBeNull();
+
+  await page.goto("/?rawBackend=webgpu-aahd");
+  await page.locator('input[type="file"]').setInputFiles(secondCameraFixture);
+  await expect(
+    page.getByRole("button", { name: /leica-m8\.dng.*Ready/ }),
+  ).toBeVisible({ timeout: 30_000 });
+  downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export selected" }).click();
+  const browserDownload = await downloadPromise;
+  const browserOutput = await browserDownload.path();
+  expect(browserOutput).not.toBeNull();
+
+  const comparison = compareRgb16Tiffs(
+    await readFile(browserOutput!),
+    await readFile(productionOutput!),
+  );
+  const reportPath = testInfo.outputPath("aahd-export-leica-comparison.json");
+  await writeFile(reportPath, JSON.stringify(comparison, null, 2));
+  await testInfo.attach("aahd-export-leica-comparison.json", {
+    path: reportPath,
+    contentType: "application/json",
+  });
+  expect([comparison.width, comparison.height]).toEqual([3_920, 2_638]);
+  expect(comparison.maxCodeDifference).toBeLessThanOrEqual(2);
+  expect(comparison.samplesOverTwoCodes).toBe(0);
 });

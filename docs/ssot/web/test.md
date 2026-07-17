@@ -28,9 +28,12 @@
   and streamed TIFF encoding; every decoded RGB16 channel stays within two
   codes of the default LibRaw export and the reported backend cannot be a
   fallback.
+- A second opt-in hardware export compares every Leica M8 RGB16 channel with
+  production LibRaw and covers its data-adjusted AAHD scaling maximum.
 - A synthetic hardware fixture proves that sparse ordered defect correction and
   tiled AAHD bit-match the full-frame parity route across all four Bayer phases,
-  both tile axes, rectangular edge tiles, and a smaller-than-tile image.
+  both tile axes, rectangular edge tiles, a smaller-than-tile image, and
+  unequal per-channel black levels.
 - An opt-in production Chromium benchmark records cold and warm file reading, embedded JPEG, first processed frame, settled processed frame, Canvas drawing, and phased LibRaw Preview without substituting a test decoder; after those samples it records one independent full LibRaw decode, color processing, TIFF encoding, Blob, and export boundary so Export cannot contaminate Preview timings.
 - An opt-in production Chromium benchmark measures at least 20 EV edits, every initially uncached built-in LUT, and at least 20 cached LUT changes from control input through Canvas drawing; it enforces the preview p95 budgets and records Worker LUT-load and color stages.
 - A 60-event EV burst scheduled at nominal 60 Hz in the production Chromium bundle finishes input dispatch within 1.1 seconds, paints at least 12 monotonically newer interaction frames, meets the first and final interaction latency budgets, and finishes with the exact current 1024px settled frame.

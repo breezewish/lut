@@ -23,7 +23,9 @@ The exposure slider remains an uncontrolled native input while the pointer moves
 The preview-only Base transfer function uses a 65,536-entry 8-bit sRGB table initialized from the canonical transfer function. Exhaustive one-million-point testing bounds its output to one display code from direct evaluation. Export retains the exact floating-point processing path. Transferred RGBA8 results are reinterpreted directly as clamped Canvas views instead of copied into another complete preview allocation. Export receives a fresh transferable RAW buffer and performs a full decode only for that operation. A stateful Rust WASM encoder requests and copies only the next approximately 1 MB LibRaw view, so JavaScript never owns a complete decoded RGB16 image and the separate color WASM receives no second complete allocation.
 
 The query-gated WebGPU AAHD export is a separate experimental route. LibRaw
-opens and unpacks the visible Bayer mosaic. WebGPU scales the CFA, collects
+opens and unpacks the visible Bayer mosaic and exposes the effective AAHD
+scaling range after its adjusted-maximum policy. WebGPU subtracts each CFA
+channel's adjusted black level, scales the CFA, collects
 extrema, and classifies the initial defects in parallel. A sparse CPU scan
 enumerates only classified pixels in LibRaw row order and schedules every later
 classification affected by a correction, preserving exact cascades. A shared

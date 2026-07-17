@@ -24,7 +24,7 @@ test("tiled AAHD matches full-frame math across seams and CFA phases", async ({
           .at(-1) as PerformanceMark
       ).detail,
   );
-  expect(report.results).toHaveLength(5);
+  expect(report.results).toHaveLength(6);
   for (const result of report.results) {
     expect(result.validation.differingSamples).toBe(0);
     expect(result.validation.maximumDifference).toBe(0);
@@ -34,4 +34,5 @@ test("tiled AAHD matches full-frame math across seams and CFA phases", async ({
   }
   expect(report.results[0].gradedValidation.differingSamples).toBe(0);
   expect(report.results[0].gradedValidation.maximumDifference).toBe(0);
+  expect(report.results.at(-1).blackLevels).toEqual([64, 96, 192, 96]);
 });

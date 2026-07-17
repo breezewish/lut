@@ -33,7 +33,8 @@
 - A hardware synthetic dependency fixture crosses horizontal and vertical tile
   seams, uses rectangular edge tiles and clustered extreme defects, and
   bit-matches full-frame output for all four Bayer phases; a smaller-than-tile
-  fixture covers the single-tile path.
+  fixture covers the single-tile path and a separate fixture proves unequal
+  per-channel black-level scaling.
 - WebGPU exposure and LUT output compares against the current Rust corrected-v2
   CPU/WASM renderer for the same ProPhoto input and rejects any sample more than
   two code values away.
@@ -46,6 +47,9 @@
 - One cold and four warm complete experimental exports report TIFF encoding,
   Worker wall time, every AAHD stage, peak GPU allocation, and maximum binding;
   the decoded Sony TIFF rejects any channel difference above two codes.
+- A second-camera hardware export compares every Leica M8 TIFF channel with
+  production LibRaw, exercises LibRaw's adjusted processing maximum, and
+  rejects any difference above two codes.
 - Production Preview interaction benchmarks remain authoritative for first
   feedback: they cover 20 EV edits, cold and warm LUT changes, continuous input,
   and UI responsiveness while RAW decode is active.
@@ -62,4 +66,7 @@
 - The hardware benchmark records one cold and at least four warm runs, verifies a non-fallback NVIDIA WebGPU adapter, and reports every GPU phase plus LibRaw unpack and worker totals.
 - The LibRaw algorithm benchmark can select AAHD alone and reports warm distribution statistics for the production CPU/WASM baseline.
 - The normal unit, production build, native workspace, and browser end-to-end suites continue to exercise the unchanged production path; the prototype remains query-gated.
-- A production follow-up must add multi-camera, border, clipped-highlight, CFA-phase, unequal-black-level, and synthetic clustered-defect cases before changing the product decoder.
+- Changing the default decoder requires a broader camera and client-GPU matrix;
+  the experimental suite already covers two Bayer cameras, tile borders,
+  clipped Blend highlights, every Bayer phase, unequal black levels, and
+  clustered defect cascades.

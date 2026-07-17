@@ -15,6 +15,7 @@ const fixtures = [
     cfa: [0, 1, 3, 2],
     blackLevels: [512, 512, 512, 512],
     whiteLevel: 16380,
+    aahdScaleRange: 15868,
     orientation: 0,
     whiteBalance: [2643, 1024, 1590, 1024],
     xyzToCamera: [
@@ -23,6 +24,26 @@ const fixtures = [
     ],
     sum: 28170738174,
     samples: [702, 940, 622, 1036, 642, 518],
+  },
+  {
+    name: "Leica M8 DNG",
+    path: "tests/fixtures/leica-m8.dng",
+    width: 3920,
+    height: 2638,
+    sensorType: "bayer",
+    cfaSize: 2,
+    cfa: [0, 1, 3, 2],
+    blackLevels: [0, 0, 0, 0],
+    whiteLevel: 16383,
+    aahdScaleRange: 16256,
+    orientation: 0,
+    whiteBalance: [2.0458984375, 1, 1.29052734375, 0],
+    xyzToCamera: [
+      0.7675, -0.2196, -0.0305, -0.586, 1.4119, 0.1856, -0.2425, 0.4006, 0.6578,
+      0, 0, 0,
+    ],
+    sum: 31653712396,
+    samples: [3080, 6806, 3306, 6806, 441, 812],
   },
 ];
 if (process.env.XTRANS_FIXTURE) {
@@ -39,6 +60,7 @@ if (process.env.XTRANS_FIXTURE) {
     ],
     blackLevels: [1023, 1023, 1023, 1023],
     whiteLevel: 16383,
+    aahdScaleRange: 0,
     orientation: 0,
     whiteBalance: [581, 302, 482, 0],
     xyzToCamera: [
@@ -93,6 +115,11 @@ for (const fixture of fixtures) {
       info.whiteLevel,
       fixture.whiteLevel,
       `${fixture.name} white level`,
+    );
+    assertEqual(
+      info.aahdScaleRange,
+      fixture.aahdScaleRange,
+      `${fixture.name} AAHD scale range`,
     );
     assertEqual(
       info.orientation,

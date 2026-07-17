@@ -9,12 +9,12 @@ not reference implementations for this experiment.
 
 The implementation proves exact bounded-memory AAHD parity and integrates it
 through color and streamed TIFF export as an explicit experimental backend.
-On the 26 MP Sony fixture, the final TIFF stays within one code of the pinned
-production export and peak WebGPU allocation stays below 256 MiB. It is not a
-candidate for the default backend: exact LibRaw row-order boundaries and the
-two tile sweeps keep the measured post-unpack path well above the 500 ms target
-on an NVIDIA T4. The display-sized Preview pipeline remains the correct path
-for fast user feedback.
+On 26 MP Sony and 10 MP Leica Bayer fixtures, every final TIFF difference from
+the pinned production export stays within one code. Peak WebGPU allocation
+stays below 256 MiB. It is not a candidate for the default backend: exact
+LibRaw row-order boundaries and the two tile sweeps keep the measured
+post-unpack path well above the 500 ms target on an NVIDIA T4. The display-sized
+Preview pipeline remains the correct path for fast user feedback.
 
 ## Background
 
@@ -62,6 +62,14 @@ scaling, AAHD hot/dead-pixel handling, horizontal and vertical interpolation,
 gamma/YUV conversion, homogeneity accumulation, direction selection and
 refinement, highlight blending, camera-to-ProPhoto conversion, and packed
 RGB16 output.
+
+The wrapper also exports LibRaw's effective post-black scaling range. This is
+not necessarily `whiteLevel - blackLevel`: LibRaw may lower its processing
+maximum to the near-white data maximum according to decoder flags and
+`adjust_maximum_thr`. Computing that value while copying the visible mosaic
+keeps WGSL scaling identical across cameras without repeating LibRaw policy in
+TypeScript. Scaling subtracts each CFA channel's own adjusted black level, so
+the route does not assume equal black levels.
 
 All AAHD integer state uses 32-bit storage. Signed gradient arithmetic preserves
 LibRaw's defined wrapping behavior. Candidate RGB values are clamped and stored
@@ -323,15 +331,23 @@ On the 6240 x 4168 Sony fixture, the complete experimental TIFF differed from
 the default production export in 51,361 of 78,024,960 channel samples. Every
 difference was one code value, no sample exceeded the two-code corrected-v2
 contract, and MAE was 0.0006583. One cold and four warm T4 runs measured warm
-Worker totals of 2.42-2.90 seconds and TIFF work of 0.31-0.32 seconds. The
-streamed demosaic call, which includes overlapped TIFF callbacks, took
-2.07-2.54 seconds. GPU scaling, candidate classification, full scaled-CFA
-readback, and corrected-CFA upload took 0.27-0.32 seconds; the exact sparse CPU
-defect scan took 0.028-0.035 seconds. Color took 0.065-0.073 seconds. Once
+Worker totals of 2.60-3.18 seconds and TIFF work of 0.31-0.33 seconds in the
+final five-sample audit. The streamed demosaic call, which includes overlapped
+TIFF callbacks, took 2.11-2.50 seconds. GPU scaling, candidate classification,
+full scaled-CFA readback, and corrected-CFA upload took 0.27-0.32 seconds; the
+exact sparse CPU defect scan took 0.028-0.035 seconds. Color took 0.065-0.073
+seconds. Once
 streaming overlaps GPU waits, individual
 wall-time stage counters also include time when their completion callback was
 delayed by synchronous TIFF work; they are not additive GPU timestamps. The
 500 ms post-unpack target is not met.
+
+The 3920 x 2638 Leica M8 fixture exercises LibRaw's adjusted-maximum path:
+the sensor white level is 16,383 while the effective AAHD scale range is
+16,256. Its complete experimental TIFF differed in 38,801 of 31,022,880
+channel samples, every difference was one code value, and MAE was 0.001251.
+A synthetic hardware fixture separately proves exact tiled/full-frame parity
+with per-channel black levels `[64, 96, 192, 96]`.
 
 The route is selected only by `rawBackend=webgpu-aahd`. It rejects missing
 WebGPU, unsupported sensors, and insufficient adapter limits without changing
@@ -367,8 +383,8 @@ the browser's performance-critical implementation.
 Retain the bounded handwritten WGSL route as an explicit experimental Bayer
 backend. The current parity contract is the only route supported by product
 integration because its differences are bounded to one final color code on the
-tested golden. Production default selection still requires broader camera and
-client-GPU evidence, and this route also misses the stated performance target.
+tested fixtures. Production default selection still requires a broader camera
+and client-GPU matrix, and this route also misses the stated performance target.
 The deterministic defect candidate remains a separately named behavior
 proposal and must not replace the product golden implicitly.
 

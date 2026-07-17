@@ -47,6 +47,16 @@ async function runFixtures() {
       CFA_PHASES[0],
     ),
   );
+  results.push(
+    await compareFixture(
+      createDependencyFixture(66, 50),
+      66,
+      50,
+      CFA_PHASES[2],
+      false,
+      [64, 96, 192, 96],
+    ),
+  );
   return { results };
 }
 
@@ -56,8 +66,9 @@ async function compareFixture(
   height: number,
   cfaPattern: number[],
   validateDirectColor = false,
+  blackLevels = [0, 0, 0, 0],
 ) {
-  const info = createSensorInfo(width, height, cfaPattern);
+  const info = createSensorInfo(width, height, cfaPattern, blackLevels);
   const fullFrame = new Uint16Array(info.sampleCount * 3);
   await demosaicLibRawAahdWithWgsl(
     mosaic,
@@ -91,6 +102,7 @@ async function compareFixture(
     width,
     height,
     cfaPattern,
+    blackLevels,
     validation: tiled.validation,
     gradedValidation,
     resources: tiled.resources,
@@ -140,6 +152,7 @@ function createSensorInfo(
   width: number,
   height: number,
   cfaPattern: number[],
+  blackLevels: number[],
 ): SensorImageInfo {
   return {
     width,
@@ -148,8 +161,9 @@ function createSensorInfo(
     sensorType: "bayer",
     cfaSize: 2,
     cfaPattern,
-    blackLevels: [0, 0, 0, 0],
+    blackLevels,
     whiteLevel: 0x3fff,
+    aahdScaleRange: 0x3fff,
     cameraWhiteBalance: [2, 1, 1.5, 1],
     xyzToCamera: [],
     rgbCamera: [],
