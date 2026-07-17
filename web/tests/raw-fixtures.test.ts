@@ -41,7 +41,7 @@ test("RAW fixtures retain their declared provenance and decoder roles", async ()
   }
 });
 
-test("downloadable WebGPU camera fixtures remain a pinned Bayer matrix", async () => {
+test("downloadable WebGPU camera fixtures remain a pinned sensor matrix", async () => {
   const root = resolve(import.meta.dirname, "../..");
   const manifest = JSON.parse(
     await readFile(
@@ -71,6 +71,10 @@ test("downloadable WebGPU camera fixtures remain a pinned Bayer matrix", async (
     { camera: "Nikon Z 6", mode: "14-bit lossless compressed" },
     { camera: "Panasonic DC-GH5", mode: "12-bit 4:3" },
     { camera: "Fujifilm X-A5", mode: "14-bit uncompressed Bayer" },
+    {
+      camera: "Fujifilm X-T2",
+      mode: "14-bit lossless compressed X-Trans",
+    },
   ]);
   for (const fixture of manifest.fixtures) {
     expect(new URL(fixture.source).origin, fixture.id).toBe(

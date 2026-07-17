@@ -1,5 +1,5 @@
 import shader from "../demosaic/libraw-aahd.wgsl?raw";
-import type { SensorImageInfo } from "./onnx-demosaic";
+import type { SensorImageInfo } from "./sensor-image";
 import { refineImmutableIsolatedDirections } from "./aahd-candidate-reference";
 import {
   blendLibRawHighlights,
@@ -664,8 +664,6 @@ export async function demosaicLibRawAahdWithWgsl(
 export async function demosaicLibRawAahdTiledWithWgsl(
   mosaic: Uint16Array,
   info: SensorImageInfo,
-  reference?: Uint16Array,
-  capture?: Uint16Array,
   color?: TiledAahdColor,
   writeBand?: TiledAahdBandWriter,
 ): Promise<LibRawAahdResult> {
@@ -772,8 +770,6 @@ export async function demosaicLibRawAahdTiledWithWgsl(
   );
   const serialDirectionMs = performance.now() - serialDirectionStartedAt;
 
-  const pixels =
-    reference || capture ? new Uint16Array(info.sampleCount * 3) : undefined;
   let band = writeBand
     ? new Uint16Array(
         info.width * Math.min(info.height, AAHD_TILE_CORE_SIZE) * 3,
@@ -790,9 +786,6 @@ export async function demosaicLibRawAahdTiledWithWgsl(
     const readbackStartedAt = performance.now();
     const tilePixels = await finishRgbReadback(pending);
     readbackMs += performance.now() - readbackStartedAt;
-    if (pixels) {
-      writeRgbTile(tilePixels, pending.tile, pixels, info.width, 0);
-    }
     if (band) {
       writeRgbTile(tilePixels, pending.tile, band, info.width, bandY);
       if (pending.tile.coreX + pending.tile.coreWidth === info.width) {
@@ -866,11 +859,6 @@ export async function demosaicLibRawAahdTiledWithWgsl(
   }
   if (pendingReadback) await consumeReadback(pendingReadback);
 
-  const validationStartedAt = performance.now();
-  if (pixels) copyCapturedOutput(pixels, capture);
-  const validation =
-    reference && pixels ? compareRgb16(pixels, reference) : undefined;
-  const validationMs = performance.now() - validationStartedAt;
   const tiledPeakGpuBytes = [
     ...workspace.resources,
     workspace.readback,
@@ -924,10 +912,9 @@ export async function demosaicLibRawAahdTiledWithWgsl(
       highlightMs,
       colorMs,
       readbackMs,
-      validationMs,
+      validationMs: 0,
       totalMs: performance.now() - startedAt,
     },
-    ...(validation ? { validation } : {}),
   };
 }
 
@@ -1714,7 +1701,7 @@ function largestBufferBytes(info: SensorImageInfo): number {
   );
 }
 
-function compareRgb16(
+export function compareRgb16(
   actual: Uint16Array,
   expected: Uint16Array,
 ): LibRawAahdValidation {

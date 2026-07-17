@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { promisify } from "node:util";
 
 import { expect, test } from "@playwright/test";
 
@@ -7,8 +9,12 @@ import { compareRgb16Tiffs } from "./tiff";
 
 const fixture = resolve("vendor/LibRaw-Wasm/example-sony.ARW");
 const secondCameraFixture = resolve("tests/fixtures/leica-m8.dng");
+const classicNegative = resolve(
+  "vendor/V-Log-Alchemy/Luts/Fujifilm/FLog2C_to_CLASSIC-Neg_VLog.cube",
+);
+const execFileAsync = promisify(execFile);
 
-test("experimental tiled AAHD streams an aligned RGB16 export", async ({
+test("tiled AAHD streams repeated aligned RGB16 exports", async ({
   page,
 }, testInfo) => {
   test.skip(
@@ -16,18 +22,9 @@ test("experimental tiled AAHD streams an aligned RGB16 export", async ({
     "Set AAHD_EXPORT_E2E=1 on a hardware WebGPU runner.",
   );
   test.setTimeout(5 * 60_000);
+  const nativeOutput = testInfo.outputPath("sony-native.tif");
+  await nativeExport(fixture, nativeOutput);
   await page.goto("/");
-  await page.locator('input[type="file"]').setInputFiles(fixture);
-  await expect(
-    page.getByRole("button", { name: /example-sony\.ARW.*Ready/ }),
-  ).toBeVisible({ timeout: 30_000 });
-  let downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
-  const productionDownload = await downloadPromise;
-  const productionOutput = await productionDownload.path();
-  expect(productionOutput).not.toBeNull();
-
-  await page.goto("/?rawBackend=webgpu-aahd");
   await page.locator('input[type="file"]').setInputFiles(fixture);
   await expect(
     page.getByRole("button", { name: /example-sony\.ARW.*Ready/ }),
@@ -36,7 +33,7 @@ test("experimental tiled AAHD streams an aligned RGB16 export", async ({
   const browserOutputs: string[] = [];
   const samples = Number(process.env.AAHD_EXPORT_SAMPLES ?? "5");
   for (let sample = 0; sample < samples; sample += 1) {
-    downloadPromise = page.waitForEvent("download");
+    const downloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: "Export selected" }).click();
     const download = await downloadPromise;
     const browserOutput = await download.path();
@@ -54,12 +51,12 @@ test("experimental tiled AAHD streams an aligned RGB16 export", async ({
     expect(timings.colorBackend).toBe("webgpu");
     runs.push(timings);
   }
-  const productionTiff = await readFile(productionOutput!);
+  const nativeTiff = await readFile(nativeOutput);
   const comparisons = [];
   for (const browserOutput of browserOutputs) {
     const comparison = compareRgb16Tiffs(
       await readFile(browserOutput),
-      productionTiff,
+      nativeTiff,
     );
     expect([comparison.width, comparison.height]).toEqual([6_240, 4_168]);
     expect(comparison.maxCodeDifference).toBeLessThanOrEqual(2);
@@ -86,7 +83,7 @@ test("experimental tiled AAHD streams an aligned RGB16 export", async ({
   });
 });
 
-test("experimental tiled AAHD aligns on a second Bayer camera", async ({
+test("tiled AAHD aligns on a second Bayer camera", async ({
   page,
 }, testInfo) => {
   test.skip(
@@ -95,23 +92,14 @@ test("experimental tiled AAHD aligns on a second Bayer camera", async ({
   );
   test.setTimeout(3 * 60_000);
 
+  const nativeOutput = testInfo.outputPath("leica-native.tif");
+  await nativeExport(secondCameraFixture, nativeOutput);
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(secondCameraFixture);
   await expect(
     page.getByRole("button", { name: /leica-m8\.dng.*Ready/ }),
   ).toBeVisible({ timeout: 30_000 });
-  let downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
-  const productionDownload = await downloadPromise;
-  const productionOutput = await productionDownload.path();
-  expect(productionOutput).not.toBeNull();
-
-  await page.goto("/?rawBackend=webgpu-aahd");
-  await page.locator('input[type="file"]').setInputFiles(secondCameraFixture);
-  await expect(
-    page.getByRole("button", { name: /leica-m8\.dng.*Ready/ }),
-  ).toBeVisible({ timeout: 30_000 });
-  downloadPromise = page.waitForEvent("download");
+  const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export selected" }).click();
   const browserDownload = await downloadPromise;
   const browserOutput = await browserDownload.path();
@@ -119,7 +107,7 @@ test("experimental tiled AAHD aligns on a second Bayer camera", async ({
 
   const comparison = compareRgb16Tiffs(
     await readFile(browserOutput!),
-    await readFile(productionOutput!),
+    await readFile(nativeOutput),
   );
   const reportPath = testInfo.outputPath("aahd-export-leica-comparison.json");
   await writeFile(reportPath, JSON.stringify(comparison, null, 2));
@@ -132,16 +120,21 @@ test("experimental tiled AAHD aligns on a second Bayer camera", async ({
   expect(comparison.samplesOverTwoCodes).toBe(0);
 });
 
-test("experimental tiled AAHD matches LibRaw auto WB", async ({ page }) => {
+test("tiled AAHD matches LibRaw auto WB", async ({ page }, testInfo) => {
   test.skip(
     process.env.AAHD_EXPORT_MATRIX_E2E !== "1",
     "Set AAHD_EXPORT_MATRIX_E2E=1 on a hardware WebGPU runner.",
   );
   test.setTimeout(3 * 60_000);
+  const modified = withoutDngAsShotNeutral(await readFile(secondCameraFixture));
+  const fixturePath = testInfo.outputPath("leica-m8-no-camera-wb.dng");
+  const nativeOutput = testInfo.outputPath("leica-m8-no-camera-wb-native.tif");
+  await writeFile(fixturePath, modified);
+  await nativeExport(fixturePath, nativeOutput);
   const file = {
     name: "leica-m8-no-camera-wb.dng",
     mimeType: "image/x-adobe-dng",
-    buffer: withoutDngAsShotNeutral(await readFile(secondCameraFixture)),
+    buffer: modified,
   };
 
   await page.goto("/");
@@ -149,29 +142,73 @@ test("experimental tiled AAHD matches LibRaw auto WB", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: /leica-m8-no-camera-wb\.dng.*Ready/ }),
   ).toBeVisible({ timeout: 30_000 });
-  let downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
-  const productionOutput = await (await downloadPromise).path();
-  expect(productionOutput).not.toBeNull();
-
-  await page.goto("/?rawBackend=webgpu-aahd");
-  await page.locator('input[type="file"]').setInputFiles(file);
-  await expect(
-    page.getByRole("button", { name: /leica-m8-no-camera-wb\.dng.*Ready/ }),
-  ).toBeVisible({ timeout: 30_000 });
-  downloadPromise = page.waitForEvent("download");
+  const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export selected" }).click();
   const browserOutput = await (await downloadPromise).path();
   expect(browserOutput).not.toBeNull();
 
   const comparison = compareRgb16Tiffs(
     await readFile(browserOutput!),
-    await readFile(productionOutput!),
+    await readFile(nativeOutput),
   );
   expect([comparison.width, comparison.height]).toEqual([3_920, 2_638]);
   expect(comparison.maxCodeDifference).toBeLessThanOrEqual(2);
   expect(comparison.samplesOverTwoCodes).toBe(0);
 });
+
+test("rotated Bayer keeps LibRaw geometry and required GPU color", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    process.env.AAHD_EXPORT_MATRIX_E2E !== "1",
+    "Set AAHD_EXPORT_MATRIX_E2E=1 on a hardware WebGPU runner.",
+  );
+  test.setTimeout(3 * 60_000);
+  const modified = Buffer.from(await readFile(secondCameraFixture));
+  setDngOrientation(modified, 6);
+  const fixturePath = testInfo.outputPath("leica-m8-rotated.dng");
+  const nativeOutput = testInfo.outputPath("leica-m8-rotated-native.tif");
+  await writeFile(fixturePath, modified);
+  await nativeExport(fixturePath, nativeOutput);
+
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(fixturePath);
+  await expect(
+    page.getByRole("button", { name: /leica-m8-rotated\.dng.*Ready/ }),
+  ).toBeVisible({ timeout: 30_000 });
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export selected" }).click();
+  const browserOutput = await (await downloadPromise).path();
+  expect(browserOutput).not.toBeNull();
+  const timings = await page.evaluate(
+    () =>
+      (
+        performance
+          .getEntriesByName("raw-alchemy:export-worker")
+          .at(-1) as PerformanceMark
+      ).detail,
+  );
+  expect(timings.rawBackend).toBe("libraw");
+  expect(timings.colorBackend).toBe("webgpu");
+
+  const comparison = compareRgb16Tiffs(
+    await readFile(browserOutput!),
+    await readFile(nativeOutput),
+  );
+  expect([comparison.width, comparison.height]).toEqual([2_638, 3_920]);
+  expect(comparison.maxCodeDifference).toBeLessThanOrEqual(1);
+});
+
+async function nativeExport(input: string, output: string): Promise<void> {
+  await execFileAsync(resolve("target/release/alchemy"), [
+    input,
+    output,
+    "--lut",
+    classicNegative,
+    "--color",
+    "never",
+  ]);
+}
 
 function withoutDngAsShotNeutral(source: Buffer): Buffer {
   const bytes = Buffer.from(source);
@@ -187,4 +224,19 @@ function withoutDngAsShotNeutral(source: Buffer): Buffer {
     }
   }
   throw new Error("Leica fixture has no AsShotNeutral tag");
+}
+
+function setDngOrientation(bytes: Buffer, orientation: number): void {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const littleEndian = String.fromCharCode(bytes[0], bytes[1]) === "II";
+  const ifdOffset = view.getUint32(4, littleEndian);
+  const entryCount = view.getUint16(ifdOffset, littleEndian);
+  for (let index = 0; index < entryCount; index += 1) {
+    const entryOffset = ifdOffset + 2 + index * 12;
+    if (view.getUint16(entryOffset, littleEndian) === 274) {
+      view.setUint16(entryOffset + 8, orientation, littleEndian);
+      return;
+    }
+  }
+  throw new Error("Leica fixture has no Orientation tag");
 }

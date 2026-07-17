@@ -73,8 +73,9 @@
   78,024,960-channel highlight boundary exactly before ProPhoto conversion.
 - The hardware benchmark records one cold and at least four warm runs, verifies a non-fallback NVIDIA WebGPU adapter, and reports every GPU phase plus LibRaw unpack and worker totals.
 - The LibRaw algorithm benchmark can select AAHD alone and reports warm distribution statistics for the production CPU/WASM baseline.
-- The normal unit, production build, native workspace, and browser end-to-end suites continue to exercise the unchanged production path; the prototype remains query-gated.
-- Changing the default decoder requires a broader camera and client-GPU matrix;
-  the experimental suite already covers two Bayer cameras, tile borders,
+- The normal unit, production build, native workspace, browser end-to-end, and
+  required T4 release-gate suites exercise the automatic production path.
+- The production matrix covers downloadable Nikon, Panasonic, Bayer Fujifilm,
+  and X-Trans Fujifilm fixtures in addition to Sony and Leica, tile borders,
   clipped Blend highlights, every Bayer phase, unequal black levels, and
   clustered defect cascades.

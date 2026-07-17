@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { promisify } from "node:util";
 
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
@@ -11,20 +13,23 @@ interface CameraFixture {
   camera: string;
   width: number;
   height: number;
+  rawBackend?: "libraw";
 }
 
 const fixtureRoot = resolve(
   process.env.WEBGPU_CAMERA_FIXTURE_DIR ??
     "tests/fixtures/webgpu-camera-matrix",
 );
+const classicNegative = resolve(
+  "vendor/V-Log-Alchemy/Luts/Fujifilm/FLog2C_to_CLASSIC-Neg_VLog.cube",
+);
+const execFileAsync = promisify(execFile);
 const manifest = JSON.parse(
   await readFile("tests/fixtures/webgpu-camera-matrix.json", "utf8"),
 ) as { fixtures: CameraFixture[] };
 
 for (const fixture of manifest.fixtures) {
-  test(`experimental tiled AAHD aligns ${fixture.camera} export`, async ({
-    page,
-  }, testInfo) => {
+  test(`GPU export aligns ${fixture.camera}`, async ({ page }, testInfo) => {
     test.skip(
       process.env.WEBGPU_CAMERA_MATRIX_E2E !== "1",
       "Run npm run test:webgpu-camera-matrix on a hardware WebGPU runner.",
@@ -32,12 +37,16 @@ for (const fixture of manifest.fixtures) {
     test.setTimeout(5 * 60_000);
 
     const path = resolve(fixtureRoot, fixture.file);
-    const productionOutput = await exportSelected(page, path, "/");
-    const webGpuOutput = await exportSelected(
-      page,
+    const nativeOutput = testInfo.outputPath(`${fixture.id}-native.tif`);
+    await execFileAsync(resolve("target/release/alchemy"), [
       path,
-      "/?rawBackend=webgpu-aahd",
-    );
+      nativeOutput,
+      "--lut",
+      classicNegative,
+      "--color",
+      "never",
+    ]);
+    const webGpuOutput = await exportSelected(page, path);
     const timings = await page.evaluate(
       () =>
         (
@@ -46,7 +55,7 @@ for (const fixture of manifest.fixtures) {
             .at(-1) as PerformanceMark
         ).detail,
     );
-    expect(timings.rawBackend).toBe("webgpu-aahd");
+    expect(timings.rawBackend).toBe(fixture.rawBackend ?? "webgpu-aahd");
     expect(timings.colorBackend).toBe("webgpu");
     const adapterInfo = await page.evaluate(async () => {
       const adapter = await navigator.gpu.requestAdapter({
@@ -67,7 +76,7 @@ for (const fixture of manifest.fixtures) {
 
     const comparison = compareRgb16Tiffs(
       await readFile(webGpuOutput),
-      await readFile(productionOutput),
+      await readFile(nativeOutput),
     );
     expect([comparison.width, comparison.height]).toEqual([
       fixture.width,
@@ -88,8 +97,8 @@ for (const fixture of manifest.fixtures) {
   });
 }
 
-async function exportSelected(page: Page, fixture: string, route: string) {
-  await page.goto(route);
+async function exportSelected(page: Page, fixture: string) {
+  await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(fixture);
   const exportButton = page.getByRole("button", { name: "Export selected" });
   await expect(exportButton).toBeEnabled({ timeout: 60_000 });

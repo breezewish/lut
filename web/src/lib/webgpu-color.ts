@@ -36,6 +36,7 @@ export class WebGpuColorRenderer {
     runtime?: WebGpuRuntime,
   ): Promise<WebGpuColorRenderer> {
     const sharedRuntime = runtime ?? (await getWebGpuRuntime());
+    sharedRuntime.assertAvailable();
     const { device } = sharedRuntime;
     const module = device.createShaderModule({ code: shader });
     const compilation = await module.getCompilationInfo();
@@ -52,52 +53,69 @@ export class WebGpuColorRenderer {
       compute: { module, entryPoint: "main" },
     });
     const samples = new Float32Array(lut.samples());
-    const lutBuffer = device.createBuffer({
-      size: samples.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(lutBuffer, 0, samples);
-    const parameterBuffer = device.createBuffer({
-      size: 48,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    const domainMin = lut.domain_min();
-    const domainMax = lut.domain_max();
-    const inverseDomainRange = domainMin.map(
-      (minimum, axis) => 1 / (domainMax[axis] - minimum),
-    );
-    return new WebGpuColorRenderer(
-      sharedRuntime,
-      pipeline,
-      lutBuffer,
-      parameterBuffer,
-      lut.size(),
-      domainMin,
-      inverseDomainRange,
-    );
+    const buffers: GPUBuffer[] = [];
+    try {
+      const lutBuffer = device.createBuffer({
+        size: samples.byteLength,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+      buffers.push(lutBuffer);
+      device.queue.writeBuffer(lutBuffer, 0, samples);
+      const parameterBuffer = device.createBuffer({
+        size: 48,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+      buffers.push(parameterBuffer);
+      const domainMin = lut.domain_min();
+      const domainMax = lut.domain_max();
+      const inverseDomainRange = domainMin.map(
+        (minimum, axis) => 1 / (domainMax[axis] - minimum),
+      );
+      const renderer = new WebGpuColorRenderer(
+        sharedRuntime,
+        pipeline,
+        lutBuffer,
+        parameterBuffer,
+        lut.size(),
+        domainMin,
+        inverseDomainRange,
+      );
+      buffers.length = 0;
+      return renderer;
+    } catch (error) {
+      for (const buffer of buffers) buffer.destroy();
+      throw new Error("WebGPU could not allocate the export color buffers.", {
+        cause: error,
+      });
+    }
   }
 
   async renderStrip(source: Uint16Array, ev: number): Promise<WebGpuStrip> {
+    this.runtime.assertAvailable();
     if (source.length % 3 !== 0) {
       throw new Error("WebGPU color input must contain complete RGB pixels.");
     }
     const pixelCount = source.length / 3;
     const pairCount = Math.ceil(pixelCount / 2);
     const packedBytes = pairCount * 3 * Uint32Array.BYTES_PER_ELEMENT;
-    const sourceBuffer = this.runtime.device.createBuffer({
-      size: packedBytes,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    const destinationBuffer = this.runtime.device.createBuffer({
-      size: packedBytes,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    });
-    const readbackBuffer = this.runtime.device.createBuffer({
-      size: packedBytes,
-      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-    });
-
+    const buffers: GPUBuffer[] = [];
+    let readbackBuffer: GPUBuffer | undefined;
     try {
+      const sourceBuffer = this.runtime.device.createBuffer({
+        size: packedBytes,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+      buffers.push(sourceBuffer);
+      const destinationBuffer = this.runtime.device.createBuffer({
+        size: packedBytes,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      });
+      buffers.push(destinationBuffer);
+      readbackBuffer = this.runtime.device.createBuffer({
+        size: packedBytes,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      });
+      buffers.push(readbackBuffer);
       const uploadStartedAt = performance.now();
       if (source.byteLength === packedBytes) {
         this.runtime.device.queue.writeBuffer(
@@ -143,10 +161,8 @@ export class WebGpuColorRenderer {
         },
       };
     } finally {
-      if (readbackBuffer.mapState === "mapped") readbackBuffer.unmap();
-      sourceBuffer.destroy();
-      destinationBuffer.destroy();
-      readbackBuffer.destroy();
+      if (readbackBuffer?.mapState === "mapped") readbackBuffer.unmap();
+      for (const buffer of buffers) buffer.destroy();
     }
   }
 
@@ -157,6 +173,7 @@ export class WebGpuColorRenderer {
     pixelCount: number,
     ev: number,
   ): void {
+    this.runtime.assertAvailable();
     if (!Number.isInteger(pixelCount) || pixelCount <= 0) {
       throw new Error("WebGPU color requires a positive pixel count.");
     }

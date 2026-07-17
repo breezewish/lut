@@ -61,35 +61,20 @@ export interface LibRawSensorTimings {
   totalMs: number;
 }
 
-export interface DemosaicBenchmarkReport {
-  sensor: import("./lib/onnx-demosaic").SensorImageInfo;
-  sensorTimings: LibRawSensorTimings;
-  demosaic:
-    | import("./lib/onnx-demosaic").DemosaicResult
-    | import("./lib/native-rcd").NativeRcdResult
-    | import("./lib/libraw-aahd").LibRawAahdResult;
-  workerTotalMs: number;
-}
-
 export interface PreviewTimings {
-  previewBackend: "cpu" | "webgpu";
+  previewBackend: "webgpu";
   libraw: LibRawDecodeTimings;
   previewSourceMs: number;
   lutLoadMs: number;
   previewColorMs: number;
   workerTotalMs: number;
   gpuExecutionAndReadbackMs?: number;
-  gpuValidation?: {
-    sampleCount: number;
-    differingSamples: number;
-    maximumDifference: number;
-  };
 }
 
 export interface ExportTimings {
   libraw: LibRawDecodeTimings;
-  rawBackend?: "libraw" | "webgpu-aahd";
-  colorBackend: "cpu" | "webgpu" | "onnx";
+  rawBackend: "libraw" | "webgpu-aahd";
+  colorBackend: "webgpu";
   colorProcessingMs: number;
   tiffEncodingMs: number;
   workerTotalMs: number;
@@ -101,13 +86,6 @@ export interface ExportTimings {
     resources: NonNullable<
       import("./lib/libraw-aahd").LibRawAahdResult["resources"]
     >;
-  };
-  gpuValidation?: {
-    sampleCount: number;
-    differingSamples: number;
-    samplesOverTwoCodes: number;
-    maximumDifference: number;
-    meanAbsoluteDifference: number;
   };
 }
 
@@ -148,8 +126,6 @@ export type WorkerCommand =
       buffer: ArrayBuffer;
       ev: number;
       lut: LutDefinition;
-      previewBackend: "auto" | "cpu" | "webgpu";
-      validatePreviewGpu: boolean;
     }
   | {
       requestId: number;
@@ -167,42 +143,6 @@ export type WorkerCommand =
       buffer: ArrayBuffer;
       ev: number;
       lut: LutDefinition;
-      colorBackend?: "cpu" | "webgpu" | "onnx";
-      rawBackend?: "libraw" | "webgpu-aahd";
-      validateGpu?: boolean;
-    }
-  | {
-      requestId: number;
-      type: "benchmark-demosaic";
-      buffer: ArrayBuffer;
-      referenceRgb16?: ArrayBuffer;
-      demosaicBackend:
-        | "onnx"
-        | "native-wgsl"
-        | "libraw-aahd-wgsl"
-        | "libraw-aahd-wgsl-tiled";
-      demosaicContract: "deterministic-parallel-candidate" | "libraw-parity";
-      demosaicOutputStage:
-        | "demosaic"
-        | "identity-lut"
-        | "scaled"
-        | "corrected"
-        | "defects"
-        | "horizontal"
-        | "vertical"
-        | "horizontal-yuv"
-        | "vertical-yuv"
-        | "horizontal-homogeneity"
-        | "vertical-homogeneity"
-        | "chosen-directions"
-        | "directions"
-        | "candidate-directions"
-        | "aahd"
-        | "highlight"
-        | "final";
-      completeExport: boolean;
-      librawReference: boolean;
-      candidateReference: boolean;
     };
 
 export type WorkerReply =
@@ -236,12 +176,6 @@ export type WorkerReply =
       fileId: string;
       tiff: Uint8Array;
       timings: ExportTimings;
-    }
-  | {
-      requestId: number;
-      ok: true;
-      type: "demosaic-benchmark";
-      result: DemosaicBenchmarkReport;
     }
   | {
       requestId: number;

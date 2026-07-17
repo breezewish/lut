@@ -27,6 +27,7 @@ const fixtures = [
     ],
     sum: 28170738174,
     samples: [702, 940, 622, 1036, 642, 518],
+    webGpuAahd: true,
   },
   {
     name: "Leica M8 DNG",
@@ -50,6 +51,7 @@ const fixtures = [
     ],
     sum: 31653712396,
     samples: [3080, 6806, 3306, 6806, 441, 812],
+    webGpuAahd: true,
   },
 ];
 if (process.env.XTRANS_FIXTURE) {
@@ -75,6 +77,7 @@ if (process.env.XTRANS_FIXTURE) {
     ],
     sum: 56057963413,
     samples: [2653, 4891, 5299, 4840, 1893, 7488],
+    webGpuAahd: false,
   });
 }
 
@@ -85,6 +88,11 @@ for (const fixture of fixtures) {
   const raw = new module.LibRaw();
   try {
     raw.open(new Uint8Array(await readFile(fixture.path)), false);
+    assertEqual(
+      raw.supportsWebGpuAahd(),
+      fixture.webGpuAahd,
+      `${fixture.name} WebGPU AAHD route`,
+    );
     const info = raw.sensorInfo();
     if (process.env.PRINT_SENSOR_INFO === "1")
       console.log(JSON.stringify(info));
@@ -187,6 +195,37 @@ for (const fixture of fixtures) {
   }
 }
 
+const linearRaw = new module.LibRaw();
+try {
+  linearRaw.open(
+    new Uint8Array(await readFile("tests/fixtures/linear.dng")),
+    false,
+  );
+  assertEqual(
+    linearRaw.supportsWebGpuAahd(),
+    false,
+    "Linear DNG WebGPU AAHD route",
+  );
+} finally {
+  linearRaw.delete();
+}
+
+const rotatedBytes = new Uint8Array(
+  await readFile("tests/fixtures/leica-m8.dng"),
+);
+setDngOrientation(rotatedBytes, 6);
+const rotatedRaw = new module.LibRaw();
+try {
+  rotatedRaw.open(rotatedBytes, false);
+  assertEqual(
+    rotatedRaw.supportsWebGpuAahd(),
+    false,
+    "Rotated Bayer WebGPU AAHD route",
+  );
+} finally {
+  rotatedRaw.delete();
+}
+
 const missingWhiteBalance = new Uint8Array(
   await readFile("tests/fixtures/leica-m8.dng"),
 );
@@ -220,6 +259,21 @@ function removeDngAsShotNeutral(bytes) {
     }
   }
   throw new Error("Leica fixture has no AsShotNeutral tag");
+}
+
+function setDngOrientation(bytes, orientation) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const littleEndian = String.fromCharCode(bytes[0], bytes[1]) === "II";
+  const ifdOffset = view.getUint32(4, littleEndian);
+  const entryCount = view.getUint16(ifdOffset, littleEndian);
+  for (let index = 0; index < entryCount; index += 1) {
+    const entryOffset = ifdOffset + 2 + index * 12;
+    if (view.getUint16(entryOffset, littleEndian) === 274) {
+      view.setUint16(entryOffset + 8, orientation, littleEndian);
+      return;
+    }
+  }
+  throw new Error("Leica fixture has no Orientation tag");
 }
 
 function assertEqual(actual, expected, label) {

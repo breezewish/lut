@@ -7,12 +7,6 @@ const fixture = resolve(
   process.env.RAW_PERF_FIXTURE ?? "vendor/LibRaw-Wasm/example-sony.ARW",
 );
 const samples = Number(process.env.RAW_PERF_SAMPLES ?? "5");
-const requestedBackend = process.env.RAW_PERF_BACKEND;
-const colorBackend =
-  requestedBackend === "webgpu" || requestedBackend === "onnx"
-    ? requestedBackend
-    : "cpu";
-const validateGpu = process.env.RAW_PERF_VALIDATE_GPU === "1";
 
 test("records phased production Worker performance", async ({
   page,
@@ -34,9 +28,7 @@ test("records phased production Worker performance", async ({
     | { exportWallMs: number; worker: unknown; blob: unknown }
     | undefined;
 
-  await page.goto(
-    `/?colorBackend=${colorBackend}${validateGpu ? "&validateGpu=1" : ""}`,
-  );
+  await page.goto("/");
   const adapterInfo = await page.evaluate(async () => {
     if (!("gpu" in navigator)) return undefined;
     const adapter = await navigator.gpu.requestAdapter({
@@ -108,8 +100,7 @@ test("records phased production Worker performance", async ({
         fixture,
         fixtureBytes: fixtureStat.size,
         samples,
-        colorBackend,
-        validateGpu,
+        colorBackend: "webgpu",
         adapterInfo,
         coldRun: runs[0],
         warmRuns: runs.slice(1),

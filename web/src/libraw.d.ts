@@ -72,7 +72,8 @@ declare module "*libraw.js" {
     aahdDirectionView(offset: number, length: number): Uint8Array;
     aahdOutputView(offset: number, length: number): Uint16Array;
     aahdHighlightView(offset: number, length: number): Uint16Array;
-    sensorInfo(): import("./lib/onnx-demosaic").SensorImageInfo;
+    supportsWebGpuAahd(): boolean;
+    sensorInfo(): import("./lib/sensor-image").SensorImageInfo;
     sensorView(offset: number, length: number): Uint16Array;
     sensorTimings(): import("./types").LibRawSensorTimings;
     timings(): DecodeTimings;

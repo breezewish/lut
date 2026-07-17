@@ -32,7 +32,8 @@ const exportTimings: ExportTimings = {
     rgb16Ms: 9,
     totalMs: 45,
   },
-  colorBackend: "cpu",
+  rawBackend: "libraw",
+  colorBackend: "webgpu",
   colorProcessingMs: 10,
   tiffEncodingMs: 11,
   workerTotalMs: 66,
@@ -72,7 +73,7 @@ function preview(fileId: string, value: number): PreviewResult {
     metadata: { camera: "Test Camera", width: 1, height: 1 },
     decodeCount: 1,
     timings: {
-      previewBackend: "cpu",
+      previewBackend: "webgpu",
       libraw: exportTimings.libraw,
       previewSourceMs: 10,
       lutLoadMs: 0,
@@ -167,9 +168,9 @@ test("decode rejects an unsent render instead of dispatching stale exposure", as
   const decodeCommand = ControlledWorker.instance.messages[1];
   expect(decodeCommand).toMatchObject({
     type: "decode",
-    previewBackend: "auto",
-    validatePreviewGpu: false,
   });
+  expect(decodeCommand).not.toHaveProperty("previewBackend");
+  expect(decodeCommand).not.toHaveProperty("validatePreviewGpu");
   const initialPreview = preview("two", 15);
   ControlledWorker.instance.reply({
     requestId: decodeCommand.requestId,
@@ -251,6 +252,10 @@ test("export rejects an unsent render instead of dispatching stale exposure", as
     result: preview("one", 10),
   });
   const exportCommand = ControlledWorker.instance.messages[1];
+  expect(exportCommand).toMatchObject({ type: "export" });
+  expect(exportCommand).not.toHaveProperty("rawBackend");
+  expect(exportCommand).not.toHaveProperty("colorBackend");
+  expect(exportCommand).not.toHaveProperty("validateGpu");
   const tiff = new Uint8Array([1, 2, 3]);
   ControlledWorker.instance.reply({
     requestId: exportCommand.requestId,

@@ -67,47 +67,64 @@ export class WebGpuPreviewRenderer {
     const sourceBytes = align(source.byteLength, Uint32Array.BYTES_PER_ELEMENT);
     const { runtime, pipeline } = await prepareWebGpuPreview();
     await getWebGpuRuntime(Math.max(sourceBytes, outputBytes));
+    runtime.assertAvailable();
     const { device } = runtime;
-    const sourceBuffer = device.createBuffer({
-      size: sourceBytes,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    if (sourceBytes === source.byteLength) {
-      device.queue.writeBuffer(
-        sourceBuffer,
-        0,
-        source.buffer,
-        source.byteOffset,
-        source.byteLength,
-      );
-    } else {
-      const padded = new Uint8Array(sourceBytes);
-      padded.set(
-        new Uint8Array(source.buffer, source.byteOffset, source.byteLength),
-      );
-      device.queue.writeBuffer(sourceBuffer, 0, padded);
-    }
     const outputUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC;
     const readbackUsage = GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ;
-    return new WebGpuPreviewRenderer(
-      runtime,
-      pipeline,
-      sourceBuffer,
-      device.createBuffer({ size: outputBytes, usage: outputUsage }),
-      device.createBuffer({ size: outputBytes, usage: outputUsage }),
-      device.createBuffer({ size: outputBytes, usage: readbackUsage }),
-      device.createBuffer({ size: outputBytes, usage: readbackUsage }),
-      device.createBuffer({
-        size: 64,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-      }),
-      width,
-      height,
-      lut,
-    );
+    const buffers: GPUBuffer[] = [];
+    const createBuffer = (descriptor: GPUBufferDescriptor) => {
+      const buffer = device.createBuffer(descriptor);
+      buffers.push(buffer);
+      return buffer;
+    };
+    try {
+      const sourceBuffer = createBuffer({
+        size: sourceBytes,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+      if (sourceBytes === source.byteLength) {
+        device.queue.writeBuffer(
+          sourceBuffer,
+          0,
+          source.buffer,
+          source.byteOffset,
+          source.byteLength,
+        );
+      } else {
+        const padded = new Uint8Array(sourceBytes);
+        padded.set(
+          new Uint8Array(source.buffer, source.byteOffset, source.byteLength),
+        );
+        device.queue.writeBuffer(sourceBuffer, 0, padded);
+      }
+      const renderer = new WebGpuPreviewRenderer(
+        runtime,
+        pipeline,
+        sourceBuffer,
+        createBuffer({ size: outputBytes, usage: outputUsage }),
+        createBuffer({ size: outputBytes, usage: outputUsage }),
+        createBuffer({ size: outputBytes, usage: readbackUsage }),
+        createBuffer({ size: outputBytes, usage: readbackUsage }),
+        createBuffer({
+          size: 64,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        }),
+        width,
+        height,
+        lut,
+      );
+      buffers.length = 0;
+      return renderer;
+    } catch (error) {
+      for (const buffer of buffers) buffer.destroy();
+      throw new Error("WebGPU could not allocate the preview buffers.", {
+        cause: error,
+      });
+    }
   }
 
   setLut(lut: GpuLut): void {
+    this.runtime.assertAvailable();
     const previous = this.lutBuffer;
     this.lutBuffer = this.createLutBuffer(lut);
     this.lutSize = lut.size();
@@ -121,6 +138,7 @@ export class WebGpuPreviewRenderer {
     maxEdge: number,
     includeBase: boolean,
   ): Promise<WebGpuPreview> {
+    this.runtime.assertAvailable();
     const [width, height] = previewDimensions(this.width, this.height, maxEdge);
     const pixelCount = width * height;
     const outputBytes = pixelCount * Uint32Array.BYTES_PER_ELEMENT;
@@ -199,8 +217,13 @@ export class WebGpuPreviewRenderer {
       size: samples.byteLength,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
-    this.runtime.device.queue.writeBuffer(buffer, 0, samples);
-    return buffer;
+    try {
+      this.runtime.device.queue.writeBuffer(buffer, 0, samples);
+      return buffer;
+    } catch (error) {
+      buffer.destroy();
+      throw error;
+    }
   }
 
   private writeParameters(

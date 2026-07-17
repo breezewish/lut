@@ -11,7 +11,12 @@ const hardwareWebGpuArgs =
         "--disable-vulkan-surface",
         "--enable-unsafe-webgpu",
       ]
-    : [];
+    : [
+        "--enable-unsafe-webgpu",
+        "--use-angle=swiftshader",
+        "--enable-features=Vulkan",
+        "--disable-vulkan-surface",
+      ];
 
 export default defineConfig({
   testDir: "web/e2e",

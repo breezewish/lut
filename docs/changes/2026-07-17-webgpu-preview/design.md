@@ -6,11 +6,11 @@ The Preview-only LibRaw path still produces one orientation-correct longest-edge
 
 One compute shader performs nearest display sampling, exposure, corrected-v2 Base conversion, V-Log conversion, tetrahedral LUT interpolation, and RGBA8 quantization. The source, current LUT, two output buffers, two readbacks, and uniforms remain allocated across rerenders. The worst square 1024px workspace is below 26 MB, excluding the shared WebGPU device. Device and shader initialization starts when the Worker loads so cold GPU setup overlaps file selection and LibRaw work.
 
-The Worker serializes GPU submissions. `ProcessingClient` keeps one render active and only the latest waiting recipe. WebGPU exposure commits are limited to one per 16 ms and render at 1024px immediately. The CPU fallback retains its 50 ms commits, 256px interaction result, and delayed 1024px refinement.
+The Worker serializes GPU submissions. `ProcessingClient` keeps one render active and only the latest waiting recipe. WebGPU exposure commits are limited to one per 16 ms and render at 1024px immediately. There is no CPU fallback or delayed refinement.
 
 ## Correctness
 
-The Rust corrected-v2 Preview renderer remains the numerical oracle. An opt-in hardware mode retains a second CPU source, renders both paths for the same requests, and reports every RGBA8 difference. This validation allocation and CPU work are absent from production.
+Native corrected-v2 exports and pinned display-quality fixtures are the independent correctness references. Production does not retain a second source or run CPU/GPU validation.
 
 ## Trade-offs
 

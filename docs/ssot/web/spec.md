@@ -6,7 +6,7 @@ The browser accepts multiple RAW files through a chooser or drag and drop, inclu
 
 The selected file has side-by-side Base and LUT previews. Changing EV or LUT rerenders the cached preview without decoding RAW again. Continuous EV input keeps the interface responsive, discards obsolete waiting recipes, and presents the final value without a growing processing backlog. Look selection supports text search and recent choices; malformed local recent-choice data is ignored. EV supports a slider and bounded numeric entry. The queue shows textual status, camera, dimensions, removal, clear, and undo.
 
-Initial processing is progressive. An embedded JPEG is only an immediate labeled placeholder. The first processed comparison is longest-edge 384 and the settled comparison is longest-edge 1024. On WebGPU, every interactive EV or LUT result is a longest-edge-1024 exact-color frame; there is no coarse interaction phase or idle refinement delay. The CPU fallback uses longest-edge-256 exact-color interaction frames before the same 1024 refinement. These buffers fill one stable preview geometry and never change the displayed image size. The previous processed comparison remains visible until the next interaction frame atomically replaces it; an EV or LUT change never clears either canvas to a blank placeholder. During continuous EV input, completed frames for the same file and LUT may trail the control value briefly, but their generations must increase monotonically so the image keeps moving forward and never regresses. A file or LUT change immediately invalidates older frames. Only the exact current recipe may publish the settled comparison or enable export.
+Initial processing is progressive. An embedded JPEG is only an immediate labeled placeholder. The first processed comparison is longest-edge 384 and the settled comparison is longest-edge 1024. Every interactive EV or LUT result is a longest-edge-1024 exact-color WebGPU frame; there is no coarse interaction phase or idle refinement delay. These buffers fill one stable preview geometry and never change the displayed image size. The previous processed comparison remains visible until the next interaction frame atomically replaces it; an EV or LUT change never clears either canvas to a blank placeholder. During continuous EV input, completed frames for the same file and LUT may trail the control value briefly, but their generations must increase monotonically so the image keeps moving forward and never regresses. A file or LUT change immediately invalidates older frames. Only the exact current recipe may publish the settled comparison or enable export.
 
 Preview and export have different image contracts. Preview may use half-size CFA reconstruction and display-sized sampling, so edge detail, noise, moiré, and isolated pixels may differ from export. Orientation, crop, frame coverage, exposure relationships, white balance, highlight behavior, and LUT semantics remain accurate. Against full-resolution export sampled to the same display dimensions, the accepted multi-camera fixture set must have mean absolute RGB8 display difference at most 12 codes, p99 absolute difference at most 80 codes, and mean signed difference within 2 codes for every channel.
 
@@ -16,7 +16,7 @@ Legacy diagonal Fujifilm Super CCD layouts fail explicitly at selection because 
 
 The acceptance fixture is the 6240 × 4168 Sony RAW in the repository, rendered by the production Chromium bundle. When available, its embedded JPEG must appear within 0.3 seconds. A cold selection must draw the first longest-edge-384 processed comparison within 1.2 seconds and the longest-edge-1024 settled comparison within 1.5 seconds. Warm selections must draw their first processed comparison with p95 below 0.6 seconds and their settled comparison with p95 below 0.8 seconds. These boundaries begin in the file-selection handler and include file reading, Worker/WASM work, transfer, and Canvas drawing.
 
-After the longest-edge-1024 source cache is ready on the acceptance GPU, at least 20 EV samples must show a recipe-correct longest-edge-1024 frame with p95 below 0.08 seconds. First access to the built-in LUT set and a previously loaded LUT must each show that full-detail frame with p95 below 0.2 seconds. The CPU fallback retains the progressive interaction budgets but is not the hardware performance reference.
+After the longest-edge-1024 source cache is ready on the acceptance GPU, at least 20 EV samples must show a recipe-correct longest-edge-1024 frame with p95 below 0.08 seconds. First access to the built-in LUT set and a previously loaded LUT must each show that full-detail frame with p95 below 0.2 seconds.
 
 During a 60-event EV input burst scheduled at nominal 60 Hz, input dispatch must finish within 1.1 seconds and the acceptance GPU must publish at least 30 longest-edge-1024 processed frames. The first frame must appear within 0.08 seconds of the first input and the final exact frame within 0.1 seconds after the last input.
 
@@ -28,12 +28,18 @@ Export selected downloads one uncompressed RGB16 TIFF. Export all processes nonf
 
 Export actions remain disabled until the selected processed preview matches the visible EV and LUT. This prevents an undecoded or stale recipe from being exported before the user has compared it.
 
-The default export uses pinned LibRaw. An explicit experimental
-`rawBackend=webgpu-aahd` query is available for supported Bayer RAW files. It
-uses tiled LibRaw-parity AAHD and corrected-v2 color/LUT processing on WebGPU,
-then streams bounded RGB16 bands into the TIFF encoder. Missing WebGPU,
-unsupported sensors, and adapter limits fail explicitly; the experimental
-route never changes decoder silently.
+WebGPU is required for Preview and Export. A missing adapter, allocation
+failure, adapter-limit violation, or lost shared device fails explicitly and
+never changes to a CPU renderer. Reloading after the GPU becomes available is
+the recovery action.
+
+Export selects the demosaic stage from the RAW contract. Even, unrotated Bayer
+RAW uses tiled LibRaw-parity AAHD on WebGPU. X-Trans, Linear DNG, rotated RAW,
+odd Bayer geometry, and spatial black-level layouts retain LibRaw's
+sensor-specific demosaic and geometry processing. Both routes require WebGPU
+for corrected-v2 color/LUT processing and stream bounded RGB16 bands into the
+TIFF encoder. This preserves the accepted RAW formats without treating a GPU
+failure as permission to change algorithms.
 
 A full-resolution export failure shows the concrete error, does not invalidate an already rendered preview, and does not mislabel the RAW as undecodable. The failed file remains eligible for an explicit retry. Removing the selected file or clearing the queue releases its persistent decoded preview cache.
 

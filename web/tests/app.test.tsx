@@ -162,7 +162,7 @@ test("renders only after the exposure recipe changes", async () => {
                 metadata: { camera: "Test Camera", width: 1, height: 1 },
                 decodeCount: 1,
                 timings: {
-                  previewBackend: "cpu",
+                  previewBackend: "webgpu",
                   libraw: {},
                   previewSourceMs: 0,
                   lutLoadMs: 0,
@@ -246,12 +246,6 @@ test("renders only after the exposure recipe changes", async () => {
     expect(
       RecipeWorker.instance.commands.filter(({ type }) => type === "render"),
     ).toEqual([
-      expect.objectContaining({
-        type: "render",
-        ev: 1,
-        maxEdge: 256,
-        includeBase: true,
-      }),
       expect.objectContaining({
         type: "render",
         ev: 1,

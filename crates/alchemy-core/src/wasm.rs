@@ -36,17 +36,17 @@ impl WasmLut {
         renderer.set_lut(self.parsed.clone());
     }
 
-    /// Returns the LUT edge length for the experimental WebGPU renderer.
+    /// Returns the LUT edge length for the WebGPU renderer.
     pub fn size(&self) -> u32 {
-        self.parsed.size() as u32
+        u32::try_from(self.parsed.size()).expect("LUT size is capped at 129")
     }
 
-    /// Returns the lower CUBE domain bound for the experimental WebGPU renderer.
+    /// Returns the lower CUBE domain bound for the WebGPU renderer.
     pub fn domain_min(&self) -> Vec<f32> {
         self.parsed.domain_min().to_vec()
     }
 
-    /// Returns the upper CUBE domain bound for the experimental WebGPU renderer.
+    /// Returns the upper CUBE domain bound for the WebGPU renderer.
     pub fn domain_max(&self) -> Vec<f32> {
         self.parsed.domain_max().to_vec()
     }
@@ -54,16 +54,6 @@ impl WasmLut {
     /// Returns RGB-interleaved CUBE samples for one GPU upload.
     pub fn samples(&self) -> Vec<f32> {
         self.parsed.flattened_samples()
-    }
-
-    /// Creates a strip encoder with this parsed LUT.
-    pub fn create_tiff_encoder(
-        &self,
-        width: u32,
-        height: u32,
-        ev: f32,
-    ) -> std::result::Result<TiffEncoder, JsError> {
-        TiffEncoder::new(width, height, ev, self.parsed.clone())
     }
 }
 
@@ -179,47 +169,21 @@ impl PreviewRenderer {
 
 #[wasm_bindgen]
 pub struct TiffEncoder {
-    pipeline: ColorPipeline,
     writer: Rgb16TiffWriter,
-    output: Vec<u16>,
-}
-
-impl TiffEncoder {
-    fn new(width: u32, height: u32, ev: f32, lut: Lut3d) -> std::result::Result<Self, JsError> {
-        let pipeline =
-            ColorPipeline::new(ev, ProcessingMode::CorrectedV2, lut).map_err(to_js_error)?;
-        let writer = Rgb16TiffWriter::new(width, height).map_err(to_js_error)?;
-        Ok(Self {
-            pipeline,
-            writer,
-            output: Vec::new(),
-        })
-    }
 }
 
 #[wasm_bindgen]
 impl TiffEncoder {
+    #[wasm_bindgen(constructor)]
+    /// Creates a TIFF encoder for RGB16 strips already rendered by WebGPU.
+    pub fn new(width: u32, height: u32) -> std::result::Result<Self, JsError> {
+        Ok(Self {
+            writer: Rgb16TiffWriter::new(width, height).map_err(to_js_error)?,
+        })
+    }
+
     pub fn next_strip_samples(&self) -> usize {
         self.writer.next_strip_samples()
-    }
-
-    pub fn render_strip(&mut self, pixels: &[u16]) -> std::result::Result<(), JsError> {
-        let expected = self.writer.next_strip_samples();
-        if pixels.len() != expected {
-            return Err(to_js_error(AlchemyError::InvalidPixelCount {
-                actual: pixels.len(),
-                expected,
-            }));
-        }
-        self.output.clear();
-        self.output.reserve(expected);
-        self.pipeline.render_rgb16_strip(pixels, &mut self.output);
-        Ok(())
-    }
-
-    /// Copies the last CPU-rendered strip for experimental GPU parity checks.
-    pub fn rendered_strip(&self) -> Vec<u16> {
-        self.output.clone()
     }
 
     /// Writes an externally rendered RGB16 strip without applying color again.
@@ -232,19 +196,6 @@ impl TiffEncoder {
             }));
         }
         self.writer.write_strip(pixels).map_err(to_js_error)
-    }
-
-    pub fn write_strip(&mut self) -> std::result::Result<(), JsError> {
-        let expected = self.writer.next_strip_samples();
-        if self.output.len() != expected {
-            return Err(to_js_error(AlchemyError::InvalidPixelCount {
-                actual: self.output.len(),
-                expected,
-            }));
-        }
-        self.writer.write_strip(&self.output).map_err(to_js_error)?;
-        self.output.clear();
-        Ok(())
     }
 
     pub fn finish(self) -> std::result::Result<Vec<u8>, JsError> {

@@ -1,6 +1,5 @@
 import type {
   CameraPreview,
-  DemosaicBenchmarkReport,
   ExportResult,
   LutDefinition,
   PreviewResult,
@@ -47,23 +46,6 @@ export class ProcessingClient {
   private activeRender?: RenderBatch;
   private queuedRender?: RenderBatch;
   private stoppedError?: Error;
-  private readonly colorBackend = (() => {
-    const backend = new URLSearchParams(location.search).get("colorBackend");
-    return backend === "webgpu" || backend === "onnx" ? backend : "cpu";
-  })();
-  private readonly validateGpu =
-    new URLSearchParams(location.search).get("validateGpu") === "1";
-  private readonly previewBackend = (() => {
-    const backend = new URLSearchParams(location.search).get("previewBackend");
-    return backend === "cpu" || backend === "webgpu" ? backend : "auto";
-  })();
-  private readonly validatePreviewGpu =
-    new URLSearchParams(location.search).get("validatePreviewGpu") === "1";
-  private readonly rawBackend =
-    new URLSearchParams(location.search).get("rawBackend") === "webgpu-aahd"
-      ? "webgpu-aahd"
-      : "libraw";
-
   constructor() {
     this.worker.onmessage = ({ data }: MessageEvent<WorkerReply>) => {
       if (data.ok && data.type === "thumbnail") {
@@ -135,8 +117,6 @@ export class ProcessingClient {
         buffer,
         ev,
         lut,
-        previewBackend: this.previewBackend,
-        validatePreviewGpu: this.validatePreviewGpu,
       },
       [buffer],
     );
@@ -195,9 +175,6 @@ export class ProcessingClient {
         buffer,
         ev,
         lut,
-        colorBackend: this.colorBackend,
-        rawBackend: this.rawBackend,
-        validateGpu: this.validateGpu,
       },
       [buffer],
     );
@@ -205,71 +182,6 @@ export class ProcessingClient {
       return { tiff: reply.tiff, timings: reply.timings };
     }
     throw new Error("Worker returned an unexpected export response.");
-  }
-
-  async benchmarkDemosaic(
-    buffer: ArrayBuffer,
-    referenceRgb16?: ArrayBuffer,
-  ): Promise<DemosaicBenchmarkReport> {
-    const search = new URLSearchParams(location.search);
-    const requestedBackend = search.get("demosaicBackend");
-    const demosaicBackend =
-      requestedBackend === "native-wgsl" ||
-      requestedBackend === "libraw-aahd-wgsl" ||
-      requestedBackend === "libraw-aahd-wgsl-tiled"
-        ? requestedBackend
-        : "onnx";
-    const requestedStage = search.get("demosaicOutputStage");
-    const demosaicContract =
-      search.get("demosaicContract") === "libraw-parity"
-        ? "libraw-parity"
-        : "deterministic-parallel-candidate";
-    const demosaicOutputStage =
-      demosaicBackend === "libraw-aahd-wgsl" ||
-      demosaicBackend === "libraw-aahd-wgsl-tiled"
-        ? requestedStage === "scaled" ||
-          requestedStage === "corrected" ||
-          requestedStage === "defects" ||
-          requestedStage === "horizontal" ||
-          requestedStage === "vertical" ||
-          requestedStage === "horizontal-yuv" ||
-          requestedStage === "vertical-yuv" ||
-          requestedStage === "horizontal-homogeneity" ||
-          requestedStage === "vertical-homogeneity" ||
-          requestedStage === "chosen-directions" ||
-          requestedStage === "directions" ||
-          requestedStage === "candidate-directions" ||
-          requestedStage === "aahd" ||
-          requestedStage === "highlight"
-          ? requestedStage
-          : "final"
-        : demosaicBackend === "native-wgsl"
-          ? requestedStage === "demosaic"
-            ? "demosaic"
-            : "identity-lut"
-          : "demosaic";
-    const completeExport = search.get("completeExport") === "1";
-    const librawReference = search.get("librawReference") === "1";
-    const candidateReference = search.get("candidateReference") === "1";
-    const transfer = referenceRgb16 ? [buffer, referenceRgb16] : [buffer];
-    const reply = await this.send(
-      {
-        type: "benchmark-demosaic",
-        buffer,
-        referenceRgb16,
-        demosaicBackend,
-        demosaicContract,
-        demosaicOutputStage,
-        completeExport,
-        librawReference,
-        candidateReference,
-      },
-      transfer,
-    );
-    if (reply.ok && reply.type === "demosaic-benchmark") return reply.result;
-    throw new Error(
-      "Worker returned an unexpected demosaic benchmark response.",
-    );
   }
 
   dispose(): void {

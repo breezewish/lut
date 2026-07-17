@@ -8,13 +8,14 @@ LibRaw remains the numerical reference. Studio, RCD, Markesteijn, and ONNX are
 not reference implementations for this experiment.
 
 The implementation proves exact bounded-memory AAHD parity and integrates it
-through color and streamed TIFF export as an explicit experimental backend.
+through color and streamed TIFF export as the production Bayer backend.
 On 26 MP Sony and 10 MP Leica Bayer fixtures, every final TIFF difference from
 the pinned production export stays within one code. Peak WebGPU allocation
-stays below 256 MiB. It is not a candidate for the default backend: exact
-LibRaw row-order boundaries and the two tile sweeps keep the measured
-post-unpack path well above the 500 ms target on an NVIDIA T4. The display-sized
-Preview pipeline remains the correct path for fast user feedback.
+stays below 256 MiB. Exact LibRaw row-order boundaries and the two tile sweeps
+keep the measured post-unpack path above the prototype's original 500 ms goal
+on an NVIDIA T4. That goal is not a release constraint: correctness, bounded
+memory, and measured end-to-end improvement justify the route, while the
+display-sized Preview pipeline remains responsible for fast user feedback.
 
 ## Background
 
@@ -340,7 +341,8 @@ seconds. Once
 streaming overlaps GPU waits, individual
 wall-time stage counters also include time when their completion callback was
 delayed by synchronous TIFF work; they are not additive GPU timestamps. The
-500 ms post-unpack target is not met.
+original 500 ms goal is not a release constraint; further work is justified
+only by measured user value.
 
 The 3920 x 2638 Leica M8 fixture exercises LibRaw's adjusted-maximum path:
 the sensor white level is 16,383 while the effective AAHD scale range is
@@ -361,9 +363,10 @@ Fujifilm in 145,946 of 72,444,672. No channel exceeded the two-code contract.
 These fixtures all contain valid camera white balance; missing camera-WB
 behavior remains a separate decoder-contract boundary.
 
-The route is selected only by `rawBackend=webgpu-aahd`. It rejects missing
-WebGPU, unsupported sensors, and insufficient adapter limits without changing
-decoder. Production export and Preview remain unchanged.
+Production selects this route automatically for even, unrotated Bayer input.
+Other accepted RAW contracts retain LibRaw demosaic and geometry, then enter
+the same required WebGPU color path. Missing WebGPU, device loss, and
+insufficient adapter limits fail without changing decoder.
 
 The wrapper provides the exact normalized AAHD pre-multipliers rather than
 asking TypeScript to normalize `cam_mul`. It mirrors LibRaw's precedence among
@@ -428,9 +431,8 @@ refined directions, selected AAHD, Blend highlight, and final ProPhoto output.
 Setting `librawReference=1` captures and compares the matching internal LibRaw
 stage. Setting `candidateReference=1` compares the candidate-only boundaries
 with their independent scalar reference. Normal application and end-to-end
-paths continue to use production LibRaw. `rawBackend=webgpu-aahd` selects the
-integrated experimental export, while `AAHD_EXPORT_E2E=1` runs its complete
-hardware TIFF comparison.
+paths use automatic production routing. `AAHD_EXPORT_E2E=1` runs the repeated
+hardware TIFF comparison against an independent native LibRaw export.
 
 The CPU baseline is reproducible with:
 

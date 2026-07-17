@@ -8,7 +8,7 @@ Preview must provide fine visual feedback while exposure or Look controls move. 
 
 Initial RAW processing remains progressive: the embedded JPEG may appear first, followed by processed 384px and 1024px comparisons. Once the display-sized source is ready, every WebGPU EV or LUT response is a 1024px corrected-v2 Base or Look image. The latest recipe wins, stale work never grows into a queue, and export becomes ready only for the exact visible recipe.
 
-Browsers without WebGPU retain the existing CPU progressive path. Preview may still differ from full-resolution export under the established display-sized proxy contract. WebGPU and CPU rendering of the same Preview source may differ by at most one RGBA8 code.
+Browsers without WebGPU fail with a visible compatibility error. Preview may still differ from full-resolution export under the established display-sized proxy contract.
 
 ## Performance
 

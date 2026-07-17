@@ -5,6 +5,11 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   base: process.env.VITE_BASE_PATH ?? "/",
+  define: {
+    TEST_ENTRIES_ENABLED: JSON.stringify(
+      process.env.VITE_ENABLE_TEST_ENTRIES === "1",
+    ),
+  },
   plugins: [
     react(),
     tailwindcss(),

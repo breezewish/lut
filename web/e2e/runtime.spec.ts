@@ -6,7 +6,7 @@ import { expect, test } from "@playwright/test";
 const linearFixture = resolve("tests/fixtures/linear.dng");
 const httpPort = process.env.PLAYWRIGHT_HTTP_PORT ?? "42731";
 
-test("processes a RAW on an insecure non-loopback development origin", async ({
+test("rejects RAW processing on an origin where WebGPU is unavailable", async ({
   page,
 }) => {
   const address = Object.values(networkInterfaces())
@@ -21,8 +21,8 @@ test("processes a RAW on an insecure non-loopback development origin", async ({
   expect(await page.evaluate(() => isSecureContext)).toBe(false);
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
 
-  await expect(page.getByLabel("Base preview")).toBeVisible({
-    timeout: 20_000,
-  });
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("alert")).toContainText(
+    "WebGPU is required to process RAW files",
+  );
+  await expect(page.getByLabel("Base preview")).toHaveCount(0);
 });

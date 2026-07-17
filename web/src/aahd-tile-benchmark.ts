@@ -1,8 +1,6 @@
-import {
-  demosaicLibRawAahdTiledWithWgsl,
-  demosaicLibRawAahdWithWgsl,
-} from "./lib/libraw-aahd";
-import type { SensorImageInfo } from "./lib/onnx-demosaic";
+import { demosaicLibRawAahdWithWgsl } from "./lib/libraw-aahd";
+import { demosaicLibRawAahdTiledValidated } from "./lib/aahd-tiled-validation";
+import type { SensorImageInfo } from "./lib/sensor-image";
 import { WebGpuColorRenderer } from "./lib/webgpu-color";
 
 const CFA_PHASES = [
@@ -79,20 +77,17 @@ async function compareFixture(
     undefined,
     fullFrame,
   );
-  const tiled = await demosaicLibRawAahdTiledWithWgsl(mosaic, info, fullFrame);
+  const tiled = await demosaicLibRawAahdTiledValidated(mosaic, info, fullFrame);
   let gradedValidation;
   if (validateDirectColor) {
     const renderer = await WebGpuColorRenderer.create(createIdentityLut());
     try {
       const uploaded = await renderer.renderStrip(fullFrame, 0);
       gradedValidation = (
-        await demosaicLibRawAahdTiledWithWgsl(
-          mosaic,
-          info,
-          uploaded.pixels,
-          undefined,
-          { renderer, ev: 0 },
-        )
+        await demosaicLibRawAahdTiledValidated(mosaic, info, uploaded.pixels, {
+          renderer,
+          ev: 0,
+        })
       ).validation;
     } finally {
       renderer.destroy();

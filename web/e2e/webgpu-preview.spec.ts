@@ -8,15 +8,11 @@ const fixture = resolve(
 
 type PreviewTiming = {
   lutId: string;
-  previewBackend: "cpu" | "webgpu";
+  previewBackend: "webgpu";
   gpuExecutionAndReadbackMs: number;
-  gpuValidation: {
-    sampleCount: number;
-    maximumDifference: number;
-  };
 };
 
-test("renders full-detail interaction and aligns every built-in LUT on WebGPU", async ({
+test("renders full-detail interaction with every built-in LUT on WebGPU", async ({
   page,
 }, testInfo) => {
   test.skip(!enabled, "Set WEBGPU_PREVIEW=1 to run the hardware preview test.");
@@ -38,7 +34,7 @@ test("renders full-detail interaction and aligns every built-in LUT on WebGPU", 
     };
   });
 
-  await page.goto("/?previewBackend=webgpu&validatePreviewGpu=1");
+  await page.goto("/");
   const adapter = await page.evaluate(async () => {
     const adapter = await navigator.gpu?.requestAdapter({
       powerPreference: "high-performance",
@@ -87,8 +83,6 @@ test("renders full-detail interaction and aligns every built-in LUT on WebGPU", 
   });
   if (!timing) throw new Error("No WebGPU Preview timing was recorded.");
   expect(timing.previewBackend).toBe("webgpu");
-  expect(timing.gpuValidation.sampleCount).toBeGreaterThan(0);
-  expect(timing.gpuValidation.maximumDifference).toBeLessThanOrEqual(1);
   expect(timing.gpuExecutionAndReadbackMs).toBeLessThan(50);
   const validations = [timing];
   const luts = await page.evaluate(async () => {
@@ -109,11 +103,6 @@ test("renders full-detail interaction and aligns every built-in LUT on WebGPU", 
     const lutTiming = await latestTiming(page, lut.id);
     if (!lutTiming)
       throw new Error(`No Preview timing was recorded for ${lut.id}.`);
-    expect(lutTiming.gpuValidation.sampleCount).toBeGreaterThan(0);
-    expect(
-      lutTiming.gpuValidation.maximumDifference,
-      lut.id,
-    ).toBeLessThanOrEqual(1);
     validations.push(lutTiming);
   }
   await testInfo.attach("webgpu-preview-timing.json", {

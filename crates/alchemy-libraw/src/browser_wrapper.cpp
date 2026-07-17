@@ -742,6 +742,33 @@ public:
     return result;
   }
 
+  bool supports_webgpu_aahd() {
+    require_opened();
+    const int status = ensure_unpacked();
+    if (status != LIBRAW_SUCCESS) {
+      release_decoder_state();
+      fail("unpack the sensor mosaic", status);
+    }
+
+    const auto &sizes = processor_.imgdata.sizes;
+    const auto &identity = processor_.imgdata.idata;
+    if (processor_.imgdata.rawdata.raw_image == nullptr ||
+        identity.filters <= 1000 || sizes.flip != 0 || sizes.width == 0 ||
+        sizes.height == 0 || sizes.width % 2 != 0 || sizes.height % 2 != 0) {
+      return false;
+    }
+    try {
+      adjusted_black_levels();
+    } catch (const std::runtime_error &error) {
+      if (std::string(error.what()) ==
+          "Spatially varying RAW black levels are not supported") {
+        return false;
+      }
+      throw;
+    }
+    return true;
+  }
+
   val sensor_info() {
     require_opened();
     if (sensor_.empty()) {
@@ -1312,6 +1339,7 @@ EMSCRIPTEN_BINDINGS(raw_alchemy_libraw) {
       .function("metadata", &BrowserLibRaw::metadata)
       .function("thumbnailData", &BrowserLibRaw::thumbnail_data)
       .function("imageInfo", &BrowserLibRaw::image_info)
+      .function("supportsWebGpuAahd", &BrowserLibRaw::supports_webgpu_aahd)
       .function("timings", &BrowserLibRaw::timings)
       .function("imageView", &BrowserLibRaw::image_view)
       .function("sensorInfo", &BrowserLibRaw::sensor_info)
