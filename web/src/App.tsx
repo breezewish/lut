@@ -1,4 +1,7 @@
 import {
+  Circle,
+  CircleAlert,
+  CircleCheck,
   CircleStop,
   FileImage,
   FolderOpen,
@@ -95,6 +98,21 @@ interface DisplayedPreview {
 
 function isDecodeFailure(item: QueueItem): boolean {
   return item.status === "decode-error";
+}
+
+function StatusIcon({ status }: { status: QueueItem["status"] }) {
+  switch (status) {
+    case "decoding":
+    case "exporting":
+      return <LoaderCircle size={13} aria-hidden="true" />;
+    case "done":
+      return <CircleCheck size={13} aria-hidden="true" />;
+    case "decode-error":
+    case "export-error":
+      return <CircleAlert size={13} aria-hidden="true" />;
+    default:
+      return <Circle size={13} aria-hidden="true" />;
+  }
 }
 
 function hasUsablePreview(item: QueueItem): boolean {
@@ -841,35 +859,17 @@ export default function App() {
     }
   };
 
-  const statusText =
-    items.length === 0
-      ? "No files"
-      : `${items.length} local file${items.length === 1 ? "" : "s"}`;
-
   return (
-    <div className="app-shell">
-      <header className="topbar">
+    <div className="shell">
+      <header className="titlebar">
         <div className="brand">
-          <div className="brand-mark" aria-hidden="true">
-            RA
-          </div>
-          <h1>RAW Alchemy</h1>
+          <div className="brand-mark" aria-hidden="true" />
+          <h1 className="brand-name">RAW Alchemy</h1>
         </div>
-        <div
-          className="document-context"
-          aria-label="Current document"
-          aria-live="polite"
-        >
-          <strong>{selected?.file.name ?? "Local color workspace"}</strong>
-          <span>
-            {selected
-              ? selected.dimensions || STATUS_LABELS[selected.status]
-              : "No file open"}
-          </span>
-        </div>
-        <div className="topbar-actions">
-          <div className="privacy-note">
-            <LockKeyhole size={15} aria-hidden="true" />
+        <div className="titlebar-spacer" />
+        <div className="titlebar-end">
+          <div className="privacy-badge">
+            <LockKeyhole size={12} aria-hidden="true" />
             <span>Files stay on this device</span>
           </div>
           <Button
@@ -879,9 +879,9 @@ export default function App() {
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
           >
             {theme === "dark" ? (
-              <Sun size={17} aria-hidden="true" />
+              <Sun size={15} aria-hidden="true" />
             ) : (
-              <Moon size={17} aria-hidden="true" />
+              <Moon size={15} aria-hidden="true" />
             )}
           </Button>
           <Button
@@ -890,7 +890,7 @@ export default function App() {
             disabled={exporting}
             onClick={() => fileInput.current?.click()}
           >
-            <Plus size={17} aria-hidden="true" />
+            <Plus size={15} aria-hidden="true" />
             <span className="add-raw-label">Add RAWs</span>
           </Button>
           {items.length > 1 && (
@@ -900,95 +900,95 @@ export default function App() {
                 exportableItems.length === 0 || exporting || !canStartExport
               }
             >
-              <ImageDown size={17} aria-hidden="true" />
+              <ImageDown size={15} aria-hidden="true" />
               {exporting ? "Exporting…" : "Export all"}
             </Button>
           )}
         </div>
       </header>
 
-      <div className="app-grid">
+      <div className="workbench">
         <aside
-          className="queue-panel"
+          className="rail"
           aria-label="RAW queue"
           onDragOver={(event) => event.preventDefault()}
           onDrop={onDrop}
         >
-          <div className="queue-heading">
-            <div className="queue-heading-copy">
-              <div className="queue-title-row">
-                <h2>Queue</h2>
-                <span>{statusText}</span>
-              </div>
-              <p>Local files in this session</p>
-            </div>
-            {items.length > 0 && (
-              <Button
-                size="icon"
-                variant="quiet"
-                aria-label="Clear queue"
-                disabled={exporting}
-                onClick={clearQueue}
-              >
-                <Trash2 size={17} />
-              </Button>
-            )}
-          </div>
-
           {items.length === 0 ? (
-            <button
-              type="button"
-              className="drop-zone"
-              onClick={() => fileInput.current?.click()}
-            >
-              <FolderOpen size={24} aria-hidden="true" />
-              <strong>Add camera RAWs</strong>
-              <span>Drop files here or choose from this device.</span>
-            </button>
+            <>
+              <span className="visually-hidden" aria-live="polite">
+                No files
+              </span>
+              <button
+                type="button"
+                className="rail-empty"
+                onClick={() => fileInput.current?.click()}
+              >
+                <FolderOpen size={20} aria-hidden="true" />
+                <strong>Add RAWs</strong>
+                <span>Drop files or choose from device</span>
+              </button>
+            </>
           ) : (
-            <div className="queue-list">
-              {items.map((item) => (
-                <div
-                  key={item.id}
-                  className={`queue-item ${item.id === selectedId ? "is-selected" : ""}`}
+            <>
+              <div className="rail-header">
+                <span>
+                  {items.length === 1
+                    ? "1 local file"
+                    : `${items.length} local files`}
+                </span>
+                <Button
+                  size="icon"
+                  variant="quiet"
+                  aria-label="Clear queue"
+                  disabled={exporting}
+                  onClick={clearQueue}
                 >
-                  <button
-                    className="queue-select"
-                    aria-current={item.id === selectedId ? "true" : undefined}
-                    disabled={exporting}
-                    onClick={() => setSelectedId(item.id)}
+                  <Trash2 size={13} />
+                </Button>
+              </div>
+              <div className="rail-list">
+                {items.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`rail-item status-${item.status} ${item.id === selectedId ? "is-selected" : ""}`}
                   >
-                    <FileImage size={18} aria-hidden="true" />
-                    <span className="queue-copy">
-                      <strong>{item.file.name}</strong>
-                      <span>
-                        {item.status === "decode-error"
-                          ? "Could not decode"
-                          : item.status === "export-error"
-                            ? "Export failed · retry available"
-                            : item.camera ||
-                              `${(item.file.size / 1_048_576).toFixed(1)} MB`}
+                    <button
+                      className="rail-item-select"
+                      aria-current={item.id === selectedId ? "true" : undefined}
+                      disabled={exporting}
+                      onClick={() => setSelectedId(item.id)}
+                    >
+                      <span className="rail-item-status" aria-hidden="true">
+                        <StatusIcon status={item.status} />
                       </span>
-                    </span>
-                    <span className="queue-status">
-                      <span
-                        className={`status-dot status-${item.status}`}
-                        aria-hidden="true"
-                      />
-                      {STATUS_LABELS[item.status]}
-                    </span>
-                  </button>
-                  <button
-                    className="remove-file"
-                    aria-label={`Remove ${item.file.name}`}
-                    disabled={exporting}
-                    onClick={() => removeItem(item.id)}
-                  >
-                    <X size={15} />
-                  </button>
-                </div>
-              ))}
-            </div>
+                      <span className="rail-item-copy">
+                        <span className="rail-item-name">{item.file.name}</span>
+                        <span className="rail-item-meta">
+                          {item.status === "decode-error"
+                            ? "Could not decode"
+                            : item.status === "export-error"
+                              ? "Export failed · retry available"
+                              : item.camera ||
+                                `${(item.file.size / 1_048_576).toFixed(1)} MB`}
+                        </span>
+                      </span>
+                      <span className="visually-hidden">
+                        {STATUS_LABELS[item.status]}
+                      </span>
+                    </button>
+                    <button
+                      className="rail-item-remove"
+                      aria-label={`Remove ${item.file.name}`}
+                      disabled={exporting}
+                      onClick={() => removeItem(item.id)}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
           <input
             ref={fileInput}
@@ -1002,10 +1002,10 @@ export default function App() {
           />
         </aside>
 
-        <main className="workspace">
-          <div className="notification-stack">
+        <main className="stage">
+          <div className="notices">
             {manifestError && (
-              <div className="error-banner" role="alert">
+              <div className="notice notice-error" role="alert">
                 <span>{manifestError}</span>
                 <Button variant="secondary" onClick={() => location.reload()}>
                   Reload
@@ -1013,9 +1013,9 @@ export default function App() {
               </div>
             )}
             {globalError && (
-              <div className="error-banner" role="alert">
+              <div className="notice notice-error" role="alert">
                 <span>{globalError}</span>
-                <div className="banner-actions">
+                <div className="notice-actions">
                   {selected && isDecodeFailure(selected) && (
                     <>
                       <Button
@@ -1044,9 +1044,9 @@ export default function App() {
               </div>
             )}
             {queueUndo && (
-              <div className="undo-banner" role="status">
+              <div className="notice notice-undo" role="status">
                 <span>{queueUndo.message}</span>
-                <div className="banner-actions">
+                <div className="notice-actions">
                   <Button variant="secondary" onClick={restoreQueue}>
                     Undo
                   </Button>
@@ -1063,191 +1063,290 @@ export default function App() {
             )}
           </div>
 
-          <div className={`workspace-layout ${selected ? "" : "is-empty"}`}>
+          <div className={`editor ${selected ? "" : "is-empty"}`}>
             {selected && selectedLut && (
-              <section
-                className="control-panel"
-                aria-label="Processing controls"
-              >
-                <div className="panel-heading">
-                  <div className="panel-heading-copy">
-                    <h2>Adjustments</h2>
-                  </div>
-                  <div className="panel-heading-actions">
-                    {isPreviewProcessing && (
-                      <span
-                        className="processing-indicator"
-                        role="status"
-                        aria-label="Preview processing"
+              <section className="inspector" aria-label="Processing controls">
+                <div className="inspector-section">
+                  <div className="section-heading">
+                    <span className="section-title">Adjustments</span>
+                    <div className="section-actions">
+                      {isPreviewProcessing && (
+                        <span
+                          className="badge-processing"
+                          role="status"
+                          aria-label="Preview processing"
+                        >
+                          <LoaderCircle size={13} aria-hidden="true" />
+                          Processing
+                        </span>
+                      )}
+                      <Button
+                        size="icon"
+                        variant="quiet"
+                        aria-label="Reset exposure"
+                        onClick={() => setExposure(0)}
+                        disabled={exporting || ev === 0}
                       >
-                        <LoaderCircle
-                          className="processing-spinner"
-                          size={14}
-                          aria-hidden="true"
-                        />
-                        Processing
-                      </span>
-                    )}
-                    <Button
-                      size="icon"
-                      variant="quiet"
-                      aria-label="Reset exposure"
-                      onClick={() => setExposure(0)}
-                      disabled={exporting || ev === 0}
-                    >
-                      <RotateCcw size={15} aria-hidden="true" />
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="control-section">
-                  <label>Look</label>
-                  <div className="look-picker">
-                    <div className="look-current">
-                      <strong>{selectedLut.name}</strong>
-                      <span>{selectedLut.group} · built-in transform</span>
+                        <RotateCcw size={15} aria-hidden="true" />
+                      </Button>
                     </div>
-                    {workingLuts.length > 1 && (
-                      <div
-                        className="look-working-set"
-                        aria-label="Recent looks"
-                      >
-                        {workingLuts.map((lut) => (
-                          <button
-                            key={lut.id}
-                            type="button"
-                            className={lut.id === lutId ? "is-active" : ""}
-                            aria-pressed={lut.id === lutId}
-                            disabled={exporting}
-                            onClick={() => chooseLut(lut.id)}
-                          >
-                            {lut.name}
-                          </button>
-                        ))}
+                  </div>
+
+                  <div className="field">
+                    <span className="field-label">Look</span>
+                    <div className="look">
+                      <div className="look-current">
+                        <span className="look-current-name">
+                          {selectedLut.name}
+                        </span>
+                        <span className="look-current-meta">
+                          {selectedLut.group} · built-in transform
+                        </span>
                       </div>
-                    )}
-                    <Button
-                      size="compact"
-                      variant="secondary"
-                      aria-expanded={lookBrowserOpen}
-                      onClick={() => setLookBrowserOpen((open) => !open)}
-                      disabled={exporting}
-                    >
-                      <Search size={14} aria-hidden="true" />
-                      {lookBrowserOpen
-                        ? "Close look browser"
-                        : `Browse all ${manifest?.luts.length ?? 27} looks`}
-                    </Button>
-                    {lookBrowserOpen && (
-                      <div className="look-browser">
-                        <div className="search-control">
-                          <Search size={14} aria-hidden="true" />
-                          <input
-                            id="look-search"
-                            type="search"
-                            aria-label="Look"
-                            value={lookQuery}
+                      {workingLuts.length > 1 && (
+                        <div className="look-recents" aria-label="Recent looks">
+                          {workingLuts.map((lut) => (
+                            <button
+                              key={lut.id}
+                              type="button"
+                              className={lut.id === lutId ? "is-active" : ""}
+                              aria-pressed={lut.id === lutId}
+                              disabled={exporting}
+                              onClick={() => chooseLut(lut.id)}
+                            >
+                              {lut.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <Button
+                        size="compact"
+                        variant="secondary"
+                        aria-expanded={lookBrowserOpen}
+                        onClick={() => setLookBrowserOpen((open) => !open)}
+                        disabled={exporting}
+                      >
+                        <Search size={14} aria-hidden="true" />
+                        {lookBrowserOpen
+                          ? "Close look browser"
+                          : `Browse all ${manifest?.luts.length ?? 27} looks`}
+                      </Button>
+                      {lookBrowserOpen && (
+                        <div className="look-panel">
+                          <div className="search">
+                            <Search size={14} aria-hidden="true" />
+                            <input
+                              id="look-search"
+                              type="search"
+                              aria-label="Look"
+                              value={lookQuery}
+                              disabled={exporting}
+                              placeholder="Search by name or camera family"
+                              onChange={(event) =>
+                                setLookQuery(event.target.value)
+                              }
+                            />
+                          </div>
+                          <Select
+                            label="Built-in V-Log look"
+                            value={lutId}
+                            onValueChange={chooseLut}
+                            options={selectOptions}
                             disabled={exporting}
-                            placeholder="Search by name or camera family"
-                            onChange={(event) =>
-                              setLookQuery(event.target.value)
-                            }
                           />
                         </div>
-                        <Select
-                          label="Built-in V-Log look"
-                          value={lutId}
-                          onValueChange={chooseLut}
-                          options={selectOptions}
+                      )}
+                      <details className="help">
+                        <summary>How built-in looks work</summary>
+                        <p>
+                          RAW Alchemy converts camera color to V-Gamut and
+                          V-Log, then applies the selected display transform.
+                          Compare the result before export because each look
+                          responds differently to exposure and color.
+                        </p>
+                      </details>
+                    </div>
+                  </div>
+
+                  <div className="field exposure">
+                    <div className="field-row">
+                      <label htmlFor="exposure">Exposure</label>
+                      <label className="exposure-value">
+                        <input
+                          ref={exposureInput}
+                          aria-label="Exposure value"
+                          type="number"
+                          min="-4"
+                          max="4"
+                          step="0.1"
+                          defaultValue={ev}
                           disabled={exporting}
+                          onChange={(event) => {
+                            const value = event.currentTarget.valueAsNumber;
+                            if (Number.isFinite(value)) {
+                              setExposure(value);
+                            }
+                          }}
+                          onBlur={(event) => {
+                            event.currentTarget.value = String(ev);
+                          }}
                         />
-                      </div>
-                    )}
-                    <details className="control-help">
-                      <summary>How built-in looks work</summary>
-                      <p>
-                        RAW Alchemy converts camera color to V-Gamut and V-Log,
-                        then applies the selected display transform. Compare the
-                        result before export because each look responds
-                        differently to exposure and color.
-                      </p>
-                    </details>
+                        <span>EV</span>
+                      </label>
+                    </div>
+                    <input
+                      ref={exposureRange}
+                      id="exposure"
+                      type="range"
+                      min="-4"
+                      max="4"
+                      step="0.1"
+                      defaultValue={ev}
+                      aria-valuetext={`${ev} EV`}
+                      disabled={exporting}
+                      style={
+                        {
+                          "--range-progress": `${((ev + 4) / 8) * 100}%`,
+                        } as CSSProperties
+                      }
+                      onInput={(event) =>
+                        scheduleExposurePreview(event.currentTarget)
+                      }
+                      onChange={(event) =>
+                        scheduleExposurePreview(event.currentTarget)
+                      }
+                    />
+                    <div className="exposure-ticks" aria-hidden="true">
+                      {Array.from({ length: 9 }, (_, index) => (
+                        <span key={index} />
+                      ))}
+                    </div>
+                    <div className="exposure-scale" aria-hidden="true">
+                      <span>−4</span>
+                      <span>0</span>
+                      <span>+4</span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="control-section exposure-control">
-                  <div className="control-label-row">
-                    <label htmlFor="exposure">Exposure</label>
-                    <label className="ev-value">
-                      <input
-                        ref={exposureInput}
-                        aria-label="Exposure value"
-                        type="number"
-                        min="-4"
-                        max="4"
-                        step="0.1"
-                        defaultValue={ev}
-                        disabled={exporting}
-                        onChange={(event) => {
-                          const value = event.currentTarget.valueAsNumber;
-                          if (Number.isFinite(value)) {
-                            setExposure(value);
-                          }
-                        }}
-                        onBlur={(event) => {
-                          event.currentTarget.value = String(ev);
-                        }}
-                      />
-                      <span>EV</span>
-                    </label>
+                <div className="inspector-section" aria-label="Export controls">
+                  <div className="section-heading">
+                    <div>
+                      <span className="section-title">Output</span>
+                      <p className="section-subtitle">
+                        16-bit uncompressed TIFF
+                      </p>
+                    </div>
                   </div>
-                  <input
-                    ref={exposureRange}
-                    id="exposure"
-                    type="range"
-                    min="-4"
-                    max="4"
-                    step="0.1"
-                    defaultValue={ev}
-                    aria-valuetext={`${ev} EV`}
-                    disabled={exporting}
-                    style={
-                      {
-                        "--range-progress": `${((ev + 4) / 8) * 100}%`,
-                      } as CSSProperties
-                    }
-                    onInput={(event) =>
-                      scheduleExposurePreview(event.currentTarget)
-                    }
-                    onChange={(event) =>
-                      scheduleExposurePreview(event.currentTarget)
-                    }
-                  />
-                  <div className="range-scale" aria-hidden="true">
-                    <span>−4</span>
-                    <span>0</span>
-                    <span>+4</span>
+                  <dl className="details">
+                    <div>
+                      <dt>Camera</dt>
+                      <dd>{selected.camera || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Size</dt>
+                      <dd>{selected.dimensions || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Look</dt>
+                      <dd>{selectedLut.name}</dd>
+                    </div>
+                  </dl>
+                  <details className="assumption">
+                    <summary>
+                      Verify color space in your destination editor
+                    </summary>
+                    <p>
+                      This look does not declare an output color space, so
+                      another editor may interpret the TIFF differently. Check
+                      the result in your destination editor before production
+                      use.
+                    </p>
+                    <p>
+                      <strong>Why?</strong> The browser preview displays the LUT
+                      values as sRGB. The exported TIFF intentionally has no
+                      embedded profile rather than claiming one the source LUT
+                      does not provide.
+                    </p>
+                  </details>
+                  <div className="export-status" aria-live="polite">
+                    {selected.status === "export-error" ? (
+                      <span className="export-error-text" role="alert">
+                        {selected.error}
+                      </span>
+                    ) : exportProgress ? (
+                      <strong>
+                        Exporting {exportProgress.current} of{" "}
+                        {exportProgress.total}
+                        <span> · {exportProgress.fileName}</span>
+                      </strong>
+                    ) : exportSummary ? (
+                      <span>{exportSummary}</span>
+                    ) : (
+                      <span>Full-resolution processing starts on export.</span>
+                    )}
                   </div>
+                  {exporting && exportProgress && exportProgress.total > 1 ? (
+                    <Button
+                      variant="quiet"
+                      disabled={exportProgress.stopRequested}
+                      onClick={() => {
+                        stopAfterCurrent.current = true;
+                        setExportProgress((current) =>
+                          current
+                            ? { ...current, stopRequested: true }
+                            : current,
+                        );
+                      }}
+                    >
+                      <CircleStop size={16} aria-hidden="true" />
+                      {exportProgress.stopRequested
+                        ? "Stopping after current…"
+                        : "Stop after current"}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant={items.length > 1 ? "secondary" : "primary"}
+                      onClick={() => void exportItems([selected])}
+                      disabled={
+                        isDecodeFailure(selected) ||
+                        exporting ||
+                        !canStartExport
+                      }
+                    >
+                      <ImageDown size={16} aria-hidden="true" /> Export selected
+                    </Button>
+                  )}
                 </div>
               </section>
             )}
 
             <section
-              className="comparison"
+              className="canvas"
               aria-label="Base and LUT comparison"
               aria-busy={selected ? isPreviewProcessing : undefined}
               data-decode-count={preview?.decodeCount}
             >
-              <div className="canvas-toolbar">
-                <div className="canvas-title">
-                  <strong>{selected ? "Compare" : "Workspace"}</strong>
-                  <span>{selectedLut?.name ?? "Local RAW processing"}</span>
+              <div className="canvas-bar">
+                <div className="canvas-meta" aria-live="polite">
+                  {selected ? (
+                    <>
+                      <span className="canvas-name">{selected.file.name}</span>
+                      {selected.dimensions && (
+                        <span className="canvas-dims">
+                          {selected.dimensions}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="canvas-label">Local RAW processing</span>
+                  )}
                 </div>
-                <div className="canvas-actions">
+                <div className="canvas-controls">
                   {selected && (
                     <>
                       <div
-                        className="mobile-preview-switch"
+                        className="canvas-switch mobile-only"
                         aria-label="Mobile comparison view"
                       >
                         <button
@@ -1265,10 +1364,7 @@ export default function App() {
                           Look
                         </button>
                       </div>
-                      <div
-                        className="preview-view-switch"
-                        aria-label="Preview zoom"
-                      >
+                      <div className="canvas-switch" aria-label="Preview zoom">
                         <button
                           type="button"
                           aria-pressed={previewView === "fit"}
@@ -1279,11 +1375,12 @@ export default function App() {
                         </button>
                         <button
                           type="button"
+                          aria-label="Preview 1:1"
                           aria-pressed={previewView === "actual"}
-                          title="Show preview pixels at 1:1 (1)"
+                          title="1:1 pixels (1)"
                           onClick={() => setPreviewView("actual")}
                         >
-                          Preview 1:1
+                          1:1
                         </button>
                       </div>
                       <span className="canvas-status">
@@ -1296,14 +1393,14 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="canvas-stage">
+              <div className="canvas-viewport">
                 {!selected ? (
-                  <div className="workspace-empty">
-                    <div className="empty-icon">
+                  <div className="state">
+                    <div className="state-icon">
                       <FileImage size={28} />
                     </div>
-                    <h2>Start with a camera RAW</h2>
-                    <p>
+                    <h2 className="state-title">Start with a camera RAW</h2>
+                    <p className="state-copy">
                       Compare a neutral rendering with a curated look, then
                       export a 16-bit TIFF. Everything stays in this browser.
                     </p>
@@ -1311,40 +1408,44 @@ export default function App() {
                       <FolderOpen size={17} aria-hidden="true" /> Choose RAW
                       files
                     </Button>
-                    <span className="empty-detail">
+                    <span className="state-detail">
                       Multiple files supported · sequential local export
                     </span>
                   </div>
                 ) : !selectedLut ? (
-                  <div className="processing-error-state" role="status">
-                    <FileImage size={28} aria-hidden="true" />
-                    <h2>
+                  <div className="state" role="status">
+                    <div className="state-icon">
+                      <FileImage size={28} aria-hidden="true" />
+                    </div>
+                    <h2 className="state-title">
                       {manifestError
                         ? "Built-in looks unavailable"
                         : "Loading looks…"}
                     </h2>
-                    <p>
+                    <p className="state-copy">
                       {manifestError
                         ? "Reload after the application assets are available. This RAW has not been decoded."
                         : "The selected RAW will be decoded when its processing assets are ready."}
                     </p>
                   </div>
                 ) : isDecodeFailure(selected) ? (
-                  <div className="processing-error-state">
-                    <FileImage size={28} aria-hidden="true" />
-                    <h2>Preview unavailable</h2>
-                    <p>
+                  <div className="state">
+                    <div className="state-icon">
+                      <FileImage size={28} aria-hidden="true" />
+                    </div>
+                    <h2 className="state-title">Preview unavailable</h2>
+                    <p className="state-copy">
                       Remove this file or choose another RAW to continue. Other
                       ready files can still be exported.
                     </p>
                   </div>
                 ) : !preview && cameraPreview?.fileId === selected.id ? (
-                  <figure className="camera-preview">
+                  <figure className="camera-frame">
                     <figcaption>
                       <strong>Camera preview</strong>
                       <span>Embedded JPEG · color not processed</span>
                     </figcaption>
-                    <div className="camera-preview-image">
+                    <div className="camera-frame-image">
                       <img
                         src={cameraPreview.url}
                         alt="Embedded camera preview"
@@ -1354,7 +1455,7 @@ export default function App() {
                 ) : (
                   <div
                     ref={previewGrid}
-                    className={`preview-grid mobile-show-${mobilePreview} ${selected.status === "decoding" ? "is-loading" : ""}`}
+                    className={`panes mobile-show-${mobilePreview} ${selected.status === "decoding" ? "is-loading" : ""}`}
                   >
                     <PreviewCanvas
                       label="Base"
@@ -1379,7 +1480,7 @@ export default function App() {
                       onFocusChange={updatePreviewFocus}
                     />
                     {selected.status === "decoding" && (
-                      <div className="loading-label" role="status">
+                      <div className="pane-loading" role="status">
                         Decoding preview…
                       </div>
                     )}
@@ -1387,98 +1488,7 @@ export default function App() {
                 )}
               </div>
             </section>
-
-            {selected && selectedLut && (
-              <section className="output-panel" aria-label="Export controls">
-                <div className="panel-heading">
-                  <div className="panel-heading-copy">
-                    <h2>Output</h2>
-                    <p>16-bit uncompressed TIFF</p>
-                  </div>
-                </div>
-                <dl className="file-details">
-                  <div>
-                    <dt>Camera</dt>
-                    <dd>{selected.camera || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Size</dt>
-                    <dd>{selected.dimensions || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Look</dt>
-                    <dd>{selectedLut.name}</dd>
-                  </div>
-                </dl>
-                <details className="lut-assumption">
-                  <summary>
-                    Verify color space in your destination editor
-                  </summary>
-                  <p>
-                    This look does not declare an output color space, so another
-                    editor may interpret the TIFF differently. Check the result
-                    in your destination editor before production use.
-                  </p>
-                  <p>
-                    <strong>Why?</strong> The browser preview displays the LUT
-                    values as sRGB. The exported TIFF intentionally has no
-                    embedded profile rather than claiming one the source LUT
-                    does not provide.
-                  </p>
-                </details>
-                <div className="export-feedback" aria-live="polite">
-                  {selected.status === "export-error" ? (
-                    <span className="selected-error" role="alert">
-                      {selected.error}
-                    </span>
-                  ) : exportProgress ? (
-                    <strong>
-                      Exporting {exportProgress.current} of{" "}
-                      {exportProgress.total}
-                      <span> · {exportProgress.fileName}</span>
-                    </strong>
-                  ) : exportSummary ? (
-                    <span>{exportSummary}</span>
-                  ) : (
-                    <span>Full-resolution processing starts on export.</span>
-                  )}
-                </div>
-                {exporting && exportProgress && exportProgress.total > 1 ? (
-                  <Button
-                    variant="quiet"
-                    disabled={exportProgress.stopRequested}
-                    onClick={() => {
-                      stopAfterCurrent.current = true;
-                      setExportProgress((current) =>
-                        current ? { ...current, stopRequested: true } : current,
-                      );
-                    }}
-                  >
-                    <CircleStop size={16} aria-hidden="true" />
-                    {exportProgress.stopRequested
-                      ? "Stopping after current…"
-                      : "Stop after current"}
-                  </Button>
-                ) : (
-                  <Button
-                    variant={items.length > 1 ? "secondary" : "primary"}
-                    onClick={() => void exportItems([selected])}
-                    disabled={
-                      isDecodeFailure(selected) || exporting || !canStartExport
-                    }
-                  >
-                    <ImageDown size={16} aria-hidden="true" /> Export selected
-                  </Button>
-                )}
-              </section>
-            )}
           </div>
-
-          <footer className="workspace-footer">
-            <span>Camera white balance + color matrix</span>
-            <span>Automatic boost off</span>
-            <span>Lens correction off</span>
-          </footer>
         </main>
       </div>
     </div>

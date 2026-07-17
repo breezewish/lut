@@ -154,6 +154,10 @@ Git:
 - Any built or generated artifacts should not be committed to git
 - Deployer states, local dev VM info, or any other environment-specific info should not be committed to git, git is public and shared by all
 
+CI:
+
+- Track CI status and fix CI failures immediately after push to remote.
+
 ## Tests
 
 All features and journeys listed in `docs/spec.md` _must_ be covered by e2e tests, while other specs

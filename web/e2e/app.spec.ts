@@ -246,7 +246,7 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
   ).toHaveAttribute("aria-current", "true");
   await expect(
     page.getByRole("button", { name: "Export selected" }),
-  ).toHaveClass(/button-primary/);
+  ).toHaveAttribute("data-variant", "primary");
   const baseBeforeExposure = await page
     .getByLabel("Base preview")
     .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
@@ -411,12 +411,12 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 20_000,
   });
-  await expect(page.getByRole("button", { name: "Export all" })).toHaveClass(
-    /button-primary/,
-  );
+  await expect(
+    page.getByRole("button", { name: "Export all" }),
+  ).toHaveAttribute("data-variant", "primary");
   await expect(
     page.getByRole("button", { name: "Export selected" }),
-  ).toHaveClass(/button-secondary/);
+  ).toHaveAttribute("data-variant", "secondary");
 
   await page.getByRole("button", { name: /Browse all/ }).click();
 
@@ -912,7 +912,7 @@ test("supports focused look discovery, synchronized preview inspection, and a co
   ).toBe(keyboardFocused);
   await page.getByRole("button", { name: "Fit", exact: true }).click();
   await expect(basePreview.locator("..")).toHaveClass(/is-fit/);
-  await page.locator(".canvas-title").click();
+  await basePreview.click();
   await page.keyboard.press("1");
   await expect(basePreview.locator("..")).toHaveClass(/is-actual/);
   await page.keyboard.press("f");
@@ -955,7 +955,7 @@ test("supports focused look discovery, synchronized preview inspection, and a co
   );
   expect(
     await page
-      .locator(".panel-heading")
+      .locator(".section-heading")
       .evaluateAll((headings) =>
         headings.every((heading) => heading.scrollWidth <= heading.clientWidth),
       ),
