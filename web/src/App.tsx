@@ -1288,7 +1288,9 @@ export default function App() {
                       variant={items.length > 1 ? "secondary" : "primary"}
                       onClick={() => void exportItems([selected])}
                       disabled={
-                        isDecodeFailure(selected) || exporting || !canStartExport
+                        isDecodeFailure(selected) ||
+                        exporting ||
+                        !canStartExport
                       }
                     >
                       <ImageDown size={16} aria-hidden="true" /> Export selected
@@ -1453,9 +1455,7 @@ export default function App() {
                 )}
               </div>
             </section>
-
           </div>
-
         </main>
       </div>
     </div>
