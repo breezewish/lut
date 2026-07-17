@@ -35,6 +35,7 @@ test("applies LibRaw defect corrections in row order", () => {
   expect(result.defects).toEqual(
     new Uint32Array([0, (1 << 10) | (1 << 12), 0, 0]),
   );
+  expect(result.extrema).toEqual(new Uint32Array([1, 0, 0, 100, 100, 100]));
   expect(mosaic[4 * width + 2]).toBe(0);
   expect(mosaic[4 * width + 4]).toBe(1);
 });
@@ -52,10 +53,17 @@ test("applies LibRaw isolated-direction refinement in row order", () => {
   directions[3 * width + 3] = 2;
   directions[2 * width + 4] = 2;
 
-  const refined = refineLibRawSerialDirections(directions, width, height);
+  const packed = new Uint32Array(Math.ceil(directions.length / 8));
+  const refined = refineLibRawSerialDirections(
+    directions,
+    width,
+    height,
+    packed,
+  );
 
   expect(refined[2 * width + 2]).toBe(2);
   expect(refined[2 * width + 3]).toBe(2);
-  expect(directions[2 * width + 2]).toBe(4);
-  expect(directions[2 * width + 3]).toBe(6);
+  expect(packed).toEqual(new Uint32Array([0, 0x22200022, 0x00220002, 0]));
+  expect(directions[2 * width + 2]).toBe(2);
+  expect(directions[2 * width + 3]).toBe(2);
 });

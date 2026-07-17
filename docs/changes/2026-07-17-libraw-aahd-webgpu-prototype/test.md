@@ -18,9 +18,9 @@
 - The immutable defect test uses adjacent defects whose classifications would
   cascade under in-place writes and verifies the corrected samples and packed
   defect mask against the original mosaic.
-- The isolated-direction test uses adjacent direction choices whose refinements
-  would cascade under in-place writes and verifies every result against one
-  immutable input plane.
+- The LibRaw isolated-direction test uses adjacent direction choices whose
+  refinements cascade, verifies the row-ordered in-place result, and checks the
+  packed four-bit plane emitted by the same scan.
 - Tiled output matches the corresponding accepted full-frame output exactly,
   while the full-frame output is independently checked against LibRaw or the
   explicitly approved candidate CPU reference.
@@ -51,7 +51,8 @@
 - The selected-AAHD and final-ProPhoto comparisons check all 78,024,960 RGB16 channel values on the Sony fixture.
 - The LibRaw-parity YUV comparison checks every signed 16-bit component before
   homogeneity selection, and the WGSL parity path stores each matrix operation
-  through `f32` storage to preserve LibRaw's statement-level rounding.
+  through `f32` storage within one dispatch to preserve LibRaw's
+  statement-level rounding.
 - The compact highlight test proves the scalar Blend transform against a known
   LibRaw pixel, then verifies all 49,408 collected Sony pixels and the complete
   78,024,960-channel highlight boundary exactly before ProPhoto conversion.

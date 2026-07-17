@@ -23,13 +23,17 @@ The exposure slider remains an uncontrolled native input while the pointer moves
 The preview-only Base transfer function uses a 65,536-entry 8-bit sRGB table initialized from the canonical transfer function. Exhaustive one-million-point testing bounds its output to one display code from direct evaluation. Export retains the exact floating-point processing path. Transferred RGBA8 results are reinterpreted directly as clamped Canvas views instead of copied into another complete preview allocation. Export receives a fresh transferable RAW buffer and performs a full decode only for that operation. A stateful Rust WASM encoder requests and copies only the next approximately 1 MB LibRaw view, so JavaScript never owns a complete decoded RGB16 image and the separate color WASM receives no second complete allocation.
 
 The query-gated WebGPU AAHD export is a separate experimental route. LibRaw
-only opens and unpacks the visible Bayer mosaic. A shared WebGPU device runs a
-1024-core, 12-halo two-sweep parity pipeline, then passes each selected core
-directly into corrected-v2 exposure and LUT processing. Two fixed output
-readbacks overlap bounded transfer with TIFF prediction and Deflate; a separate
-scratch readback supports the compact exact Blend-highlight transform. The
-default route and Preview remain unchanged, and unsupported inputs never fall
-back inside the experimental route.
+opens and unpacks the visible Bayer mosaic, then its C++ WASM wrapper performs
+the exact row-ordered scaling and defect scan. A shared WebGPU device runs a
+1024-core, 12-halo two-sweep parity pipeline. The first sweep reads directions
+back into one CPU plane for exact row-order refinement; that scan emits one
+packed four-bit direction plane consumed directly by every tile in the second
+sweep. Exact YUV rounding uses one dispatch with explicit storage round trips.
+Each selected core passes directly into corrected-v2 exposure and LUT
+processing. Two fixed output readbacks overlap bounded transfer with TIFF
+prediction and Deflate; a separate scratch readback supports the compact exact
+Blend-highlight transform. The default route and Preview remain unchanged,
+and unsupported inputs never fall back inside the experimental route.
 
 Successful preview and export replies carry monotonic diagnostic timings. The LibRaw wrapper records input copy, open, unpack, preprocessing, preview resizing, demosaic, postprocessing, RGB conversion, and RGB16 creation at the real processing seams. File selection, file reading, embedded JPEG publication, initial processed frames, Canvas drawing, TIFF encoding, and Blob construction publish named Performance marks for opt-in production-path benchmarks. These diagnostics do not change the selected algorithm or image data.
 

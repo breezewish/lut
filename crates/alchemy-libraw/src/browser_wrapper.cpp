@@ -603,6 +603,8 @@ public:
     }
     clear_image();
     sensor_.clear();
+    aahd_corrected_.clear();
+    aahd_defects_.clear();
     processor_.disable_aahd_capture();
     processor_.recycle();
     timings_ = {};
@@ -868,6 +870,149 @@ public:
     return val(typed_memory_view(length, sensor_.data() + offset));
   }
 
+  val aahd_preprocess_info() {
+    if (sensor_.empty()) {
+      throw std::runtime_error("LibRaw sensor_info() must be called first");
+    }
+    const auto &sizes = processor_.imgdata.sizes;
+    const auto &identity = processor_.imgdata.idata;
+    const auto &color = processor_.imgdata.rawdata.color;
+    if (identity.filters == 9 || identity.filters <= 1000) {
+      throw std::runtime_error("AAHD preprocessing requires a Bayer sensor");
+    }
+
+    const double started_at = emscripten_get_now();
+    const auto black = adjusted_black_levels();
+    std::array<float, 4> camera{};
+    for (unsigned channel = 0; channel < 4; ++channel) {
+      const unsigned fallback = channel == 3 ? 1 : channel;
+      camera[channel] = color.cam_mul[channel] > 0
+                            ? color.cam_mul[channel]
+                            : color.cam_mul[fallback];
+    }
+    const float camera_maximum =
+        *std::max_element(camera.begin(), camera.end());
+    const float sensor_range = color.maximum - black[0];
+    std::array<float, 4> scale{};
+    for (unsigned channel = 0; channel < 4; ++channel) {
+      const float pre = camera[channel] / camera_maximum;
+      scale[channel] = pre * 65535.0f / sensor_range;
+    }
+
+    constexpr unsigned margin = 4;
+    const unsigned width = sizes.width;
+    const unsigned height = sizes.height;
+    const unsigned stride = width + margin * 2;
+    std::vector<std::uint16_t> working(
+        static_cast<std::size_t>(stride) * (height + margin * 2));
+    aahd_extrema_.fill(0);
+    for (unsigned row = 0; row < height; ++row) {
+      const std::size_t source_row = static_cast<std::size_t>(row) * width;
+      const std::size_t working_row =
+          static_cast<std::size_t>(row + margin) * stride + margin;
+      for (unsigned col = 0; col < width; ++col) {
+        unsigned channel = processor_.COLOR(row, col);
+        if (channel == 3) channel = 1;
+        const float value = static_cast<float>(sensor_[source_row + col]) -
+                            static_cast<float>(black[channel]);
+        const float scaled = value * scale[channel];
+        const auto sample = static_cast<std::uint16_t>(
+            std::clamp(scaled, 0.0f, 65535.0f));
+        working[working_row + col] = sample;
+        if (row == 0 && col == 0) aahd_extrema_[channel] = sample;
+        if (sample != 0) {
+          aahd_extrema_[channel] =
+              std::min(aahd_extrema_[channel], unsigned(sample));
+          aahd_extrema_[channel + 3] =
+              std::max(aahd_extrema_[channel + 3], unsigned(sample));
+        }
+      }
+    }
+
+    aahd_defects_.assign((sensor_.size() + 31) / 32, 0);
+    const auto correct_parity = [&](unsigned row, unsigned start) {
+      const std::size_t row_offset =
+          static_cast<std::size_t>(row + margin) * stride + margin;
+      for (unsigned col = start; col < width; col += 2) {
+        const std::size_t offset = row_offset + col;
+        const int center = working[offset];
+        const int west2 = working[offset - 2];
+        const int east2 = working[offset + 2];
+        const int north2 = working[offset - 2 * stride];
+        const int south2 = working[offset + 2 * stride];
+        const int west = working[offset - 1];
+        const int east = working[offset + 1];
+        const int north = working[offset - stride];
+        const int south = working[offset + stride];
+        const bool hot = center > west2 && center > east2 &&
+                         center > north2 && center > south2 && center > west &&
+                         center > east && center > north && center > south;
+        const bool dead = center < west2 && center < east2 &&
+                          center < north2 && center < south2 && center < west &&
+                          center < east && center < north && center < south;
+        if (!hot && !dead) continue;
+
+        const int average =
+            (working[offset - 2 * stride - 2] + north2 +
+             working[offset - 2 * stride + 2] + west2 + east2 +
+             working[offset + 2 * stride - 2] + south2 +
+             working[offset + 2 * stride + 2]) /
+            8;
+        if ((center >> 4) <= average && (center << 4) >= average) continue;
+
+        const int horizontal = std::abs(west2 - east2) +
+                               std::abs(west - east) +
+                               std::abs(west - east + east2 - west2);
+        const int vertical = std::abs(north2 - south2) +
+                             std::abs(north - south) +
+                             std::abs(north - south + south2 - north2);
+        working[offset] = static_cast<std::uint16_t>(
+            vertical > horizontal ? (west2 + east2) / 2
+                                  : (north2 + south2) / 2);
+        const std::size_t index = static_cast<std::size_t>(row) * width + col;
+        aahd_defects_[index >> 5] |= 1u << (index & 31);
+      }
+    };
+
+    for (unsigned row = 0; row < height; ++row) {
+      unsigned first_channel = processor_.COLOR(row, 0);
+      if (first_channel == 3) first_channel = 1;
+      const unsigned non_green_start = first_channel & 1;
+      correct_parity(row, non_green_start);
+      correct_parity(row, non_green_start ^ 1);
+    }
+
+    aahd_corrected_.resize(sensor_.size());
+    for (unsigned row = 0; row < height; ++row) {
+      const auto *source = working.data() +
+                           static_cast<std::size_t>(row + margin) * stride +
+                           margin;
+      std::memcpy(aahd_corrected_.data() + static_cast<std::size_t>(row) * width,
+                  source, width * sizeof(std::uint16_t));
+    }
+    const double total_ms = emscripten_get_now() - started_at;
+
+    val extrema = val::array();
+    for (unsigned index = 0; index < aahd_extrema_.size(); ++index) {
+      extrema.set(index, aahd_extrema_[index]);
+    }
+    val result = val::object();
+    result.set("sampleCount", aahd_corrected_.size());
+    result.set("defectWordCount", aahd_defects_.size());
+    result.set("extrema", extrema);
+    result.set("totalMs", total_ms);
+    return result;
+  }
+
+  val aahd_corrected_view(std::size_t offset, std::size_t length) const {
+    return reference_view(aahd_corrected_, offset, length,
+                          "AAHD corrected mosaic");
+  }
+
+  val aahd_defect_view(std::size_t offset, std::size_t length) const {
+    return reference_view(aahd_defects_, offset, length, "AAHD defect mask");
+  }
+
   val timings() const {
     if (image_ == nullptr) {
       throw std::runtime_error("LibRaw image_info() must be called first");
@@ -1011,6 +1156,9 @@ private:
   TimedLibRaw processor_;
   std::vector<std::uint8_t> input_;
   std::vector<std::uint16_t> sensor_;
+  std::vector<std::uint16_t> aahd_corrected_;
+  std::vector<std::uint32_t> aahd_defects_;
+  std::array<unsigned, 6> aahd_extrema_{};
   libraw_processed_image_t *image_ = nullptr;
   bool opened_ = false;
   bool unpacked_ = false;
@@ -1180,6 +1328,9 @@ EMSCRIPTEN_BINDINGS(raw_alchemy_libraw) {
       .function("sensorInfo", &BrowserLibRaw::sensor_info)
       .function("sensorTimings", &BrowserLibRaw::sensor_timings)
       .function("sensorView", &BrowserLibRaw::sensor_view)
+      .function("aahdPreprocessInfo", &BrowserLibRaw::aahd_preprocess_info)
+      .function("aahdCorrectedView", &BrowserLibRaw::aahd_corrected_view)
+      .function("aahdDefectView", &BrowserLibRaw::aahd_defect_view)
       .function("aahdReferenceInfo", &BrowserLibRaw::aahd_reference_info)
       .function("aahdInputView", &BrowserLibRaw::aahd_input_view)
       .function("aahdHorizontalView", &BrowserLibRaw::aahd_horizontal_view)

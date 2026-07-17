@@ -7,14 +7,14 @@ LibRaw AAHD path closely enough to replace its slow browser/WASM processing.
 LibRaw remains the numerical reference. Studio, RCD, Markesteijn, and ONNX are
 not reference implementations for this experiment.
 
-The result is positive for AAHD itself and negative for direct productization
-of the current full-frame implementation. On the 26 MP Sony fixture, WGSL
-reproduces the two integer AAHD candidates almost exactly and reduces the AAHD
-core from 7.07 seconds to about 79 milliseconds on an NVIDIA T4. The remaining
-large local differences come from LibRaw's serial, stateful hot/dead-pixel scan,
-not from demosaic interpolation. The prototype also uses 2.19 GiB of GPU
-buffers and has a 417 MB maximum storage binding. A tiled implementation and an
-explicit hot-pixel contract are therefore required before production use.
+The implementation proves exact bounded-memory AAHD parity and integrates it
+through color and streamed TIFF export as an explicit experimental backend.
+On the 26 MP Sony fixture, the final TIFF stays within one code of the pinned
+production export and peak WebGPU allocation stays below 256 MiB. It is not a
+candidate for the default backend: exact LibRaw row-order boundaries and the
+two tile sweeps keep the measured post-unpack path well above the 500 ms target
+on an NVIDIA T4. The display-sized Preview pipeline remains the correct path
+for fast user feedback.
 
 ## Background
 
@@ -75,11 +75,11 @@ candidates, refined direction flags, selected camera RGB, final ProPhoto RGB16,
 matrices, channel extrema, scale multipliers, and hot-pixel stage time. Capture
 allocations are absent from normal decode.
 
-The current workspace is intentionally simple and full-frame. It retains two
-RGB candidates, two YUV candidates, two homogeneity planes, directions, input,
-packed output, and readback. A production implementation must process bounded
-tiles with AAHD's required halo and keep the final image GPU-resident through
-color and LUT processing.
+The parity workspace is bounded to a 1024 x 1024 core plus a 12-pixel halo. It
+retains two RGB candidates, two YUV candidates, two homogeneity planes,
+directions, output, and readback for one tile. One shared device carries the
+selected core through color and LUT processing. Only final quantized bands and
+compact exact-Blend records cross the GPU boundary.
 
 ## Numerical Contract
 
@@ -231,10 +231,11 @@ numerically non-portable boundaries outside WGSL:
   result avoids a full RGB readback at this boundary.
 
 LibRaw's YUV matrix affects discrete homogeneity decisions. The parity route
-therefore stores every multiply and add through an existing `f32` storage slot
-between dispatches. This prevents driver contraction without allocating
-another full-frame buffer. The deterministic candidate retains its shorter
-single-dispatch conversion.
+therefore stores every multiply and add through existing `f32` storage slots
+inside one dispatch. These explicit storage round trips preserve LibRaw's
+statement-level rounding without the previous 13-dispatch conversion or
+another full-frame buffer. The deterministic candidate retains its direct
+conversion.
 
 On the 6240 x 4168 Sony fixture, the scaled CFA, horizontal and vertical
 candidates, YUV values, homogeneity, chosen and refined directions, selected
@@ -255,12 +256,14 @@ global coordinates, while each tile writes only its rectangular core.
 
 The row-ordered direction contract requires two tile sweeps. The first sweep
 assembles checker-refined directions into one CPU `u16` plane. The existing
-scalar LibRaw scan refines that plane. The second sweep recomputes bounded
-candidates, loads the refined directions for the halo region, combines the
-selected camera RGB, applies compact CPU Blend highlights, and reads back only
-the final core. The GPU keeps one full corrected packed CFA and one full defect
-bitset; the original CFA is uploaded per tile. Candidate, YUV, homogeneity,
-direction, output, and readback buffers are reused.
+scalar LibRaw scan refines that plane and emits eight four-bit directions per
+`u32` during the same ordered traversal. The packed plane is uploaded once.
+The second sweep recomputes bounded candidates, loads its halo directions on
+the GPU, combines the selected camera RGB, applies compact CPU Blend
+highlights, and reads back only the final core. The GPU keeps one full corrected
+packed CFA, one full defect bitset, and the packed direction plane; the
+original CFA is uploaded per tile. Candidate, YUV, homogeneity, output, and
+readback buffers are reused.
 
 On the 6240 x 4168 Sony fixture, 117 tiles produced zero differences across all
 78,024,960 final ProPhoto RGB16 channels in one cold and four warm oracle runs.
@@ -296,18 +299,27 @@ full-frame JavaScript RGB allocation.
 
 Two reusable output readbacks form an explicit depth-two pipeline. While CPU
 prediction and Deflate consume one mapped result, the next tile can execute and
-transfer into the other. The exact compact Blend-highlight transform keeps a
-separate scratch buffer because its CPU row-order statement semantics are part
-of the accepted parity contract. The complete live WebGPU allocation is
-212,768,508 bytes and the largest binding is 52,016,640 bytes.
+transfer into the other. The previous result is mapped before the next tile is
+submitted, and its consumer must finish before that readback can be reused two
+tiles later. The exact compact Blend-highlight transform keeps a separate
+scratch buffer because its CPU row-order statement semantics are part of the
+accepted parity contract. LibRaw's C++ WASM wrapper also performs
+scaling, extrema collection, and the serial defect scan in one traversal before
+exposing zero-copy corrected-mosaic and defect-mask views. The complete live
+WebGPU allocation is 225,772,668 bytes and the largest binding is 52,016,640
+bytes.
 
 On the 6240 x 4168 Sony fixture, the complete experimental TIFF differed from
 the default production export in 51,361 of 78,024,960 channel samples. Every
 difference was one code value, no sample exceeded the two-code corrected-v2
 contract, and MAE was 0.0006583. One cold and four warm T4 runs measured warm
-Worker totals of 4.05-4.72 seconds, GPU pipeline totals of 3.66-4.33 seconds,
-color of 129-144 ms, final readback waits of 234-239 ms, and TIFF work of
-308-338 ms.
+Worker totals of 2.79-3.18 seconds and TIFF work of 0.31-0.32 seconds. The
+streamed demosaic call, which includes overlapped TIFF callbacks, took
+2.45-2.81 seconds. Exact C++ defect preprocessing took 0.60-0.65 seconds and
+color took 0.07-0.08 seconds. Once streaming overlaps GPU waits, individual
+wall-time stage counters also include time when their completion callback was
+delayed by synchronous TIFF work; they are not additive GPU timestamps. The
+500 ms post-unpack target is not met.
 
 The route is selected only by `rawBackend=webgpu-aahd`. It rejects missing
 WebGPU, unsupported sensors, and insufficient adapter limits without changing
@@ -325,9 +337,10 @@ full-resolution export backend.
 
 The full-frame workspace allocates approximately 2.19 GiB and its largest
 buffer is 417 MB. The final 1024-core experimental route instead measures
-212.8 MB of live WebGPU buffers with a 52.0 MB maximum binding. This includes
-two bounded output readbacks and one exact-highlight scratch readback. It
-excludes the CPU direction plane and the final compressed TIFF Blob.
+225.8 MB of live WebGPU buffers with a 52.0 MB maximum binding. This includes
+two bounded output readbacks, one exact-highlight scratch readback, and the
+packed full-image direction plane. It excludes CPU/WASM preprocessing storage,
+the CPU direction plane, and the final compressed TIFF Blob.
 
 Handwritten WGSL is required for this path. AAHD uses mutable neighborhoods,
 integer wrapping, atomic homogeneity accumulation, and discrete refinements.
@@ -342,8 +355,9 @@ Retain the bounded handwritten WGSL route as an explicit experimental Bayer
 backend. The current parity contract is the only route supported by product
 integration because its differences are bounded to one final color code on the
 tested golden. Production default selection still requires broader camera and
-client-GPU evidence. The deterministic defect candidate remains a separately
-named behavior proposal and must not replace the product golden implicitly.
+client-GPU evidence, and this route also misses the stated performance target.
+The deterministic defect candidate remains a separately named behavior
+proposal and must not replace the product golden implicitly.
 
 ## Open Questions
 

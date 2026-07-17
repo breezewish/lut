@@ -1,6 +1,7 @@
 export interface LibRawDefectCorrection {
   corrected: Uint16Array<ArrayBuffer>;
   defects: Uint32Array<ArrayBuffer>;
+  extrema: Uint32Array<ArrayBuffer>;
 }
 
 const HOR = 2;
@@ -146,6 +147,7 @@ export function correctLibRawSerialDefects(
   const margin = 4;
   const stride = width + margin * 2;
   const working = new Uint16Array(stride * (height + margin * 2));
+  const extrema = new Uint32Array(6);
   for (let y = 0; y < height; y += 1) {
     const sourceRow = y * width;
     const workingRow = (y + margin) * stride + margin;
@@ -154,9 +156,13 @@ export function correctLibRawSerialDefects(
       const channel = cfa === 3 ? 1 : cfa;
       const value = Math.fround(mosaic[sourceRow + x] - blackLevels[channel]);
       const scaled = Math.fround(value * scaleMultipliers[channel]);
-      working[workingRow + x] = Math.trunc(
-        Math.min(65535, Math.max(0, scaled)),
-      );
+      const sample = Math.trunc(Math.min(65535, Math.max(0, scaled)));
+      working[workingRow + x] = sample;
+      if (y === 0 && x === 0) extrema[channel] = sample;
+      if (sample !== 0) {
+        extrema[channel] = Math.min(extrema[channel], sample);
+        extrema[channel + 3] = Math.max(extrema[channel + 3], sample);
+      }
     }
   }
 
@@ -235,53 +241,60 @@ export function correctLibRawSerialDefects(
     const row = (y + margin) * stride + margin;
     corrected.set(working.subarray(row, row + width), y * width);
   }
-  return { corrected, defects };
+  return { corrected, defects, extrema };
 }
 
-/** Reproduces LibRaw AAHD's final ordered isolated-direction scan. */
+/**
+ * Reproduces LibRaw AAHD's final ordered isolated-direction scan in place.
+ * When supplied, `packed` receives eight four-bit results per word during the
+ * same row traversal.
+ */
 export function refineLibRawSerialDirections(
-  directions: Uint16Array,
+  directions: Uint16Array<ArrayBuffer>,
   width: number,
   height: number,
+  packed?: Uint32Array,
 ): Uint16Array<ArrayBuffer> {
   if (
     !Number.isInteger(width) ||
     !Number.isInteger(height) ||
     width <= 0 ||
     height <= 0 ||
-    directions.length !== width * height
+    directions.length !== width * height ||
+    (packed !== undefined && packed.length !== Math.ceil(directions.length / 8))
   ) {
     throw new Error("LibRaw direction refinement requires a complete plane.");
   }
 
-  const refined = new Uint16Array(directions.length);
-  refined.set(directions);
+  const refined = directions;
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const index = y * width + x;
       let value = refined[index];
-      if ((value & 1) !== 0) continue;
-      const north = y > 0 ? refined[index - width] : 0;
-      const south = y + 1 < height ? refined[index + width] : 0;
-      const west = x > 0 ? refined[index - 1] : 0;
-      const east = x + 1 < width ? refined[index + 1] : 0;
-      const verticalCount =
-        Number((north & VER) !== 0) +
-        Number((south & VER) !== 0) +
-        Number((west & VER) !== 0) +
-        Number((east & VER) !== 0);
-      const horizontalCount =
-        Number((north & HOR) !== 0) +
-        Number((south & HOR) !== 0) +
-        Number((west & HOR) !== 0) +
-        Number((east & HOR) !== 0);
-      if ((value & VER) !== 0 && horizontalCount > 3) {
-        value = (value & ~VER) | HOR;
+      if ((value & 1) === 0) {
+        const north = y > 0 ? refined[index - width] : 0;
+        const south = y + 1 < height ? refined[index + width] : 0;
+        const west = x > 0 ? refined[index - 1] : 0;
+        const east = x + 1 < width ? refined[index + 1] : 0;
+        const verticalCount =
+          Number((north & VER) !== 0) +
+          Number((south & VER) !== 0) +
+          Number((west & VER) !== 0) +
+          Number((east & VER) !== 0);
+        const horizontalCount =
+          Number((north & HOR) !== 0) +
+          Number((south & HOR) !== 0) +
+          Number((west & HOR) !== 0) +
+          Number((east & HOR) !== 0);
+        if ((value & VER) !== 0 && horizontalCount > 3) {
+          value = (value & ~VER) | HOR;
+        }
+        if ((value & HOR) !== 0 && verticalCount > 3) {
+          value = (value & ~HOR) | VER;
+        }
+        refined[index] = value;
       }
-      if ((value & HOR) !== 0 && verticalCount > 3) {
-        value = (value & ~HOR) | VER;
-      }
-      refined[index] = value;
+      if (packed) packed[index >>> 3] |= (value & 15) << ((index & 7) * 4);
     }
   }
   return refined;

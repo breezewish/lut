@@ -123,6 +123,7 @@ const ENTRY_POINTS = [
   "interpolate_rb_at_green",
   "interpolate_remaining_rb",
   "convert_candidates_to_yuv",
+  "convert_candidates_to_yuv_parity",
   "initialize_yuv_first_products",
   "store_yuv_second_0",
   "add_yuv_second_0",
@@ -144,6 +145,7 @@ const ENTRY_POINTS = [
   "write_vertical_homogeneity",
   "refine_checker_even",
   "refine_checker_odd",
+  "load_tiled_direction_plane",
   "refine_isolated",
   "copy_refined_directions",
   "combine",
@@ -160,6 +162,14 @@ const ENTRY_POINTS = [
 ] as const;
 
 type EntryPoint = (typeof ENTRY_POINTS)[number];
+
+interface PassCommand {
+  entryPoint: EntryPoint;
+  padded?: boolean;
+  paired?: boolean;
+  linearWorkgroups?: number;
+  core?: boolean;
+}
 
 // WebGPU guarantees at least 65,535 workgroups per dispatch dimension. Keep
 // this in sync with LINEAR_DISPATCH_WIDTH in the shader.
@@ -178,6 +188,7 @@ const BINDINGS: Record<EntryPoint, number[]> = {
   interpolate_rb_at_green: [1, 2, 8, 11],
   interpolate_remaining_rb: [1, 2, 8, 11],
   convert_candidates_to_yuv: [1, 2, 3, 4, 9, 11],
+  convert_candidates_to_yuv_parity: [1, 2, 3, 4, 9, 11],
   initialize_yuv_first_products: [1, 2, 3, 4, 9, 11],
   store_yuv_second_0: [1, 2, 9, 11],
   add_yuv_second_0: [1, 2, 3, 4, 11],
@@ -199,6 +210,7 @@ const BINDINGS: Record<EntryPoint, number[]> = {
   write_vertical_homogeneity: [6, 7, 10, 11],
   refine_checker_even: [5, 11],
   refine_checker_odd: [5, 11],
+  load_tiled_direction_plane: [5, 11, 15],
   refine_isolated: [5, 6, 11],
   copy_refined_directions: [5, 6, 11],
   combine: [1, 2, 5, 11, 13],
@@ -214,6 +226,13 @@ const BINDINGS: Record<EntryPoint, number[]> = {
   write_final: [1, 10, 11],
 };
 
+const PARITY_INTERPOLATION_PASSES: readonly PassCommand[] = [
+  { entryPoint: "interpolate_green" },
+  { entryPoint: "interpolate_rb_at_green" },
+  { entryPoint: "interpolate_remaining_rb" },
+  { entryPoint: "convert_candidates_to_yuv_parity", padded: true },
+];
+
 interface Runtime {
   adapter: GPUAdapter;
   device: GPUDevice;
@@ -223,6 +242,14 @@ interface Runtime {
 export interface TiledAahdColor {
   renderer: WebGpuColorRenderer;
   ev: number;
+}
+
+/** Exact row-ordered LibRaw AAHD inputs prepared by the C++ WASM wrapper. */
+export interface LibRawAahdPreprocessed {
+  corrected: Uint16Array<ArrayBuffer>;
+  defects: Uint32Array<ArrayBuffer>;
+  extrema: Uint32Array<ArrayBuffer>;
+  totalMs: number;
 }
 
 export type TiledAahdBandWriter = (
@@ -631,9 +658,12 @@ export async function demosaicLibRawAahdTiledWithWgsl(
   capture?: Uint16Array,
   color?: TiledAahdColor,
   writeBand?: TiledAahdBandWriter,
+  preprocessed?: LibRawAahdPreprocessed,
 ): Promise<LibRawAahdResult> {
   validateInput(mosaic, info);
-  const startedAt = performance.now();
+  // Native preprocessing completes before this function is entered. Include
+  // its measured duration so totalMs remains the full post-unpack AAHD cost.
+  const startedAt = performance.now() - (preprocessed?.totalMs ?? 0);
   const tiles = createAahdTiles(info.width, info.height);
   const deviceStartedAt = performance.now();
   const runtime = await getRuntime(
@@ -656,23 +686,37 @@ export async function demosaicLibRawAahdTiledWithWgsl(
   );
 
   const serialDefectStartedAt = performance.now();
-  const correction = correctLibRawSerialDefects(
-    mosaic,
-    info.width,
-    info.height,
-    info.cfaPattern,
-    info.blackLevels,
-    scaleMultipliers,
-  );
-  const serialDefectMs = performance.now() - serialDefectStartedAt;
+  const correction =
+    preprocessed ??
+    correctLibRawSerialDefects(
+      mosaic,
+      info.width,
+      info.height,
+      info.cfaPattern,
+      info.blackLevels,
+      scaleMultipliers,
+    );
+  if (
+    correction.corrected.length !== info.sampleCount ||
+    correction.defects.length !== Math.ceil(info.sampleCount / 32) ||
+    correction.extrema.length !== 6
+  ) {
+    throw new Error("LibRaw AAHD preprocessing returned invalid dimensions.");
+  }
+  const serialDefectMs = preprocessed
+    ? preprocessed.totalMs
+    : performance.now() - serialDefectStartedAt;
   const scaleStartedAt = performance.now();
-  const extrema = calculateChannelExtrema(mosaic, info, scaleMultipliers);
   runtime.device.queue.writeBuffer(
     workspace.resources[0],
     0,
     correction.corrected,
   );
-  runtime.device.queue.writeBuffer(workspace.resources[8], 0, extrema);
+  runtime.device.queue.writeBuffer(
+    workspace.resources[8],
+    0,
+    correction.extrema,
+  );
   runtime.device.queue.writeBuffer(
     workspace.resources[12],
     0,
@@ -686,20 +730,24 @@ export async function demosaicLibRawAahdTiledWithWgsl(
   let readbackMs = 0;
   for (const tile of tiles) {
     prepareTile(runtime.device, workspace, mosaic, info, tile);
-    submitPass(runtime, workspace, "clear_tile", true);
-    submitPass(runtime, workspace, "initialize_parity");
 
     const interpolateStartedAt = performance.now();
-    submitParityInterpolation(runtime, workspace);
+    submitPasses(runtime, workspace, [
+      { entryPoint: "clear_tile", padded: true },
+      { entryPoint: "initialize_parity" },
+      ...PARITY_INTERPOLATION_PASSES,
+    ]);
     await runtime.device.queue.onSubmittedWorkDone();
     interpolateMs += performance.now() - interpolateStartedAt;
 
     const homogeneityStartedAt = performance.now();
-    submitPass(runtime, workspace, "evaluate_homogeneity");
-    submitPass(runtime, workspace, "choose_direction");
-    submitPass(runtime, workspace, "refine_checker_even");
-    submitPass(runtime, workspace, "refine_checker_odd");
-    submitPass(runtime, workspace, "write_direction_plane", false, true);
+    submitPasses(runtime, workspace, [
+      { entryPoint: "evaluate_homogeneity" },
+      { entryPoint: "choose_direction" },
+      { entryPoint: "refine_checker_even" },
+      { entryPoint: "refine_checker_odd" },
+      { entryPoint: "write_direction_plane", paired: true },
+    ]);
     await runtime.device.queue.onSubmittedWorkDone();
     const readbackStartedAt = performance.now();
     await readDirectionCore(
@@ -714,10 +762,17 @@ export async function demosaicLibRawAahdTiledWithWgsl(
   }
 
   const serialDirectionStartedAt = performance.now();
-  const refinedDirections = refineLibRawSerialDirections(
+  const packedDirections = new Uint32Array(Math.ceil(info.sampleCount / 8));
+  refineLibRawSerialDirections(
     chosenDirections,
     info.width,
     info.height,
+    packedDirections,
+  );
+  runtime.device.queue.writeBuffer(
+    workspace.resources[15],
+    0,
+    packedDirections,
   );
   const serialDirectionMs = performance.now() - serialDirectionStartedAt;
 
@@ -756,26 +811,27 @@ export async function demosaicLibRawAahdTiledWithWgsl(
     }
   };
   for (const [tileIndex, tile] of tiles.entries()) {
+    // Start mapping and encoding the previous core before submitting this
+    // core. The two readbacks alternate, so GPU work can overlap the CPU
+    // consumer without reusing a mapped buffer.
+    const consumePromise = pendingReadback
+      ? consumeReadback(pendingReadback)
+      : undefined;
     prepareTile(runtime.device, workspace, mosaic, info, tile);
-    submitPass(runtime, workspace, "clear_tile", true);
-    submitPass(runtime, workspace, "initialize_parity");
     const interpolateStartedAt = performance.now();
-    submitParityInterpolation(runtime, workspace);
+    submitPasses(runtime, workspace, [
+      { entryPoint: "clear_tile", padded: true },
+      { entryPoint: "initialize_parity" },
+      ...PARITY_INTERPOLATION_PASSES,
+    ]);
     await runtime.device.queue.onSubmittedWorkDone();
     interpolateMs += performance.now() - interpolateStartedAt;
 
     const combineStartedAt = performance.now();
-    runtime.device.queue.writeBuffer(
-      workspace.resources[5],
-      0,
-      createTileDirectionStorage(
-        refinedDirections,
-        info.width,
-        workspace,
-        tile,
-      ),
-    );
-    submitPass(runtime, workspace, "combine");
+    submitPasses(runtime, workspace, [
+      { entryPoint: "load_tiled_direction_plane" },
+      { entryPoint: "combine" },
+    ]);
     await runtime.device.queue.onSubmittedWorkDone();
     refineAndCombineMs += performance.now() - combineStartedAt;
 
@@ -787,12 +843,10 @@ export async function demosaicLibRawAahdTiledWithWgsl(
       true,
     );
     serialHighlightMs += serialMs;
-    await runtime.device.queue.onSubmittedWorkDone();
     highlightMs += performance.now() - highlightStartedAt;
 
     const colorStartedAt = performance.now();
     submitPass(runtime, workspace, "write_final", false, true);
-    await runtime.device.queue.onSubmittedWorkDone();
     let output = workspace.resources[10];
     if (color) {
       color.renderer.renderBuffer(
@@ -811,7 +865,7 @@ export async function demosaicLibRawAahdTiledWithWgsl(
       output,
       outputReadbacks[tileIndex & 1],
     );
-    if (pendingReadback) await consumeReadback(pendingReadback);
+    if (consumePromise) await consumePromise;
     pendingReadback = nextReadback;
   }
   if (pendingReadback) await consumeReadback(pendingReadback);
@@ -871,6 +925,30 @@ export async function demosaicLibRawAahdTiledWithWgsl(
     },
     ...(validation ? { validation } : {}),
   };
+}
+
+async function readDirectionCore(
+  device: GPUDevice,
+  workspace: Workspace,
+  tile: AahdTile,
+  destination: Uint16Array,
+  imageWidth: number,
+): Promise<void> {
+  const bytes =
+    tile.coreWidth * tile.coreHeight * Uint16Array.BYTES_PER_ELEMENT;
+  await copyToReadback(device, workspace, bytes);
+  await workspace.readback.mapAsync(GPUMapMode.READ, 0, bytes);
+  try {
+    const source = new Uint16Array(workspace.readback.getMappedRange(0, bytes));
+    for (let y = 0; y < tile.coreHeight; y += 1) {
+      destination.set(
+        source.subarray(y * tile.coreWidth, (y + 1) * tile.coreWidth),
+        (tile.coreY + y) * imageWidth + tile.coreX,
+      );
+    }
+  } finally {
+    workspace.readback.unmap();
+  }
 }
 
 function copyCapturedOutput(
@@ -1112,6 +1190,10 @@ function getTiledWorkspace(
         GPUBufferUsage.COPY_SRC |
         GPUBufferUsage.COPY_DST,
     ),
+    create(
+      Math.ceil(info.sampleCount / 8) * Uint32Array.BYTES_PER_ELEMENT,
+      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    ),
   ];
   device.queue.writeBuffer(resources[9], 0, gamma);
   cachedTiledWorkspace = {
@@ -1194,46 +1276,6 @@ function destroyWorkspace(workspace: Workspace): void {
   for (const buffer of workspace.outputReadbacks ?? []) buffer.destroy();
 }
 
-function submitParityInterpolation(
-  runtime: Runtime,
-  workspace: Workspace,
-): void {
-  submitPass(runtime, workspace, "interpolate_green");
-  submitPass(runtime, workspace, "interpolate_rb_at_green");
-  submitPass(runtime, workspace, "interpolate_remaining_rb");
-  submitPass(runtime, workspace, "initialize_yuv_first_products", true);
-  for (const component of [0, 1, 2] as const) {
-    submitPass(runtime, workspace, `store_yuv_second_${component}`, true);
-    submitPass(runtime, workspace, `add_yuv_second_${component}`, true);
-    submitPass(runtime, workspace, `store_yuv_third_${component}`, true);
-    submitPass(runtime, workspace, `finish_yuv_${component}`, true);
-  }
-}
-
-async function readDirectionCore(
-  device: GPUDevice,
-  workspace: Workspace,
-  tile: AahdTile,
-  destination: Uint16Array,
-  imageWidth: number,
-): Promise<void> {
-  const bytes =
-    tile.coreWidth * tile.coreHeight * Uint16Array.BYTES_PER_ELEMENT;
-  await copyToReadback(device, workspace, bytes);
-  await workspace.readback.mapAsync(GPUMapMode.READ, 0, bytes);
-  try {
-    const source = new Uint16Array(workspace.readback.getMappedRange(0, bytes));
-    for (let y = 0; y < tile.coreHeight; y += 1) {
-      destination.set(
-        source.subarray(y * tile.coreWidth, (y + 1) * tile.coreWidth),
-        (tile.coreY + y) * imageWidth + tile.coreX,
-      );
-    }
-  } finally {
-    workspace.readback.unmap();
-  }
-}
-
 function scheduleRgbReadback(
   device: GPUDevice,
   tile: AahdTile,
@@ -1294,53 +1336,6 @@ async function copyToReadback(
   device.queue.submit([encoder.finish()]);
 }
 
-function createTileDirectionStorage(
-  directions: Uint16Array,
-  imageWidth: number,
-  workspace: Workspace,
-  tile: AahdTile,
-): Uint32Array<ArrayBuffer> {
-  const storage = new Uint32Array(
-    workspace.paddedWidth * workspace.paddedHeight,
-  );
-  for (let y = 0; y < tile.inputHeight; y += 1) {
-    const sourceRow = (tile.inputY + y) * imageWidth + tile.inputX;
-    const destinationRow = (y + 4) * workspace.paddedWidth + 4;
-    for (let x = 0; x < tile.inputWidth; x += 1) {
-      storage[destinationRow + x] = directions[sourceRow + x];
-    }
-  }
-  return storage;
-}
-
-function calculateChannelExtrema(
-  mosaic: Uint16Array,
-  info: SensorImageInfo,
-  scaleMultipliers: Float32Array,
-): Uint32Array<ArrayBuffer> {
-  const extrema = new Uint32Array(6);
-  const firstChannel = normalizedCfa(info.cfaPattern[0]);
-  extrema[firstChannel] = scaleSample(
-    mosaic[0],
-    info.blackLevels[firstChannel],
-    scaleMultipliers[firstChannel],
-  );
-  for (let y = 0; y < info.height; y += 1) {
-    for (let x = 0; x < info.width; x += 1) {
-      const channel = normalizedCfa(info.cfaPattern[(y & 1) * 2 + (x & 1)]);
-      const sample = scaleSample(
-        mosaic[y * info.width + x],
-        info.blackLevels[channel],
-        scaleMultipliers[channel],
-      );
-      if (sample === 0) continue;
-      extrema[channel] = Math.min(extrema[channel], sample);
-      extrema[channel + 3] = Math.max(extrema[channel + 3], sample);
-    }
-  }
-  return extrema;
-}
-
 async function blendLibRawHighlightsWithCpu(
   runtime: Runtime,
   workspace: Workspace,
@@ -1361,7 +1356,6 @@ async function blendLibRawHighlightsWithCpu(
     undefined,
     core,
   );
-  await runtime.device.queue.onSubmittedWorkDone();
 
   const countEncoder = runtime.device.createCommandEncoder();
   countEncoder.copyBufferToBuffer(
@@ -1435,39 +1429,56 @@ function submitPass(
   linearWorkgroups?: number,
   core = false,
 ): void {
-  const pipeline = runtime.pipelines[entryPoint];
-  const bindGroup = runtime.device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
-    entries: BINDINGS[entryPoint].map((binding) => ({
-      binding,
-      resource: { buffer: workspace.resources[binding] },
-    })),
-  });
+  submitPasses(runtime, workspace, [
+    { entryPoint, padded, paired, linearWorkgroups, core },
+  ]);
+}
+
+function submitPasses(
+  runtime: Runtime,
+  workspace: Workspace,
+  commands: readonly PassCommand[],
+): void {
   const encoder = runtime.device.createCommandEncoder();
   const pass = encoder.beginComputePass();
-  pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bindGroup);
-  const width = padded
-    ? workspace.paddedWidth
-    : core || paired
-      ? workspace.coreWidth
-      : workspace.width;
-  const height = padded
-    ? workspace.paddedHeight
-    : core || paired
-      ? workspace.coreHeight
-      : workspace.height;
-  if (linearWorkgroups === undefined) {
-    pass.dispatchWorkgroups(
-      Math.ceil((paired ? width / 2 : width) / 16),
-      Math.ceil(height / 16),
+  for (const command of commands) {
+    const pipeline = runtime.pipelines[command.entryPoint];
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(
+      0,
+      runtime.device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: BINDINGS[command.entryPoint].map((binding) => ({
+          binding,
+          resource: { buffer: workspace.resources[binding] },
+        })),
+      }),
     );
-  } else {
-    const linearWidth = Math.min(linearWorkgroups, LINEAR_DISPATCH_WIDTH);
-    pass.dispatchWorkgroups(
-      linearWidth,
-      Math.ceil(linearWorkgroups / linearWidth),
-    );
+    const width = command.padded
+      ? workspace.paddedWidth
+      : command.core || command.paired
+        ? workspace.coreWidth
+        : workspace.width;
+    const height = command.padded
+      ? workspace.paddedHeight
+      : command.core || command.paired
+        ? workspace.coreHeight
+        : workspace.height;
+    if (command.linearWorkgroups === undefined) {
+      pass.dispatchWorkgroups(
+        Math.ceil((command.paired ? width / 2 : width) / 16),
+        Math.ceil(height / 16),
+      );
+    } else {
+      const linearWidth = Math.min(
+        command.linearWorkgroups,
+        LINEAR_DISPATCH_WIDTH,
+      );
+      pass.dispatchWorkgroups(
+        linearWidth,
+        Math.ceil(command.linearWorkgroups / linearWidth),
+      );
+    }
   }
   pass.end();
   runtime.device.queue.submit([encoder.finish()]);

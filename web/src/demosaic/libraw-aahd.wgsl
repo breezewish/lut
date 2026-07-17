@@ -13,6 +13,7 @@
 @group(0) @binding(12) var<storage, read_write> defect_mask: array<atomic<u32>>;
 @group(0) @binding(13) var<storage, read> original_mosaic: array<u32>;
 @group(0) @binding(14) var<storage, read_write> highlight_count: atomic<u32>;
+@group(0) @binding(15) var<storage, read> refined_direction_plane: array<u32>;
 
 const MARGIN: u32 = 4u;
 const HOR: u32 = 2u;
@@ -360,6 +361,65 @@ fn convert_candidates_to_yuv(@builtin(global_invocation_id) id: vec3u) {
   }
 }
 
+fn store_parity_product(direction: u32, index: u32, value: f32) {
+  if direction == 0u {
+    var rgb = horizontal_rgb[index];
+    rgb.w = bitcast<u32>(value);
+    horizontal_rgb[index] = rgb;
+  } else {
+    var rgb = vertical_rgb[index];
+    rgb.w = bitcast<u32>(value);
+    vertical_rgb[index] = rgb;
+  }
+}
+
+fn parity_product(direction: u32, index: u32) -> f32 {
+  return bitcast<f32>(rgb_at(direction, index).w);
+}
+
+fn store_parity_accumulator(direction: u32, index: u32, component: u32, value: f32) {
+  var yuv = yuv_at(direction, index);
+  yuv[component] = bitcast<i32>(value);
+  if direction == 0u { horizontal_yuv[index] = yuv; }
+  else { vertical_yuv[index] = yuv; }
+}
+
+fn parity_accumulator(direction: u32, index: u32, component: u32) -> f32 {
+  return bitcast<f32>(yuv_at(direction, index)[component]);
+}
+
+@compute @workgroup_size(16, 16)
+fn convert_candidates_to_yuv_parity(@builtin(global_invocation_id) id: vec3u) {
+  if !in_padded(id) { return; }
+  let index = id.y * padded_width() + id.x;
+  for (var direction = 0u; direction < 2u; direction += 1u) {
+    let encoded = encoded_rgb(direction, index);
+    for (var component = 0u; component < 3u; component += 1u) {
+      store_parity_product(
+        direction,
+        index,
+        parameter(20u + component * 3u) * encoded.x);
+      let first = parity_product(direction, index);
+      store_parity_product(
+        direction,
+        index,
+        parameter(21u + component * 3u) * encoded.y);
+      let second = parity_product(direction, index);
+      store_parity_accumulator(direction, index, component, first + second);
+      let partial = parity_accumulator(direction, index, component);
+      store_parity_product(
+        direction,
+        index,
+        parameter(22u + component * 3u) * encoded.z);
+      let third = parity_product(direction, index);
+      var yuv = yuv_at(direction, index);
+      yuv[component] = i32(partial + third);
+      if direction == 0u { horizontal_yuv[index] = yuv; }
+      else { vertical_yuv[index] = yuv; }
+    }
+  }
+}
+
 fn encoded_rgb(direction: u32, index: u32) -> vec3f {
   let source = rgb_at(direction, index);
   return vec3f(vec3u(vec3f(
@@ -617,6 +677,15 @@ fn refine_checker_odd(@builtin(global_invocation_id) id: vec3u) {
   if !in_image(id) || ((origin_x() + id.x) & 1u) == ((origin_y() + id.y) & 1u) { return; }
   let index = padded_index(i32(id.x), i32(id.y));
   directions[index] = refined_direction(index, true);
+}
+
+@compute @workgroup_size(16, 16)
+fn load_tiled_direction_plane(@builtin(global_invocation_id) id: vec3u) {
+  if !in_image(id) { return; }
+  let global_index = image_index(id.x, id.y);
+  let direction = (refined_direction_plane[global_index / 8u] >>
+    ((global_index & 7u) * 4u)) & 15u;
+  directions[padded_index(i32(id.x), i32(id.y))] = direction;
 }
 
 @compute @workgroup_size(16, 16)
