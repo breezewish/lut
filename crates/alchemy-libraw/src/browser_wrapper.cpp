@@ -782,10 +782,7 @@ public:
         std::memcpy(destination, source, sizes.width * sizeof(std::uint16_t));
         if (idata.filters != 9) {
           for (unsigned col = 0; col < sizes.width; ++col) {
-            unsigned channel = processor_.COLOR(row, col);
-            if (channel == 3) {
-              channel = 1;
-            }
+            const unsigned channel = processor_.COLOR(row, col);
             const unsigned sample =
                 destination[col] > black.channels[channel]
                     ? destination[col] - black.channels[channel]
@@ -795,7 +792,6 @@ public:
         }
       }
       sensor_timings_.mosaic_copy_ms = emscripten_get_now() - copy_started_at;
-      sensor_timings_.total_ms = emscripten_get_now() - total_started_at_;
 
       val cfa = val::array();
       const unsigned cfa_size = idata.filters == 9 ? 6 : 2;
@@ -832,6 +828,13 @@ public:
         }
       }
       sensor_metadata_.set("aahdScaleRange", scale_range);
+      const auto pre_multipliers =
+          aahd_pre_multipliers(black, scale_range);
+      val pre_multiplier_array = val::array();
+      for (unsigned channel = 0; channel < 4; ++channel) {
+        pre_multiplier_array.set(channel, pre_multipliers[channel]);
+      }
+      sensor_metadata_.set("aahdPreMultipliers", pre_multiplier_array);
       sensor_metadata_.set("orientation", sizes.flip);
 
       val black_levels = val::array();
@@ -876,6 +879,7 @@ public:
       sensor_metadata_.set("rgbCamera", rgb_camera);
       sensor_metadata_.set("aahdYuvMatrix", aahd_yuv_matrix);
       sensor_metadata_.set("librawProPhotoMatrix", prophoto_matrix);
+      sensor_timings_.total_ms = emscripten_get_now() - total_started_at_;
     }
     return sensor_metadata_;
   }
@@ -1127,6 +1131,99 @@ private:
     std::array<unsigned, 4> channels;
     unsigned common;
   };
+
+  std::array<float, 4>
+  aahd_pre_multipliers(const AdjustedBlackLevels &black,
+                       unsigned maximum) {
+    // Mirror scale_colors() through its final pre_mul normalization. Auto-WB
+    // alone needs another mosaic scan; camera metadata stays constant-time.
+    const auto &sizes = processor_.imgdata.sizes;
+    const auto &color = processor_.imgdata.rawdata.color;
+    std::array<float, 4> pre;
+    std::copy(std::begin(color.pre_mul), std::end(color.pre_mul), pre.begin());
+
+    if (color.cam_mul[0] < -0.5f ||
+        (color.cam_mul[0] <= 0.00001f &&
+         !(processor_.imgdata.rawparams.options &
+           LIBRAW_RAWOPTIONS_CAMERAWB_FALLBACK_TO_DAYLIGHT))) {
+      std::array<double, 8> totals{};
+      for (unsigned block_row = 0; block_row < sizes.height;
+           block_row += 8) {
+        for (unsigned block_col = 0; block_col < sizes.width;
+             block_col += 8) {
+          std::array<unsigned, 8> block{};
+          bool clipped = false;
+          for (unsigned row = block_row;
+               row < block_row + 8 && row < sizes.height && !clipped; ++row) {
+            for (unsigned col = block_col;
+                 col < block_col + 8 && col < sizes.width; ++col) {
+              const unsigned channel = processor_.COLOR(row, col);
+              const auto sample =
+                  sensor_[static_cast<std::size_t>(row) * sizes.width + col];
+              const int value = sample > black.channels[channel]
+                                    ? sample - black.channels[channel]
+                                    : 0;
+              if (value > static_cast<int>(maximum) - 25) {
+                clipped = true;
+                break;
+              }
+              block[channel] += value;
+              ++block[channel + 4];
+            }
+          }
+          if (!clipped) {
+            for (unsigned channel = 0; channel < 8; ++channel) {
+              totals[channel] += block[channel];
+            }
+          }
+        }
+      }
+      for (unsigned channel = 0; channel < 4; ++channel) {
+        if (totals[channel] != 0) {
+          pre[channel] =
+              static_cast<float>(totals[channel + 4] / totals[channel]);
+        }
+      }
+    }
+
+    if (color.cam_mul[0] > 0.00001f) {
+      std::array<unsigned, 8> white{};
+      for (unsigned row = 0; row < 8; ++row) {
+        for (unsigned col = 0; col < 8; ++col) {
+          const unsigned channel = processor_.COLOR(row, col);
+          if (color.white[row][col] != 0) {
+            white[channel] += color.white[row][col];
+          }
+          ++white[channel + 4];
+        }
+      }
+      if (color.as_shot_wb_applied) {
+        pre.fill(1);
+      } else if (white[0] && white[1] && white[2] && white[3]) {
+        for (unsigned channel = 0; channel < 4; ++channel) {
+          pre[channel] =
+              static_cast<float>(white[channel + 4]) / white[channel];
+        }
+      } else if (color.cam_mul[2] > 0.00001f) {
+        std::copy(std::begin(color.cam_mul), std::end(color.cam_mul),
+                  pre.begin());
+      }
+    }
+
+    if (pre[1] == 0) {
+      pre[1] = 1;
+    }
+    if (pre[3] == 0) {
+      pre[3] = processor_.imgdata.idata.colors < 4 ? pre[1] : 1;
+    }
+    const float largest = *std::max_element(pre.begin(), pre.end());
+    if (largest > 0.00001f) {
+      for (float &multiplier : pre) {
+        multiplier /= largest;
+      }
+    }
+    return pre;
+  }
 
   AdjustedBlackLevels adjusted_black_levels() {
     const auto &source = processor_.imgdata.rawdata.color;

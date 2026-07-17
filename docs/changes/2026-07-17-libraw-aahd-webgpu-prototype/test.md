@@ -46,7 +46,7 @@
   readbacks, and rejects unsupported input without falling back to LibRaw.
 - One cold and four warm complete experimental exports report TIFF encoding,
   Worker wall time, every AAHD stage, peak GPU allocation, and maximum binding;
-  the decoded Sony TIFF rejects any channel difference above two codes.
+  every decoded Sony TIFF rejects any channel difference above two codes.
 - A second-camera hardware export compares every Leica M8 TIFF channel with
   production LibRaw, exercises LibRaw's adjusted processing maximum, and
   rejects any difference above two codes.
@@ -54,6 +54,10 @@
   Panasonic GH5 RW2, and Bayer Fujifilm X-A5 RAF fixtures outside Git, rejects
   fallback adapters, and compares every experimental WebGPU TIFF channel with
   the corresponding production LibRaw export.
+- A Leica DNG with its AsShotNeutral tag removed compares the wrapper's
+  auto-WB pre-multipliers with the four normalized multipliers captured from
+  the complete pinned LibRaw AAHD path, then compares every final hardware TIFF
+  channel with production LibRaw within two codes.
 - Production Preview interaction benchmarks remain authoritative for first
   feedback: they cover 20 EV edits, cold and warm LUT changes, continuous input,
   and UI responsiveness while RAW decode is active.

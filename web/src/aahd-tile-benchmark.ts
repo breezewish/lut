@@ -164,6 +164,7 @@ function createSensorInfo(
     blackLevels,
     whiteLevel: 0x3fff,
     aahdScaleRange: 0x3fff,
+    aahdPreMultipliers: [1, 0.5, 0.75, 0.5],
     cameraWhiteBalance: [2, 1, 1.5, 1],
     xyzToCamera: [],
     rgbCamera: [],

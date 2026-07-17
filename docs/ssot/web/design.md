@@ -24,7 +24,10 @@ The preview-only Base transfer function uses a 65,536-entry 8-bit sRGB table ini
 
 The query-gated WebGPU AAHD export is a separate experimental route. LibRaw
 opens and unpacks the visible Bayer mosaic and exposes the effective AAHD
-scaling range after its adjusted-maximum policy. WebGPU subtracts each CFA
+scaling range after its adjusted-maximum policy. The wrapper also exposes the
+four normalized pre-multipliers selected by LibRaw's camera-white-field,
+camera-WB, or auto-WB policy; the uncommon auto-WB scan reuses the visible
+mosaic already copied for WebGPU. WebGPU subtracts each CFA
 channel's adjusted black level, scales the CFA, collects
 extrema, and classifies the initial defects in parallel. A sparse CPU scan
 enumerates only classified pixels in LibRaw row order and schedules every later

@@ -365,6 +365,14 @@ The route is selected only by `rawBackend=webgpu-aahd`. It rejects missing
 WebGPU, unsupported sensors, and insufficient adapter limits without changing
 decoder. Production export and Preview remain unchanged.
 
+The wrapper provides the exact normalized AAHD pre-multipliers rather than
+asking TypeScript to normalize `cam_mul`. It mirrors LibRaw's precedence among
+the camera white field, parsed camera white balance, and auto white balance.
+The uncommon auto-WB scan runs only when camera WB is absent and reuses the
+visible mosaic already copied for WebGPU, including independent values for both
+green Bayer planes. Sensor scaling keeps the original four-channel CFA identity;
+only the later AAHD image layout merges the second green plane into green.
+
 Preview retains the display-sized proxy pipeline integrated from `main`.
 Full-resolution parity AAHD is slower than that first-feedback path and would
 add an unnecessary dependency. On the same T4, the production Preview measured

@@ -16,6 +16,8 @@ export interface SensorImageInfo {
   whiteLevel: number;
   /** Effective post-black range used by LibRaw's AAHD scaling. */
   aahdScaleRange: number;
+  /** Normalized multipliers selected by LibRaw's camera/auto WB policy. */
+  aahdPreMultipliers: number[];
   cameraWhiteBalance: number[];
   xyzToCamera: number[];
   rgbCamera: number[];

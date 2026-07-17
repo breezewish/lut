@@ -135,6 +135,22 @@ test("keeps the previous canvases visible until interaction frames are ready", a
     name: "Preview processing",
   });
   await expect(processing).toHaveCount(0);
+  await expect
+    .poll(() =>
+      basePreview.evaluate(
+        (canvas: HTMLCanvasElement) =>
+          canvas.width !== 300 && canvas.height !== 150,
+      ),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      lutPreview.evaluate(
+        (canvas: HTMLCanvasElement) =>
+          canvas.width !== 300 && canvas.height !== 150,
+      ),
+    )
+    .toBe(true);
   const previousBase = await basePreview.evaluate((canvas: HTMLCanvasElement) =>
     canvas.toDataURL(),
   );

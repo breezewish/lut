@@ -49,8 +49,12 @@ fn in_padded(id: vec3u) -> bool {
   return id.x < padded_width() && id.y < padded_height();
 }
 
+fn sensor_color(x: u32, y: u32) -> u32 {
+  return parameters[48u + ((origin_y() + y) & 1u) * 2u + ((origin_x() + x) & 1u)];
+}
+
 fn cfa_color(x: u32, y: u32) -> u32 {
-  let channel = parameters[48u + ((origin_y() + y) & 1u) * 2u + ((origin_x() + x) & 1u)];
+  let channel = sensor_color(x, y);
   return select(channel, 1u, channel == 3u);
 }
 
@@ -65,7 +69,7 @@ fn original_sample(index: u32) -> u32 {
 }
 
 fn scaled_sample(x: u32, y: u32) -> u32 {
-  let channel = cfa_color(x, y);
+  let channel = sensor_color(x, y);
   let value = max(f32(original_sample(local_image_index(x, y))) - parameter(8u + channel), 0.0);
   return u32(clamp(value * parameter(12u + channel), 0.0, 65535.0));
 }
@@ -78,7 +82,7 @@ fn preprocessed_sample(x: i32, y: i32) -> i32 {
 }
 
 fn preprocess_scaled_sample(x: u32, y: u32) -> u32 {
-  let channel = cfa_color(x, y);
+  let channel = sensor_color(x, y);
   let value = max(f32(sensor_sample(local_image_index(x, y))) - parameter(8u + channel), 0.0);
   return u32(clamp(value * parameter(12u + channel), 0.0, 65535.0));
 }

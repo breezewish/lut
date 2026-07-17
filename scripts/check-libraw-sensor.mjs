@@ -18,6 +18,9 @@ const fixtures = [
     aahdScaleRange: 15868,
     orientation: 0,
     whiteBalance: [2643, 1024, 1590, 1024],
+    aahdPreMultipliers: [
+      1, 0.38743850588798523, 0.6015890836715698, 0.38743850588798523,
+    ],
     xyzToCamera: [
       0.6972, -0.2408, -0.06, -0.433, 1.2101, 0.2515, -0.0388, 0.1277, 0.5847,
       0, 0, 0,
@@ -38,6 +41,9 @@ const fixtures = [
     aahdScaleRange: 16256,
     orientation: 0,
     whiteBalance: [2.0458984375, 1, 1.29052734375, 0],
+    aahdPreMultipliers: [
+      1, 0.4887828230857849, 0.6307876110076904, 0.4887828230857849,
+    ],
     xyzToCamera: [
       0.7675, -0.2196, -0.0305, -0.586, 1.4119, 0.1856, -0.2425, 0.4006, 0.6578,
       0, 0, 0,
@@ -131,6 +137,14 @@ for (const fixture of fixtures) {
       fixture.whiteBalance,
       `${fixture.name} camera WB`,
     );
+    if (fixture.sensorType === "bayer") {
+      assertArray(
+        info.aahdPreMultipliers,
+        fixture.aahdPreMultipliers,
+        `${fixture.name} effective AAHD WB`,
+        1e-6,
+      );
+    }
     assertArray(
       info.xyzToCamera,
       fixture.xyzToCamera,
@@ -171,6 +185,41 @@ for (const fixture of fixtures) {
   } finally {
     raw.delete();
   }
+}
+
+const missingWhiteBalance = new Uint8Array(
+  await readFile("tests/fixtures/leica-m8.dng"),
+);
+removeDngAsShotNeutral(missingWhiteBalance);
+const missingWhiteBalanceRaw = new module.LibRaw();
+try {
+  missingWhiteBalanceRaw.openWithQuality(missingWhiteBalance, false, 12);
+  const sensor = missingWhiteBalanceRaw.sensorInfo();
+  const reference = missingWhiteBalanceRaw.aahdReferenceInfo();
+  assertArray(
+    sensor.aahdPreMultipliers,
+    reference.preMultipliers,
+    "Missing camera WB auto-balance",
+    0,
+  );
+  console.log("Missing camera WB auto-balance matches LibRaw AAHD exactly");
+} finally {
+  missingWhiteBalanceRaw.delete();
+}
+
+function removeDngAsShotNeutral(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const littleEndian = String.fromCharCode(bytes[0], bytes[1]) === "II";
+  const ifdOffset = view.getUint32(4, littleEndian);
+  const entryCount = view.getUint16(ifdOffset, littleEndian);
+  for (let index = 0; index < entryCount; index += 1) {
+    const entryOffset = ifdOffset + 2 + index * 12;
+    if (view.getUint16(entryOffset, littleEndian) === 50_728) {
+      view.setUint16(entryOffset, 65_000, littleEndian);
+      return;
+    }
+  }
+  throw new Error("Leica fixture has no AsShotNeutral tag");
 }
 
 function assertEqual(actual, expected, label) {

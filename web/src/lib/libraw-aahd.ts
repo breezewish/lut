@@ -330,11 +330,12 @@ export async function demosaicLibRawAahdWithWgsl(
   );
   const scaleMultipliers = new Float32Array(parameters.buffer, 12 * 4, 4);
   const preMultipliers = new Float32Array(parameters.buffer, 16 * 4, 4);
-  const firstColor = normalizedCfa(info.cfaPattern[0]);
+  const firstSensorColor = info.cfaPattern[0];
+  const firstColor = normalizedCfa(firstSensorColor);
   const firstScaled = scaleSample(
     mosaic[0],
-    info.blackLevels[firstColor],
-    scaleMultipliers[firstColor],
+    info.blackLevels[firstSensorColor],
+    scaleMultipliers[firstSensorColor],
   );
   const extrema = new Uint32Array(6);
   extrema[firstColor] = firstScaled;
@@ -1131,6 +1132,14 @@ function validateInput(mosaic: Uint16Array, info: SensorImageInfo): void {
       "The LibRaw AAHD benchmark requires an even, unrotated, complete mosaic.",
     );
   }
+  if (
+    info.aahdPreMultipliers.length !== 4 ||
+    info.aahdPreMultipliers.some(
+      (multiplier) => !Number.isFinite(multiplier) || multiplier <= 0,
+    )
+  ) {
+    throw new Error("LibRaw did not produce valid AAHD white balance.");
+  }
 }
 
 async function getRuntime(requiredBufferBytes: number): Promise<Runtime> {
@@ -1674,15 +1683,11 @@ function calculateScale(info: SensorImageInfo): {
   scale: Float32Array;
   pre: Float32Array;
 } {
-  const camera = info.cameraWhiteBalance.map((value, channel) =>
-    value > 0 ? value : info.cameraWhiteBalance[channel === 3 ? 1 : channel],
-  );
-  const maximum = Math.max(...camera);
   const pre = new Float32Array(4);
   const scale = new Float32Array(4);
   const sensorRange = info.aahdScaleRange;
   for (let channel = 0; channel < 4; channel += 1) {
-    pre[channel] = Math.fround(camera[channel] / maximum);
+    pre[channel] = Math.fround(info.aahdPreMultipliers[channel]);
     scale[channel] = Math.fround(
       Math.fround(Math.fround(pre[channel] * 65535) / sensorRange),
     );
