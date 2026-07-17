@@ -736,6 +736,14 @@ test("export failures retain the preview, allow retry, and release it on removal
             lut: new Uint8Array([64, 64, 64, 255]),
             metadata: { camera: "Test Camera", width: 1, height: 1 },
             decodeCount: 1,
+            timings: {
+              previewBackend: "cpu",
+              libraw: {},
+              previewSourceMs: 0,
+              lutLoadMs: 0,
+              previewColorMs: 0,
+              workerTotalMs: 0,
+            },
           },
         });
       }

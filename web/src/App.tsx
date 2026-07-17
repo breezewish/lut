@@ -37,7 +37,8 @@ const RAW_ACCEPT =
 const INTERACTIVE_PREVIEW_MAX_EDGE = 256;
 const SETTLED_PREVIEW_MAX_EDGE = 1_024;
 const SETTLED_PREVIEW_IDLE_MS = 120;
-const EXPOSURE_PREVIEW_INTERVAL_MS = 50;
+const CPU_EXPOSURE_PREVIEW_INTERVAL_MS = 50;
+const GPU_EXPOSURE_PREVIEW_INTERVAL_MS = 16;
 
 const STATUS_LABELS: Record<QueueItem["status"], string> = {
   queued: "Queued",
@@ -176,6 +177,8 @@ export default function App() {
   });
   const decodedFileId = useRef<string | undefined>(undefined);
   const settledBaseRecipe = useRef<string | undefined>(undefined);
+  const previewBackend =
+    useRef<PreviewResult["timings"]["previewBackend"]>("cpu");
   const nextPreviewGeneration = useRef(0);
   const lastPaintedGeneration = useRef(0);
   const desiredPreview = useRef<
@@ -304,19 +307,24 @@ export default function App() {
     const elapsed = lastExposureCommitAt.current
       ? performance.now() - lastExposureCommitAt.current
       : 0;
+    const interval =
+      previewBackend.current === "webgpu"
+        ? GPU_EXPOSURE_PREVIEW_INTERVAL_MS
+        : CPU_EXPOSURE_PREVIEW_INTERVAL_MS;
     exposureCommitTimer.current = window.setTimeout(
       () => {
         exposureCommitTimer.current = undefined;
         lastExposureCommitAt.current = performance.now();
         startTransition(() => setEv(pendingExposure.current));
       },
-      Math.max(0, EXPOSURE_PREVIEW_INTERVAL_MS - elapsed),
+      Math.max(0, interval - elapsed),
     );
   }, []);
 
   const releasePreview = useCallback(() => {
     decodedFileId.current = undefined;
     settledBaseRecipe.current = undefined;
+    previewBackend.current = "cpu";
     setRenderedRecipe(undefined);
     setPreview(undefined);
     setCameraPreview(undefined);
@@ -408,6 +416,7 @@ export default function App() {
       .then((result) => {
         if (!active) return;
         decodedFileId.current = selected.id;
+        previewBackend.current = result.timings.previewBackend;
         settledBaseRecipe.current = basePreviewRecipeKey(selected.id, ev);
         if (pendingExposure.current === ev) {
           exposureHasPendingRecipe.current = false;
@@ -454,12 +463,15 @@ export default function App() {
     };
     const baseRecipe = basePreviewRecipeKey(selected.id, ev);
     const includeBase = settledBaseRecipe.current !== baseRecipe;
+    const rendersSettledFramesImmediately = previewBackend.current === "webgpu";
     let active = true;
     let settleTimer: number | undefined;
     const render = async () => {
       try {
         const interactive = await client.render(selected.id, ev, selectedLut, {
-          maxEdge: INTERACTIVE_PREVIEW_MAX_EDGE,
+          maxEdge: rendersSettledFramesImmediately
+            ? SETTLED_PREVIEW_MAX_EDGE
+            : INTERACTIVE_PREVIEW_MAX_EDGE,
           includeBase,
         });
         const desired = desiredPreview.current;
@@ -472,6 +484,14 @@ export default function App() {
           setPreview((current) => mergePreview(current, interactive));
         }
         if (!active) return;
+
+        if (rendersSettledFramesImmediately) {
+          if (pendingExposure.current !== ev) return;
+          settledBaseRecipe.current = baseRecipe;
+          exposureHasPendingRecipe.current = false;
+          setRenderedRecipe(recipe);
+          return;
+        }
 
         if (includeBase) {
           await new Promise<void>((resolve) => {

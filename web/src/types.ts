@@ -72,11 +72,18 @@ export interface DemosaicBenchmarkReport {
 }
 
 export interface PreviewTimings {
+  previewBackend: "cpu" | "webgpu";
   libraw: LibRawDecodeTimings;
   previewSourceMs: number;
   lutLoadMs: number;
   previewColorMs: number;
   workerTotalMs: number;
+  gpuExecutionAndReadbackMs?: number;
+  gpuValidation?: {
+    sampleCount: number;
+    differingSamples: number;
+    maximumDifference: number;
+  };
 }
 
 export interface ExportTimings {
@@ -141,6 +148,8 @@ export type WorkerCommand =
       buffer: ArrayBuffer;
       ev: number;
       lut: LutDefinition;
+      previewBackend: "auto" | "cpu" | "webgpu";
+      validatePreviewGpu: boolean;
     }
   | {
       requestId: number;

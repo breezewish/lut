@@ -53,6 +53,12 @@ export class ProcessingClient {
   })();
   private readonly validateGpu =
     new URLSearchParams(location.search).get("validateGpu") === "1";
+  private readonly previewBackend = (() => {
+    const backend = new URLSearchParams(location.search).get("previewBackend");
+    return backend === "cpu" || backend === "webgpu" ? backend : "auto";
+  })();
+  private readonly validatePreviewGpu =
+    new URLSearchParams(location.search).get("validatePreviewGpu") === "1";
   private readonly rawBackend =
     new URLSearchParams(location.search).get("rawBackend") === "webgpu-aahd"
       ? "webgpu-aahd"
@@ -122,9 +128,18 @@ export class ProcessingClient {
     this.rejectQueuedRender(
       new Error("Preview render was superseded by a new RAW decode."),
     );
-    const reply = await this.send({ type: "decode", fileId, buffer, ev, lut }, [
-      buffer,
-    ]);
+    const reply = await this.send(
+      {
+        type: "decode",
+        fileId,
+        buffer,
+        ev,
+        lut,
+        previewBackend: this.previewBackend,
+        validatePreviewGpu: this.validatePreviewGpu,
+      },
+      [buffer],
+    );
     if (reply.ok && reply.type === "preview") {
       performance.mark("raw-alchemy:preview-worker", {
         detail: reply.result.timings,

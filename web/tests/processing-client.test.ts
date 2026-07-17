@@ -72,6 +72,7 @@ function preview(fileId: string, value: number): PreviewResult {
     metadata: { camera: "Test Camera", width: 1, height: 1 },
     decodeCount: 1,
     timings: {
+      previewBackend: "cpu",
       libraw: exportTimings.libraw,
       previewSourceMs: 10,
       lutLoadMs: 0,
@@ -164,6 +165,11 @@ test("decode rejects an unsent render instead of dispatching stale exposure", as
     result: preview("one", 10),
   });
   const decodeCommand = ControlledWorker.instance.messages[1];
+  expect(decodeCommand).toMatchObject({
+    type: "decode",
+    previewBackend: "auto",
+    validatePreviewGpu: false,
+  });
   const initialPreview = preview("two", 15);
   ControlledWorker.instance.reply({
     requestId: decodeCommand.requestId,

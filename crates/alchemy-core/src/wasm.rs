@@ -131,6 +131,21 @@ impl PreviewRenderer {
         self.source.write_source_row(pixels).map_err(to_js_error)
     }
 
+    #[wasm_bindgen(getter)]
+    pub fn width(&self) -> u32 {
+        self.source.dimensions().0
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn height(&self) -> u32 {
+        self.source.dimensions().1
+    }
+
+    /// Moves the completed display-sized RGB16 cache to a GPU renderer.
+    pub fn take_source_rgb16(&mut self) -> std::result::Result<Vec<u16>, JsError> {
+        self.source.take_pixels().map_err(to_js_error)
+    }
+
     pub fn render(
         &self,
         ev: f32,

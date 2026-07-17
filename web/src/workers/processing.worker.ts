@@ -21,6 +21,10 @@ import {
 import { correctImmutableDefects } from "../lib/aahd-candidate-reference";
 import { createLibRawYuvReference } from "../lib/aahd-parity-cpu";
 import { WebGpuColorRenderer } from "../lib/webgpu-color";
+import {
+  prepareWebGpuPreview,
+  WebGpuPreviewRenderer,
+} from "../lib/webgpu-preview";
 import type {
   ExportTimings,
   LibRawDecodeTimings,
@@ -35,16 +39,27 @@ const context: DedicatedWorkerGlobalScope =
 const runtime = Promise.all([createLibRaw(), initAlchemy()]).then(
   ([module]) => ({ module }),
 );
+const previewGpuPreparation =
+  "gpu" in navigator ? prepareWebGpuPreview() : undefined;
+// Forced CPU mode can leave this promise unused. A requested WebGPU decode
+// still awaits the same promise and reports its failure to the UI.
+void previewGpuPreparation?.catch(() => undefined);
 
-let cached:
+type CachedPreview = {
+  fileId: string;
+  lutId: string;
+  metadata: PreviewResult["metadata"];
+  timings: PreviewResult["timings"];
+} & (
+  | { backend: "cpu"; renderer: PreviewRenderer }
   | {
-      fileId: string;
-      renderer: PreviewRenderer;
-      lutId: string;
-      metadata: PreviewResult["metadata"];
-      timings: PreviewResult["timings"];
+      backend: "webgpu";
+      renderer: WebGpuPreviewRenderer;
+      referenceRenderer?: PreviewRenderer;
     }
-  | undefined;
+);
+
+let cached: CachedPreview | undefined;
 const cachedLuts = new Map<string, WasmLut>();
 let decodeCount = 0;
 
@@ -266,6 +281,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
     }
     if (data.type === "clear") {
       cached?.renderer.free();
+      if (cached?.backend === "webgpu") cached.referenceRenderer?.free();
       cached = undefined;
       const reply: WorkerReply = {
         requestId: data.requestId,
@@ -278,6 +294,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
     if (data.type === "decode") {
       const workerStartedAt = performance.now();
       cached?.renderer.free();
+      if (cached?.backend === "webgpu") cached.referenceRenderer?.free();
       cached = undefined;
       const previewRaw = new module.LibRaw();
       try {
@@ -303,14 +320,17 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
         decodeCount += 1;
         const lut = await loadLut(data.lut);
         const previewSourceStartedAt = performance.now();
+        const renderer = await createCachedPreviewRenderer(
+          previewRaw,
+          image.width,
+          image.height,
+          lut,
+          data.previewBackend,
+          data.validatePreviewGpu,
+        );
         cached = {
           fileId: data.fileId,
-          renderer: createPreviewRenderer(
-            previewRaw,
-            image.width,
-            image.height,
-            lut,
-          ),
+          ...renderer,
           lutId: data.lut.id,
           metadata: {
             camera: [metadata.camera_make, metadata.camera_model]
@@ -320,6 +340,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
             height: metadata.height,
           },
           timings: {
+            previewBackend: renderer.backend,
             libraw,
             previewSourceMs: 0,
             lutLoadMs: 0,
@@ -539,6 +560,70 @@ function createPreviewRenderer(
   }
 }
 
+async function createCachedPreviewRenderer(
+  raw: InstanceType<Awaited<ReturnType<typeof createLibRaw>>["LibRaw"]>,
+  width: number,
+  height: number,
+  lut: WasmLut,
+  requestedBackend: "auto" | "cpu" | "webgpu",
+  validateGpu: boolean,
+): Promise<
+  | { backend: "cpu"; renderer: PreviewRenderer }
+  | {
+      backend: "webgpu";
+      renderer: WebGpuPreviewRenderer;
+      referenceRenderer?: PreviewRenderer;
+    }
+> {
+  const source = createPreviewRenderer(raw, width, height, lut);
+  if (requestedBackend === "cpu") {
+    return { backend: "cpu", renderer: source };
+  }
+  if (!previewGpuPreparation) {
+    if (requestedBackend === "auto") {
+      return { backend: "cpu", renderer: source };
+    }
+    source.free();
+    throw new Error("WebGPU Preview was requested but is unavailable.");
+  }
+  try {
+    await previewGpuPreparation;
+  } catch (error) {
+    if (requestedBackend === "auto") {
+      return { backend: "cpu", renderer: source };
+    }
+    source.free();
+    throw error;
+  }
+
+  const sourceWidth = source.width;
+  const sourceHeight = source.height;
+  let pixels: Uint16Array;
+  try {
+    pixels = source.take_source_rgb16();
+  } finally {
+    source.free();
+  }
+  const referenceRenderer = validateGpu
+    ? createPreviewRenderer(raw, width, height, lut)
+    : undefined;
+  try {
+    return {
+      backend: "webgpu",
+      renderer: await WebGpuPreviewRenderer.create(
+        pixels,
+        sourceWidth,
+        sourceHeight,
+        lut,
+      ),
+      referenceRenderer,
+    };
+  } catch (error) {
+    referenceRenderer?.free();
+    throw error;
+  }
+}
+
 function describeRuntimeError(
   error: unknown,
   module: Awaited<ReturnType<typeof createLibRaw>>,
@@ -605,10 +690,46 @@ async function renderCached(
   const parsedLut = await loadLut(lut);
   const lutLoadMs = performance.now() - lutStartedAt;
   if (cached.lutId !== lut.id) {
-    parsedLut.apply_to_renderer(cached.renderer);
+    if (cached.backend === "webgpu") {
+      cached.renderer.setLut(parsedLut);
+      if (cached.referenceRenderer) {
+        parsedLut.apply_to_renderer(cached.referenceRenderer);
+      }
+    } else {
+      parsedLut.apply_to_renderer(cached.renderer);
+    }
     cached.lutId = lut.id;
   }
   const startedAt = performance.now();
+  if (cached.backend === "webgpu") {
+    const preview = await cached.renderer.render(ev, maxEdge, includeBase);
+    const previewColorMs = performance.now() - startedAt;
+    const gpuValidation = cached.referenceRenderer
+      ? validatePreview(
+          preview,
+          cached.referenceRenderer.render(ev, maxEdge, includeBase),
+          includeBase,
+        )
+      : undefined;
+    return {
+      fileId,
+      width: preview.width,
+      height: preview.height,
+      base: preview.base,
+      lut: preview.lut,
+      metadata: cached.metadata,
+      decodeCount,
+      timings: {
+        ...cached.timings,
+        lutLoadMs,
+        previewColorMs,
+        workerTotalMs: performance.now() - workerStartedAt,
+        gpuExecutionAndReadbackMs: preview.executionAndReadbackMs,
+        gpuValidation,
+      },
+    };
+  }
+
   const preview = cached.renderer.render(ev, maxEdge, includeBase);
   const previewColorMs = performance.now() - startedAt;
   try {
@@ -631,6 +752,44 @@ async function renderCached(
     };
   } finally {
     preview.free();
+  }
+}
+
+function validatePreview(
+  actual: { base?: Uint8Array; lut: Uint8Array },
+  expected: import("../wasm/alchemy_core.js").WasmPreview,
+  includeBase: boolean,
+): NonNullable<PreviewResult["timings"]["gpuValidation"]> {
+  try {
+    const expectedBase = includeBase
+      ? transferablePreviewView(expected.take_base_rgba(), "Base reference")
+      : undefined;
+    const expectedLut = transferablePreviewView(
+      expected.take_lut_rgba(),
+      "LUT reference",
+    );
+    const pairs: Array<[Uint8Array | undefined, Uint8Array | undefined]> = [
+      [actual.base, expectedBase],
+      [actual.lut, expectedLut],
+    ];
+    let sampleCount = 0;
+    let differingSamples = 0;
+    let maximumDifference = 0;
+    for (const [left, right] of pairs) {
+      if (!left && !right) continue;
+      if (!left || !right || left.length !== right.length) {
+        throw new Error("WebGPU and CPU Preview dimensions do not match.");
+      }
+      sampleCount += left.length;
+      for (let index = 0; index < left.length; index += 1) {
+        const difference = Math.abs(left[index] - right[index]);
+        if (difference > 0) differingSamples += 1;
+        maximumDifference = Math.max(maximumDifference, difference);
+      }
+    }
+    return { sampleCount, differingSamples, maximumDifference };
+  } finally {
+    expected.free();
   }
 }
 
