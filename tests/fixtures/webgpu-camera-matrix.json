@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "id": "nikon-z6-nef",
+      "file": "nikon-z6.NEF",
+      "source": "https://raw.pixls.us/data/Nikon/Z%206/DSC_0752.NEF",
+      "sha256": "c079345fc93f53a4f0d322f8ddaae505f920c36015f25b58befccaa61db1af31",
+      "bytes": 30164134,
+      "license": "CC0-1.0",
+      "camera": "Nikon Z 6",
+      "mode": "14-bit lossless compressed",
+      "width": 6064,
+      "height": 4040
+    },
+    {
+      "id": "panasonic-gh5-rw2",
+      "file": "panasonic-gh5.RW2",
+      "source": "https://raw.pixls.us/data/Panasonic/DC-GH5/_T012014.RW2",
+      "sha256": "dae2281df393d8c3c1b8c513d00985f1834ae0e69ce18fbd571370c25d95d22b",
+      "bytes": 24197632,
+      "license": "CC0-1.0",
+      "camera": "Panasonic DC-GH5",
+      "mode": "12-bit 4:3",
+      "width": 5208,
+      "height": 3904
+    },
+    {
+      "id": "fujifilm-x-a5-raf",
+      "file": "fujifilm-x-a5.RAF",
+      "source": "https://raw.pixls.us/data/Fujifilm/X-A5/DSCF0617.RAF",
+      "sha256": "46daaf8c2b07f40bd01f737181d048a497bb0a87615a1fde65809fdd5de86bf1",
+      "bytes": 43150784,
+      "license": "CC0-1.0",
+      "camera": "Fujifilm X-A5",
+      "mode": "14-bit uncompressed Bayer",
+      "width": 6016,
+      "height": 4014
+    }
+  ]
+}

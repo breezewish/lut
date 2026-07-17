@@ -30,6 +30,10 @@
   fallback.
 - A second opt-in hardware export compares every Leica M8 RGB16 channel with
   production LibRaw and covers its data-adjusted AAHD scaling maximum.
+- An opt-in hardware camera matrix downloads SHA-256-pinned CC0 Nikon Z 6,
+  Panasonic GH5, and Bayer Fujifilm X-A5 RAW files into an ignored cache,
+  rejects fallback adapters, and compares every production LibRaw and WebGPU
+  AAHD RGB16 TIFF channel within two codes.
 - A synthetic hardware fixture proves that sparse ordered defect correction and
   tiled AAHD bit-match the full-frame parity route across all four Bayer phases,
   both tile axes, rectangular edge tiles, a smaller-than-tile image, and

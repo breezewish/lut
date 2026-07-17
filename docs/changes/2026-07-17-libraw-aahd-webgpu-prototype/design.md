@@ -349,6 +349,18 @@ channel samples, every difference was one code value, and MAE was 0.001251.
 A synthetic hardware fixture separately proves exact tiled/full-frame parity
 with per-channel black levels `[64, 96, 192, 96]`.
 
+A separate downloadable camera matrix broadens the accepted Bayer evidence
+without committing large RAW files. A versioned manifest pins CC0 raw.pixls.us
+URLs, byte lengths, and SHA-256 digests for Nikon Z 6 lossless-compressed NEF,
+Panasonic GH5 4:3 RW2, and Fujifilm X-A5 uncompressed RAF inputs. The prepare
+step streams each download into an atomic ignored cache and is part of the
+hardware test command. On a non-fallback NVIDIA T4 adapter, every complete
+experimental TIFF stayed within one code of production LibRaw: Nikon differed
+in 97,236 of 73,495,680 channels, Panasonic in 64,818 of 60,996,096, and
+Fujifilm in 145,946 of 72,444,672. No channel exceeded the two-code contract.
+These fixtures all contain valid camera white balance; missing camera-WB
+behavior remains a separate decoder-contract boundary.
+
 The route is selected only by `rawBackend=webgpu-aahd`. It rejects missing
 WebGPU, unsupported sensors, and insufficient adapter limits without changing
 decoder. Production export and Preview remain unchanged.

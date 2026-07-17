@@ -50,6 +50,10 @@
 - A second-camera hardware export compares every Leica M8 TIFF channel with
   production LibRaw, exercises LibRaw's adjusted processing maximum, and
   rejects any difference above two codes.
+- The hardware camera matrix prepares checksum-pinned CC0 Nikon Z 6 NEF,
+  Panasonic GH5 RW2, and Bayer Fujifilm X-A5 RAF fixtures outside Git, rejects
+  fallback adapters, and compares every experimental WebGPU TIFF channel with
+  the corresponding production LibRaw export.
 - Production Preview interaction benchmarks remain authoritative for first
   feedback: they cover 20 EV edits, cold and warm LUT changes, continuous input,
   and UI responsiveness while RAW decode is active.

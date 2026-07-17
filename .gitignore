@@ -5,6 +5,7 @@
 /target/
 /test-results/
 /playwright-report/
+/tests/fixtures/webgpu-camera-matrix/
 /web/public/luts/
 /web/src/libraw/
 /web/src/wasm/

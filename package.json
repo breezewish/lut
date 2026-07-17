@@ -23,6 +23,8 @@
     "benchmark:demosaic": "DEMOSAIC_PERF=1 PLAYWRIGHT_HTTP_PORT=${PLAYWRIGHT_HTTP_PORT:-46731} playwright test web/e2e/demosaic-performance.spec.ts --project=chromium",
     "benchmark:interaction": "RAW_PERF=1 PLAYWRIGHT_HTTP_PORT=${PLAYWRIGHT_HTTP_PORT:-46731} playwright test web/e2e/preview-interaction-performance.spec.ts --project=chromium",
     "benchmark:interaction:large": "node scripts/fetch-large-raw-fixture.mjs && RAW_PERF=1 RAW_PERF_FIXTURE=${RAW_LARGE_FIXTURE_PATH:-/tmp/raw-alchemy-ilce-7rm4-61mp.ARW} RAW_PERF_MIN_PIXELS=33000000 PLAYWRIGHT_HTTP_PORT=${PLAYWRIGHT_HTTP_PORT:-46731} playwright test web/e2e/preview-interaction-performance.spec.ts --project=chromium",
+    "test:webgpu-camera-matrix": "npm run build && npm run test:webgpu-camera-matrix:prepared",
+    "test:webgpu-camera-matrix:prepared": "node scripts/prepare-webgpu-camera-fixtures.mjs && WEBGPU_HARDWARE=1 WEBGPU_CAMERA_MATRIX_E2E=1 PLAYWRIGHT_HTTP_PORT=${PLAYWRIGHT_HTTP_PORT:-46731} playwright test web/e2e/aahd-camera-matrix.spec.ts --project=chromium",
     "quality:preview": "node scripts/check-preview-quality.mjs",
     "check": "npm run test && npm run build && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
     "format:check": "prettier --check ."
