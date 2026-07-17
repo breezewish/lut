@@ -201,9 +201,12 @@ export class ProcessingClient {
     const requestedStage = search.get("demosaicOutputStage");
     const demosaicOutputStage =
       demosaicBackend === "libraw-aahd-wgsl"
-        ? requestedStage === "horizontal" ||
+        ? requestedStage === "corrected" ||
+          requestedStage === "defects" ||
+          requestedStage === "horizontal" ||
           requestedStage === "vertical" ||
           requestedStage === "directions" ||
+          requestedStage === "candidate-directions" ||
           requestedStage === "aahd"
           ? requestedStage
           : "final"
@@ -214,6 +217,7 @@ export class ProcessingClient {
           : "demosaic";
     const completeExport = search.get("completeExport") === "1";
     const librawReference = search.get("librawReference") === "1";
+    const candidateReference = search.get("candidateReference") === "1";
     const transfer = referenceRgb16 ? [buffer, referenceRgb16] : [buffer];
     const reply = await this.send(
       {
@@ -224,6 +228,7 @@ export class ProcessingClient {
         demosaicOutputStage,
         completeExport,
         librawReference,
+        candidateReference,
       },
       transfer,
     );

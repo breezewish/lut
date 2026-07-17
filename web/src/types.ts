@@ -163,13 +163,17 @@ export type WorkerCommand =
       demosaicOutputStage:
         | "demosaic"
         | "identity-lut"
+        | "corrected"
+        | "defects"
         | "horizontal"
         | "vertical"
         | "directions"
+        | "candidate-directions"
         | "aahd"
         | "final";
       completeExport: boolean;
       librawReference: boolean;
+      candidateReference: boolean;
     };
 
 export type WorkerReply =

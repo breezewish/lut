@@ -10,6 +10,7 @@
 @group(0) @binding(9) var<storage, read> gamma_lut: array<f32>;
 @group(0) @binding(10) var<storage, read_write> output: array<u32>;
 @group(0) @binding(11) var<storage, read> parameters: array<u32>;
+@group(0) @binding(12) var<storage, read_write> defect_mask: array<atomic<u32>>;
 
 const MARGIN: u32 = 4u;
 const HOR: u32 = 2u;
@@ -89,6 +90,10 @@ fn clear(@builtin(global_invocation_id) id: vec3u) {
 @compute @workgroup_size(16, 16)
 fn initialize(@builtin(global_invocation_id) id: vec3u) {
   if !in_image(id) { return; }
+  let source_index = image_index(id.x, id.y);
+  if (source_index & 31u) == 0u {
+    atomicStore(&defect_mask[source_index / 32u], 0u);
+  }
   let channel = cfa_color(id.x, id.y);
   let sample = scaled_sample(id.x, id.y);
   let index = padded_index(i32(id.x), i32(id.y));
@@ -142,6 +147,8 @@ fn hide_hot_pixels(@builtin(global_invocation_id) id: vec3u) {
   if (center >> 4) <= average && (center << 4) >= average { return; }
 
   directions[index] = directions[index] | HOT;
+  let source_index = image_index(id.x, id.y);
+  atomicOr(&defect_mask[source_index / 32u], 1u << (source_index & 31u));
   let horizontal = abs(west2 - east2) + abs(west_cross - east_cross) +
     abs(west_cross - east_cross + east2 - west2);
   let vertical = abs(north2 - south2) + abs(north_cross - south_cross) +
@@ -150,8 +157,40 @@ fn hide_hot_pixels(@builtin(global_invocation_id) id: vec3u) {
   let dy = select(-1, 0, vertical > horizontal);
   let replacement = (rgb_channel(0u, padded_offset(index, 2 * dx, 2 * dy), known) +
     rgb_channel(0u, padded_offset(index, -2 * dx, -2 * dy), known)) / 2;
-  set_rgb_channel(0u, index, known, replacement);
   set_rgb_channel(1u, index, known, replacement);
+}
+
+@compute @workgroup_size(16, 16)
+fn copy_corrected(@builtin(global_invocation_id) id: vec3u) {
+  if !in_image(id) { return; }
+  let index = padded_index(i32(id.x), i32(id.y));
+  horizontal_rgb[index] = vertical_rgb[index];
+}
+
+@compute @workgroup_size(16, 16)
+fn write_corrected(@builtin(global_invocation_id) id: vec3u) {
+  let pairs_per_row = width() / 2u;
+  if id.x >= pairs_per_row || id.y >= height() { return; }
+  let x = id.x * 2u;
+  let first_index = padded_index(i32(x), i32(id.y));
+  let second_index = padded_index(i32(x + 1u), i32(id.y));
+  let first = horizontal_rgb[first_index][cfa_color(x, id.y)];
+  let second = horizontal_rgb[second_index][cfa_color(x + 1u, id.y)];
+  pack_pair(vec3u(first), vec3u(second), id.y * pairs_per_row + id.x);
+}
+
+fn defect_at(index: u32) -> u32 {
+  return (atomicLoad(&defect_mask[index / 32u]) >> (index & 31u)) & 1u;
+}
+
+@compute @workgroup_size(16, 16)
+fn write_defects(@builtin(global_invocation_id) id: vec3u) {
+  let pairs_per_row = width() / 2u;
+  if id.x >= pairs_per_row || id.y >= height() { return; }
+  let first_index = image_index(id.x * 2u, id.y);
+  let second_index = first_index + 1u;
+  pack_pair(vec3u(defect_at(first_index)), vec3u(defect_at(second_index)),
+            id.y * pairs_per_row + id.x);
 }
 
 @compute @workgroup_size(16, 16)
@@ -363,7 +402,7 @@ fn choose_direction(@builtin(global_invocation_id) id: vec3u) {
   directions[index] = (directions[index] & HOT) | direction;
 }
 
-fn refine_direction(index: u32, require_coding_neighbor: bool) {
+fn refined_direction(index: u32, require_coding_neighbor: bool) -> u32 {
   let north = directions[padded_offset(index, 0, -1)];
   let south = directions[padded_offset(index, 0, 1)];
   let west = directions[padded_offset(index, -1, 0)];
@@ -381,26 +420,37 @@ fn refine_direction(index: u32, require_coding_neighbor: bool) {
   if (value & HOR) != 0u && vertical_count > threshold && (!require_coding_neighbor || !coding_neighbor) {
     value = (value & ~HOR) | VER;
   }
-  directions[index] = value;
+  return value;
 }
 
 @compute @workgroup_size(16, 16)
 fn refine_checker_even(@builtin(global_invocation_id) id: vec3u) {
   if !in_image(id) || (id.x & 1u) != (id.y & 1u) { return; }
-  refine_direction(padded_index(i32(id.x), i32(id.y)), true);
+  let index = padded_index(i32(id.x), i32(id.y));
+  directions[index] = refined_direction(index, true);
 }
 
 @compute @workgroup_size(16, 16)
 fn refine_checker_odd(@builtin(global_invocation_id) id: vec3u) {
   if !in_image(id) || (id.x & 1u) == (id.y & 1u) { return; }
-  refine_direction(padded_index(i32(id.x), i32(id.y)), true);
+  let index = padded_index(i32(id.x), i32(id.y));
+  directions[index] = refined_direction(index, true);
 }
 
 @compute @workgroup_size(16, 16)
 fn refine_isolated(@builtin(global_invocation_id) id: vec3u) {
   if !in_image(id) { return; }
   let index = padded_index(i32(id.x), i32(id.y));
-  if (directions[index] & 1u) == 0u { refine_direction(index, false); }
+  var value = directions[index];
+  if (value & 1u) == 0u { value = refined_direction(index, false); }
+  atomicStore(&horizontal_homogeneity[index], value);
+}
+
+@compute @workgroup_size(16, 16)
+fn copy_refined_directions(@builtin(global_invocation_id) id: vec3u) {
+  if !in_image(id) { return; }
+  let index = padded_index(i32(id.x), i32(id.y));
+  directions[index] = atomicLoad(&horizontal_homogeneity[index]);
 }
 
 @compute @workgroup_size(16, 16)

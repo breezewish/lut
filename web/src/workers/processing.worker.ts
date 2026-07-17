@@ -13,6 +13,7 @@ import {
   demosaicLibRawAahdWithWgsl,
   type AahdReferenceInfo,
 } from "../lib/libraw-aahd";
+import { correctImmutableDefects } from "../lib/aahd-candidate-reference";
 import { WebGpuColorRenderer } from "../lib/webgpu-color";
 import type {
   ExportTimings,
@@ -65,14 +66,43 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       try {
         raw.open(new Uint8Array(data.buffer), false);
         const sensor = raw.sensorInfo();
-        if (data.librawReference && data.referenceRgb16) {
-          throw new Error("Select either the LibRaw oracle or an RGB16 file.");
+        if (
+          Number(data.librawReference) +
+            Number(data.candidateReference) +
+            Number(data.referenceRgb16 !== undefined) >
+          1
+        ) {
+          throw new Error("Select exactly one demosaic reference source.");
         }
         let referenceInfo: AahdReferenceInfo | undefined;
         let reference: Uint16Array | undefined = data.referenceRgb16
           ? new Uint16Array(data.referenceRgb16)
           : undefined;
-        if (data.librawReference) {
+        if (data.candidateReference) {
+          if (
+            data.demosaicBackend !== "libraw-aahd-wgsl" ||
+            (data.demosaicOutputStage !== "corrected" &&
+              data.demosaicOutputStage !== "defects" &&
+              data.demosaicOutputStage !== "candidate-directions")
+          ) {
+            throw new Error(
+              "The candidate CPU reference supports corrected, defects, and candidate-directions WGSL stages.",
+            );
+          }
+          if (data.demosaicOutputStage !== "candidate-directions") {
+            referenceInfo = raw.aahdReferenceInfo();
+            const input = raw.aahdInputView(0, referenceInfo.inputSampleCount);
+            const candidate = correctImmutableDefects(
+              input,
+              referenceInfo.width,
+              referenceInfo.height,
+            );
+            reference =
+              data.demosaicOutputStage === "corrected"
+                ? expandScalarSamples(candidate.corrected)
+                : expandDefectMask(candidate.defects, input.length);
+          }
+        } else if (data.librawReference) {
           if (data.demosaicBackend !== "libraw-aahd-wgsl") {
             throw new Error("The internal LibRaw oracle requires WGSL AAHD.");
           }
@@ -112,9 +142,12 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
             ? await demosaicLibRawAahdWithWgsl(
                 mosaic,
                 sensor,
-                data.demosaicOutputStage === "horizontal" ||
+                data.demosaicOutputStage === "corrected" ||
+                  data.demosaicOutputStage === "defects" ||
+                  data.demosaicOutputStage === "horizontal" ||
                   data.demosaicOutputStage === "vertical" ||
                   data.demosaicOutputStage === "directions" ||
+                  data.demosaicOutputStage === "candidate-directions" ||
                   data.demosaicOutputStage === "aahd"
                   ? data.demosaicOutputStage
                   : "final",
@@ -383,6 +416,27 @@ function expandDirections(source: Uint8Array): Uint16Array {
     result[index * 3] = direction;
     result[index * 3 + 1] = direction;
     result[index * 3 + 2] = direction;
+  }
+  return result;
+}
+
+function expandScalarSamples(source: Uint16Array): Uint16Array {
+  const result = new Uint16Array(source.length * 3);
+  for (let index = 0; index < source.length; index += 1) {
+    result[index * 3] = source[index];
+    result[index * 3 + 1] = source[index];
+    result[index * 3 + 2] = source[index];
+  }
+  return result;
+}
+
+function expandDefectMask(mask: Uint32Array, sampleCount: number): Uint16Array {
+  const result = new Uint16Array(sampleCount * 3);
+  for (let index = 0; index < sampleCount; index += 1) {
+    const value = (mask[index >>> 5] >>> (index & 31)) & 1;
+    result[index * 3] = value;
+    result[index * 3 + 1] = value;
+    result[index * 3 + 2] = value;
   }
   return result;
 }

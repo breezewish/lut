@@ -12,6 +12,12 @@
   boundary with an independent scalar CPU implementation of that new policy;
   this proves the candidate implementation, not compatibility with the product
   baseline, and cannot replace the golden without explicit approval.
+- The immutable defect test uses adjacent defects whose classifications would
+  cascade under in-place writes and verifies the corrected samples and packed
+  defect mask against the original mosaic.
+- The isolated-direction test uses adjacent direction choices whose refinements
+  would cascade under in-place writes and verifies every result against one
+  immutable input plane.
 - Tiled output matches the corresponding accepted full-frame output exactly,
   while the full-frame output is independently checked against LibRaw or the
   explicitly approved candidate CPU reference.

@@ -17,6 +17,8 @@ const outputStage =
       : "demosaic");
 const completeExport = process.env.DEMOSAIC_PERF_COMPLETE_EXPORT === "1";
 const librawReference = process.env.DEMOSAIC_PERF_LIBRAW_REFERENCE === "1";
+const candidateReference =
+  process.env.DEMOSAIC_PERF_CANDIDATE_REFERENCE === "1";
 const reference = process.env.DEMOSAIC_PERF_REFERENCE
   ? resolve(process.env.DEMOSAIC_PERF_REFERENCE)
   : undefined;
@@ -33,7 +35,7 @@ test("records LibRaw-unpack plus GPU demosaic performance", async ({
   );
   page.on("pageerror", (error) => console.log(`[browser:error] ${error}`));
   await page.goto(
-    `/?demosaicBenchmark=1&demosaicBackend=${encodeURIComponent(backend)}&demosaicOutputStage=${encodeURIComponent(outputStage)}&completeExport=${completeExport ? "1" : "0"}&librawReference=${librawReference ? "1" : "0"}`,
+    `/?demosaicBenchmark=1&demosaicBackend=${encodeURIComponent(backend)}&demosaicOutputStage=${encodeURIComponent(outputStage)}&completeExport=${completeExport ? "1" : "0"}&librawReference=${librawReference ? "1" : "0"}&candidateReference=${candidateReference ? "1" : "0"}`,
   );
   await expect(page.locator("body")).toHaveAttribute(
     "data-benchmark-status",
@@ -98,6 +100,7 @@ test("records LibRaw-unpack plus GPU demosaic performance", async ({
         outputStage,
         completeExport,
         librawReference,
+        candidateReference,
         coldRun: runs[0],
         warmRuns: runs.slice(1),
       },

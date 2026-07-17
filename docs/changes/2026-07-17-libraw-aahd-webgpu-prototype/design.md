@@ -191,6 +191,30 @@ the reports. This runtime-dependent result reinforces that the in-place defect
 and isolated-direction dispatches are not a portable deterministic contract,
 even when one browser and driver happen to repeat a result.
 
+### Deterministic Candidate Reference
+
+The parallel candidate now has an explicit contract separate from LibRaw
+parity. Defect classification and replacement read one immutable scaled CFA
+plane and write corrections to a second plane. A packed one-bit-per-pixel mask
+records the classified defects. The isolated-direction refinement similarly
+reads one direction plane and writes a second plane before copying it back.
+The two checkerboard refinement passes remain ordered by parity because each
+dispatch only reads the opposite parity.
+
+An independent scalar TypeScript implementation defines both changed
+boundaries. It deliberately reads only its immutable input and does not share
+the WGSL implementation. On the 6240 x 4168 Sony fixture, T4 hardware tests
+compared all 78,024,960 expanded channel samples at each boundary. The
+corrected CFA, packed defect classification, and isolated-direction result all
+matched their scalar references exactly. Two complete candidate runs were also
+bitwise repeatable in the tested browser and driver environment.
+
+The candidate still differs from pinned LibRaw at 2,942 final ProPhoto RGB16
+samples, with maximum difference 1,033. That difference is expected evidence
+of the new immutable-neighborhood policy, not a LibRaw parity result. The
+separate serial parity route and broader repeatability matrix remain required
+before the Phase 1 gate is complete.
+
 ## Resource Trade-offs
 
 The full-frame workspace allocates approximately 2.19 GiB and its largest
@@ -240,10 +264,12 @@ Before production:
 ## Appendix: Reproduction
 
 The opt-in Playwright benchmark selects
-`demosaicBackend=libraw-aahd-wgsl`. `demosaicOutputStage` accepts
-`horizontal`, `vertical`, `directions`, `aahd`, or `final`; setting
-`librawReference=1` captures and compares the matching internal LibRaw stage.
-Normal application and end-to-end paths continue to use production LibRaw.
+`demosaicBackend=libraw-aahd-wgsl`. `demosaicOutputStage` accepts `corrected`,
+`defects`, `horizontal`, `vertical`, `directions`, `candidate-directions`,
+`aahd`, or `final`. Setting `librawReference=1` captures and compares the
+matching internal LibRaw stage. Setting `candidateReference=1` compares the
+candidate-only boundaries with their independent scalar reference. Normal
+application and end-to-end paths continue to use production LibRaw.
 
 The CPU baseline is reproducible with:
 

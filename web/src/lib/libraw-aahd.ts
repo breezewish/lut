@@ -1,5 +1,6 @@
 import shader from "../demosaic/libraw-aahd.wgsl?raw";
 import type { SensorImageInfo } from "./onnx-demosaic";
+import { refineImmutableIsolatedDirections } from "./aahd-candidate-reference";
 
 export interface AahdReferenceInfo {
   width: number;
@@ -49,9 +50,18 @@ export interface LibRawAahdValidation {
 export interface LibRawAahdResult {
   width: number;
   height: number;
-  algorithm: "LibRaw AAHD";
+  algorithm: "Deterministic parallel AAHD candidate";
+  contract: "deterministic-parallel-candidate";
   backend: "native-wgsl";
-  outputStage: "horizontal" | "vertical" | "directions" | "aahd" | "final";
+  outputStage:
+    | "corrected"
+    | "defects"
+    | "horizontal"
+    | "vertical"
+    | "directions"
+    | "candidate-directions"
+    | "aahd"
+    | "final";
   adapterInfo: {
     vendor: string;
     architecture: string;
@@ -67,6 +77,9 @@ const ENTRY_POINTS = [
   "clear",
   "initialize",
   "hide_hot_pixels",
+  "copy_corrected",
+  "write_corrected",
+  "write_defects",
   "interpolate_green",
   "interpolate_rb_at_green",
   "interpolate_remaining_rb",
@@ -76,6 +89,7 @@ const ENTRY_POINTS = [
   "refine_checker_even",
   "refine_checker_odd",
   "refine_isolated",
+  "copy_refined_directions",
   "combine",
   "write_horizontal",
   "write_vertical",
@@ -89,8 +103,11 @@ type EntryPoint = (typeof ENTRY_POINTS)[number];
 
 const BINDINGS: Record<EntryPoint, number[]> = {
   clear: [5, 6, 7, 11],
-  initialize: [0, 1, 2, 8, 11],
-  hide_hot_pixels: [1, 2, 5, 11],
+  initialize: [0, 1, 2, 8, 11, 12],
+  hide_hot_pixels: [1, 2, 5, 11, 12],
+  copy_corrected: [1, 2, 11],
+  write_corrected: [1, 10, 11],
+  write_defects: [10, 11, 12],
   interpolate_green: [1, 2, 8, 11],
   interpolate_rb_at_green: [1, 2, 8, 11],
   interpolate_remaining_rb: [1, 2, 8, 11],
@@ -99,7 +116,8 @@ const BINDINGS: Record<EntryPoint, number[]> = {
   choose_direction: [3, 4, 5, 6, 7, 11],
   refine_checker_even: [5, 11],
   refine_checker_odd: [5, 11],
-  refine_isolated: [5, 11],
+  refine_isolated: [5, 6, 11],
+  copy_refined_directions: [5, 6, 11],
   combine: [0, 1, 2, 5, 11],
   write_horizontal: [1, 10, 11],
   write_vertical: [2, 10, 11],
@@ -128,11 +146,19 @@ interface Workspace {
 let runtimePromise: Promise<Runtime> | undefined;
 let cachedWorkspace: Workspace | undefined;
 
-/** Reproduces LibRaw's AAHD, Blend highlight, and ProPhoto RGB16 path in WGSL. */
+/** Runs the deterministic parallel AAHD candidate in WGSL. */
 export async function demosaicLibRawAahdWithWgsl(
   mosaic: Uint16Array,
   info: SensorImageInfo,
-  outputStage: "horizontal" | "vertical" | "directions" | "aahd" | "final",
+  outputStage:
+    | "corrected"
+    | "defects"
+    | "horizontal"
+    | "vertical"
+    | "directions"
+    | "candidate-directions"
+    | "aahd"
+    | "final",
   reference?: Uint16Array,
   referenceInfo?: AahdReferenceInfo,
 ): Promise<LibRawAahdResult> {
@@ -173,6 +199,12 @@ export async function demosaicLibRawAahdWithWgsl(
 
     const hotStartedAt = performance.now();
     submitPass(runtime, workspace, "hide_hot_pixels");
+    submitPass(runtime, workspace, "copy_corrected");
+    if (outputStage === "corrected") {
+      submitPass(runtime, workspace, "write_corrected", false, true);
+    } else if (outputStage === "defects") {
+      submitPass(runtime, workspace, "write_defects", false, true);
+    }
     await runtime.device.queue.onSubmittedWorkDone();
     const hotPixelMs = performance.now() - hotStartedAt;
 
@@ -193,12 +225,47 @@ export async function demosaicLibRawAahdWithWgsl(
     const refineStartedAt = performance.now();
     submitPass(runtime, workspace, "refine_checker_even");
     submitPass(runtime, workspace, "refine_checker_odd");
+    let candidateDirections: Uint32Array | undefined;
+    if (outputStage === "candidate-directions") {
+      submitPass(runtime, workspace, "write_directions", false, true);
+      await runtime.device.queue.onSubmittedWorkDone();
+      const encoder = runtime.device.createCommandEncoder();
+      encoder.copyBufferToBuffer(
+        workspace.resources[10],
+        0,
+        workspace.readback,
+        0,
+        workspace.packedBytes,
+      );
+      runtime.device.queue.submit([encoder.finish()]);
+      await workspace.readback.mapAsync(GPUMapMode.READ);
+      try {
+        const packed = new Uint16Array(workspace.readback.getMappedRange());
+        const before = new Uint32Array(info.sampleCount);
+        for (let index = 0; index < before.length; index += 1) {
+          before[index] = packed[index * 3];
+        }
+        candidateDirections = refineImmutableIsolatedDirections(
+          before,
+          info.width,
+          info.height,
+        );
+      } finally {
+        workspace.readback.unmap();
+      }
+    }
     submitPass(runtime, workspace, "refine_isolated");
-    if (outputStage === "horizontal") {
+    submitPass(runtime, workspace, "copy_refined_directions");
+    if (outputStage === "corrected" || outputStage === "defects") {
+      // The requested preprocessing boundary was packed before interpolation.
+    } else if (outputStage === "horizontal") {
       submitPass(runtime, workspace, "write_horizontal", false, true);
     } else if (outputStage === "vertical") {
       submitPass(runtime, workspace, "write_vertical", false, true);
-    } else if (outputStage === "directions") {
+    } else if (
+      outputStage === "directions" ||
+      outputStage === "candidate-directions"
+    ) {
       submitPass(runtime, workspace, "write_directions", false, true);
     } else {
       submitPass(runtime, workspace, "combine");
@@ -209,9 +276,12 @@ export async function demosaicLibRawAahdWithWgsl(
     let highlightMs = 0;
     const colorStartedAt = performance.now();
     if (
+      outputStage === "corrected" ||
+      outputStage === "defects" ||
       outputStage === "horizontal" ||
       outputStage === "vertical" ||
-      outputStage === "directions"
+      outputStage === "directions" ||
+      outputStage === "candidate-directions"
     ) {
       // The candidate was packed before combine could overwrite it.
     } else if (outputStage === "aahd") {
@@ -244,12 +314,17 @@ export async function demosaicLibRawAahdWithWgsl(
       pixels.set(new Uint16Array(workspace.readback.getMappedRange()));
       const readbackMs = performance.now() - readbackStartedAt;
       const validationStartedAt = performance.now();
-      validation = reference ? compareRgb16(pixels, reference) : undefined;
+      validation = candidateDirections
+        ? compareExpandedScalar(pixels, candidateDirections)
+        : reference
+          ? compareRgb16(pixels, reference)
+          : undefined;
       validationMs = performance.now() - validationStartedAt;
       return {
         width: info.width,
         height: info.height,
-        algorithm: "LibRaw AAHD",
+        algorithm: "Deterministic parallel AAHD candidate",
+        contract: "deterministic-parallel-candidate",
         backend: "native-wgsl",
         outputStage,
         adapterInfo: {
@@ -416,6 +491,10 @@ function getWorkspace(
     create(
       64 * Uint32Array.BYTES_PER_ELEMENT,
       GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    ),
+    create(
+      Math.ceil(info.sampleCount / 32) * Uint32Array.BYTES_PER_ELEMENT,
+      GPUBufferUsage.STORAGE,
     ),
   ];
   device.queue.writeBuffer(resources[9], 0, gamma);
@@ -587,6 +666,58 @@ function compareRgb16(
     maximumDifferenceIndex,
     actualAtMaximumDifference: actual[maximumDifferenceIndex],
     expectedAtMaximumDifference: expected[maximumDifferenceIndex],
+    meanAbsoluteDifference: differenceSum / actual.length,
+    rootMeanSquareDifference,
+    psnrDb:
+      rootMeanSquareDifference === 0
+        ? Number.POSITIVE_INFINITY
+        : 20 * Math.log10(65535 / rootMeanSquareDifference),
+  };
+}
+
+function compareExpandedScalar(
+  actual: Uint16Array,
+  expected: Uint32Array,
+): LibRawAahdValidation {
+  if (actual.length !== expected.length * 3) {
+    throw new Error(
+      `The scalar reference has ${expected.length} pixels; expected ${actual.length / 3}.`,
+    );
+  }
+  let differingSamples = 0;
+  let samplesOverOneCode = 0;
+  let samplesOverEightCodes = 0;
+  let maximumDifference = 0;
+  let maximumDifferenceIndex = 0;
+  let differenceSum = 0;
+  let squaredDifferenceSum = 0;
+  for (let index = 0; index < actual.length; index += 1) {
+    const difference = Math.abs(
+      actual[index] - expected[Math.floor(index / 3)],
+    );
+    if (difference !== 0) differingSamples += 1;
+    if (difference > 1) samplesOverOneCode += 1;
+    if (difference > 8) samplesOverEightCodes += 1;
+    if (difference > maximumDifference) {
+      maximumDifference = difference;
+      maximumDifferenceIndex = index;
+    }
+    differenceSum += difference;
+    squaredDifferenceSum += difference * difference;
+  }
+  const rootMeanSquareDifference = Math.sqrt(
+    squaredDifferenceSum / actual.length,
+  );
+  return {
+    sampleCount: actual.length,
+    differingSamples,
+    samplesOverOneCode,
+    samplesOverEightCodes,
+    maximumDifference,
+    maximumDifferenceIndex,
+    actualAtMaximumDifference: actual[maximumDifferenceIndex],
+    expectedAtMaximumDifference:
+      expected[Math.floor(maximumDifferenceIndex / 3)],
     meanAbsoluteDifference: differenceSum / actual.length,
     rootMeanSquareDifference,
     psnrDb:
