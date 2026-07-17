@@ -1,5 +1,13 @@
 # Product Context
 
+## Register
+
+product
+
+## Platform
+
+web
+
 ## Purpose
 
 RAW Alchemy gives photographers a fast way to inspect and apply the curated V-Log Alchemy looks without installing a desktop application or trusting a server with original photographs.

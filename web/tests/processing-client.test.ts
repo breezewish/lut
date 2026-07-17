@@ -27,13 +27,14 @@ const exportTimings: ExportTimings = {
     demosaicMs: 5,
     postprocessMs: 6,
     colorConversionMs: 7,
+    previewResizeMs: 0,
     processRemainderMs: 8,
     rgb16Ms: 9,
     totalMs: 45,
   },
   colorBackend: "cpu",
   colorProcessingMs: 10,
-  deflateMs: 11,
+  tiffEncodingMs: 11,
   workerTotalMs: 66,
 };
 
@@ -73,6 +74,7 @@ function preview(fileId: string, value: number): PreviewResult {
     timings: {
       libraw: exportTimings.libraw,
       previewSourceMs: 10,
+      lutLoadMs: 0,
       previewColorMs: 11,
       workerTotalMs: 66,
     },
@@ -138,6 +140,8 @@ test("supersedes queued exposure renders with the latest request", async () => {
 test("decode rejects an unsent render instead of dispatching stale exposure", async () => {
   vi.stubGlobal("Worker", ControlledWorker);
   const client = new ProcessingClient();
+  const onPreviewFrame = vi.fn();
+  client.onPreviewFrame(onPreviewFrame);
 
   const rendering = client.render("one", 0.1, lut);
   const staleRender = client.render("one", 0.2, lut);
@@ -160,6 +164,14 @@ test("decode rejects an unsent render instead of dispatching stale exposure", as
     result: preview("one", 10),
   });
   const decodeCommand = ControlledWorker.instance.messages[1];
+  const initialPreview = preview("two", 15);
+  ControlledWorker.instance.reply({
+    requestId: decodeCommand.requestId,
+    ok: true,
+    type: "preview-frame",
+    result: initialPreview,
+  });
+  expect(onPreviewFrame).toHaveBeenCalledWith(initialPreview);
   ControlledWorker.instance.reply({
     requestId: decodeCommand.requestId,
     ok: true,

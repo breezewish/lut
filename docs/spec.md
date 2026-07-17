@@ -33,6 +33,7 @@ Invalid RAW files, malformed LUTs, hash mismatches, and encoding failures stop t
 - LUT preview and export are `LibRaw ProPhoto D65 Linear → exposure → V-Gamut D65 → V-Log → LUT → display or RGB16 TIFF`.
 - V-Log preserves negative values; only LUT lookup clamps to its declared domain.
 - Camera-Match Boost is off in corrected-v2.
+- Full-resolution export writes uncompressed RGB16 TIFF to minimize local export latency.
 - The 27 creative LUTs are pinned by source commit and SHA-256 and loaded on demand.
 - Unknown LUT output semantics remain labeled as unverified.
 - The CLI supports `--output text|json`, `--json`, and `--color auto|always|never`.

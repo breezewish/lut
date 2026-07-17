@@ -8,10 +8,58 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  verify:
+  quality:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm test
+      - run: npm audit --omit=dev
+
+  rust:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --all --check
+      - run: cargo test --workspace
+      - run: cargo test --workspace --release
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy -p alchemy-core --target wasm32-unknown-unknown --features wasm -- -D warnings
+      - run: cargo build -p alchemy-core
+      - run: >-
+          cc -std=c11 -Wall -Wextra -Werror
+          -Icrates/alchemy-core/include tests/c-api-smoke.c
+          -Ltarget/debug -lalchemy_core -lm
+          -Wl,-rpath,"$PWD/target/debug"
+          -o target/c-api-smoke
+      - run: target/c-api-smoke
+
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -29,30 +77,20 @@ jobs:
       - run: cargo install wasm-pack --version 0.13.1 --locked
       - run: rustup target add wasm32-unknown-unknown
       - run: npx playwright install --with-deps chromium firefox webkit
-      - run: cargo fmt --all --check
-      - run: cargo test --workspace
-      - run: cargo test --workspace --release
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo clippy -p alchemy-core --target wasm32-unknown-unknown --features wasm -- -D warnings
-      - run: cargo build -p alchemy-core
-      - run: >-
-          cc -std=c11 -Wall -Wextra -Werror
-          -Icrates/alchemy-core/include tests/c-api-smoke.c
-          -Ltarget/debug -lalchemy_core -lm
-          -Wl,-rpath,"$PWD/target/debug"
-          -o target/c-api-smoke
-      - run: target/c-api-smoke
-      - run: npm run format:check
-      - run: npm test
       - run: npm run build
-      - run: npm run test:e2e
-      - run: npm audit --omit=dev
+      - run: npm run test:e2e:prepared
+      - run: npm run bundle:pages
+      - run: npm run test:pages:prepared
+      - if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
 
   deploy:
     if: github.event_name == 'push'
-    needs: verify
+    needs: [quality, rust, browser]
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 5
     permissions:
       contents: read
       pages: write
@@ -62,23 +100,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-
-      - run: npm ci
-      - run: cargo install wasm-pack --version 0.13.1 --locked
-      - run: npx playwright install --with-deps chromium
       - uses: actions/configure-pages@v5
-      - run: npm run test:pages
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

@@ -4,4 +4,4 @@
 - The LibRaw algorithm benchmark decodes the same Sony RAW with AHD, DCB, and AAHD under identical parameters, discards warm-ups, reports phase distributions, records sampled pairwise RGB16 differences without labeling them ground-truth quality, and records the coordinates used for optional 1:1 quality crops.
 - The Studio benchmark invokes the real Studio decode entry point for Bayer RCD and X-Trans Markesteijn, records the actual ONNX provider and fallback path, separates demosaic from full decode time, and records and renders an optional final float32 quality crop.
 - The standard native/WASM parity check proves that phase callbacks and the split TIFF strip API do not change current AAHD RGB16 output.
-- The strip unit tests prove that source reads remain bounded and color rendering and Deflate consume each strip exactly once.
+- The strip unit tests prove that source reads remain bounded and color rendering and TIFF encoding consume each strip exactly once.

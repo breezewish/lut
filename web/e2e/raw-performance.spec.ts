@@ -30,6 +30,9 @@ test("records phased production Worker performance", async ({
     );
     page.on("pageerror", (error) => console.log(`[browser:error] ${error}`));
   }
+  let exportRun:
+    | { exportWallMs: number; worker: unknown; blob: unknown }
+    | undefined;
 
   await page.goto(
     `/?colorBackend=${colorBackend}${validateGpu ? "&validateGpu=1" : ""}`,
@@ -66,24 +69,32 @@ test("records phased production Worker performance", async ({
       .toBe(1);
     const previewWallMs = performance.now() - previewStartedAt;
     const preview = await latestMarkDetail(page, "raw-alchemy:preview-worker");
+    const initial = await initialPreviewBoundaries(page);
 
-    const exportStartedAt = performance.now();
-    const downloadPromise = page.waitForEvent("download");
-    const exportErrorPromise = page
-      .getByRole("alert")
-      .waitFor({ state: "visible", timeout: 10 * 60_000 })
-      .then(async () => {
-        throw new Error(
-          `Browser export failed: ${await page.getByRole("alert").textContent()}`,
-        );
-      });
-    await page.getByRole("button", { name: "Export selected" }).click();
-    const download = await Promise.race([downloadPromise, exportErrorPromise]);
-    await download.path();
-    const exportWallMs = performance.now() - exportStartedAt;
-    const worker = await latestMarkDetail(page, "raw-alchemy:export-worker");
-    const blob = await latestMarkDetail(page, "raw-alchemy:blob");
-    runs.push({ previewWallMs, preview, exportWallMs, worker, blob });
+    runs.push({ previewWallMs, initial, preview });
+    if (index === samples - 1) {
+      const exportStartedAt = performance.now();
+      const downloadPromise = page.waitForEvent("download");
+      const exportErrorPromise = page
+        .getByRole("alert")
+        .waitFor({ state: "visible", timeout: 10 * 60_000 })
+        .then(async () => {
+          throw new Error(
+            `Browser export failed: ${await page.getByRole("alert").textContent()}`,
+          );
+        });
+      await page.getByRole("button", { name: "Export selected" }).click();
+      const download = await Promise.race([
+        downloadPromise,
+        exportErrorPromise,
+      ]);
+      await download.path();
+      exportRun = {
+        exportWallMs: performance.now() - exportStartedAt,
+        worker: await latestMarkDetail(page, "raw-alchemy:export-worker"),
+        blob: await latestMarkDetail(page, "raw-alchemy:blob"),
+      };
+    }
     await page
       .getByRole("button", { name: `Remove ${fixture.split("/").at(-1)}` })
       .click();
@@ -93,7 +104,7 @@ test("records phased production Worker performance", async ({
   const report = Buffer.from(
     JSON.stringify(
       {
-        schemaVersion: 1,
+        schemaVersion: 3,
         fixture,
         fixtureBytes: fixtureStat.size,
         samples,
@@ -102,6 +113,7 @@ test("records phased production Worker performance", async ({
         adapterInfo,
         coldRun: runs[0],
         warmRuns: runs.slice(1),
+        exportRun,
       },
       null,
       2,
@@ -113,6 +125,22 @@ test("records phased production Worker performance", async ({
     path: reportPath,
     contentType: "application/json",
   });
+
+  expect(runs[0].initial.thumbnailMs).toBeLessThan(300);
+  expect(runs[0].initial.processedPreviewMs).toBeLessThan(1_200);
+  expect(runs[0].initial.settledPreviewMs).toBeLessThan(1_500);
+  expect(
+    percentile(
+      runs.slice(1).map(({ initial }) => initial.processedPreviewMs),
+      0.95,
+    ),
+  ).toBeLessThan(600);
+  expect(
+    percentile(
+      runs.slice(1).map(({ initial }) => initial.settledPreviewMs),
+      0.95,
+    ),
+  ).toBeLessThan(800);
 });
 
 async function latestMarkDetail(page: Page, name: string) {
@@ -122,4 +150,36 @@ async function latestMarkDetail(page: Page, name: string) {
       .at(-1) as PerformanceMark;
     return mark.detail;
   }, name);
+}
+
+async function initialPreviewBoundaries(page: Page) {
+  return page.evaluate(() => {
+    const selectedAt = performance.getEntriesByName(
+      "raw-alchemy:file-selected",
+    )[0].startTime;
+    const thumbnail = performance.getEntriesByName("raw-alchemy:thumbnail")[0];
+    const fileRead = performance.getEntriesByName(
+      "raw-alchemy:file-read",
+    )[0] as PerformanceMark;
+    const draws = performance
+      .getEntriesByName("raw-alchemy:canvas-draw")
+      .map((entry) => ({
+        at: entry.startTime,
+        ...(entry as PerformanceMark).detail,
+      }));
+    return {
+      fileReadMs: fileRead.detail.durationMs as number,
+      thumbnailMs: thumbnail.startTime - selectedAt,
+      processedPreviewMs:
+        draws.find(({ width }) => width === 384)!.at - selectedAt,
+      settledPreviewMs:
+        draws.find(({ width }) => width === 1_024)!.at - selectedAt,
+      canvasDraws: draws,
+    };
+  });
+}
+
+function percentile(values: number[], quantile: number) {
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.ceil(sorted.length * quantile) - 1];
 }

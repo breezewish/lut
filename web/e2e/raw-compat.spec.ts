@@ -30,9 +30,9 @@ test("a real camera CFA DNG matches the native full-resolution export", async ({
 
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(realDng);
-  await expect(page.getByText("Leica M8", { exact: true })).toBeVisible({
-    timeout: 30_000,
-  });
+  await expect(
+    page.getByRole("button", { name: /leica-m8\.dng.*Leica M8.*Ready/ }),
+  ).toBeVisible({ timeout: 30_000 });
   const basePreview = page.getByLabel("Base preview");
   await expect(basePreview).toBeVisible();
   const preview = await basePreview.evaluate((canvas: HTMLCanvasElement) => {
@@ -99,9 +99,11 @@ test("a full-resolution Sony ARW export matches the native pipeline", async ({
   });
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(sonyArw);
-  await expect(page.getByText("SONY ILME-FX30")).toBeVisible({
-    timeout: 30_000,
-  });
+  await expect(
+    page.getByRole("button", {
+      name: /example-sony\.ARW.*Sony ILME-FX30.*Ready/,
+    }),
+  ).toBeVisible({ timeout: 30_000 });
   await expect(page.getByLabel("Base preview")).toBeVisible();
   const preview = page.getByRole("region", {
     name: "Base and LUT comparison",
@@ -182,10 +184,10 @@ test("a full-resolution Sony ARW export matches the native pipeline", async ({
 
   await expect
     .poll(async () => (await finalDifference()).meanAbsoluteDifference, {
-      timeout: 3_000,
+      timeout: 500,
     })
     .toBeGreaterThan(5);
-  expect(Date.now() - finalInputAt).toBeLessThan(3_000);
+  expect(Date.now() - finalInputAt).toBeLessThan(500);
   const finalPreview = await finalDifference();
   expect(finalPreview.average - evZero.average).toBeGreaterThan(2);
   expect(
@@ -194,7 +196,7 @@ test("a full-resolution Sony ARW export matches the native pipeline", async ({
         (window as Window & { renderCommandCount?: number })
           .renderCommandCount ?? 0,
     ),
-  ).toBeLessThanOrEqual(2);
+  ).toBeLessThanOrEqual(5);
   const maxAnimationFrameGap = await page.evaluate(
     () =>
       (window as Window & { maxAnimationFrameGap?: number })

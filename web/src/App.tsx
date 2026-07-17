@@ -3,15 +3,21 @@ import {
   FileImage,
   FolderOpen,
   ImageDown,
+  LoaderCircle,
   LockKeyhole,
+  Moon,
   Plus,
   RotateCcw,
+  Search,
+  Sun,
   Trash2,
   X,
 } from "lucide-react";
 import {
   type ChangeEvent,
+  type CSSProperties,
   type DragEvent,
+  startTransition,
   useCallback,
   useEffect,
   useMemo,
@@ -20,7 +26,7 @@ import {
 } from "react";
 import { Zip, ZipPassThrough } from "fflate";
 
-import { PreviewCanvas } from "./components/preview-canvas";
+import { PreviewCanvas, type PreviewFocus } from "./components/preview-canvas";
 import { Button } from "./components/ui/button";
 import { Select } from "./components/ui/select";
 import { ProcessingClient } from "./lib/processing-client";
@@ -28,7 +34,10 @@ import type { LutManifest, PreviewResult, QueueItem } from "./types";
 
 const RAW_ACCEPT =
   ".3fr,.ari,.arw,.bay,.cap,.cr2,.cr3,.dcr,.dcs,.dng,.drf,.eip,.erf,.fff,.gpr,.iiq,.k25,.kdc,.mdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.pef,.ptx,.pxn,.r3d,.raf,.raw,.rwl,.rw2,.rwz,.sr2,.srf,.srw,.x3f";
-const PREVIEW_RENDER_DEBOUNCE_MS = 200;
+const INTERACTIVE_PREVIEW_MAX_EDGE = 256;
+const SETTLED_PREVIEW_MAX_EDGE = 1_024;
+const SETTLED_PREVIEW_IDLE_MS = 120;
+const EXPOSURE_PREVIEW_INTERVAL_MS = 50;
 
 const STATUS_LABELS: Record<QueueItem["status"], string> = {
   queued: "Queued",
@@ -53,6 +62,36 @@ interface QueueUndo {
   message: string;
 }
 
+interface PreviewImage {
+  pixels: Uint8Array<ArrayBuffer>;
+  width: number;
+  height: number;
+}
+
+type Theme = "light" | "dark";
+type PreviewView = "fit" | "actual";
+type MobilePreview = "base" | "look";
+
+function initialTheme(): Theme {
+  try {
+    const saved = localStorage.getItem("raw-alchemy-theme");
+    if (saved === "light" || saved === "dark") return saved;
+  } catch {
+    // Storage is optional. The operating-system preference remains authoritative.
+  }
+  return typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-color-scheme: light)").matches
+    ? "light"
+    : "dark";
+}
+
+interface DisplayedPreview {
+  fileId: string;
+  base?: PreviewImage;
+  lut?: PreviewImage;
+  decodeCount: number;
+}
+
 function isDecodeFailure(item: QueueItem): boolean {
   return item.status === "decode-error";
 }
@@ -69,6 +108,31 @@ function previewRecipeKey(fileId: string, ev: number, lutId: string): string {
   return `${fileId}\n${ev}\n${lutId}`;
 }
 
+function basePreviewRecipeKey(fileId: string, ev: number): string {
+  return `${fileId}\n${ev}`;
+}
+
+function mergePreview(
+  current: DisplayedPreview | undefined,
+  result: PreviewResult,
+): DisplayedPreview {
+  const image = (pixels: Uint8Array<ArrayBuffer>): PreviewImage => ({
+    pixels,
+    width: result.width,
+    height: result.height,
+  });
+  return {
+    fileId: result.fileId,
+    base: result.base
+      ? image(result.base)
+      : current?.fileId === result.fileId
+        ? current.base
+        : undefined,
+    lut: image(result.lut),
+    decodeCount: result.decodeCount,
+  };
+}
+
 export default function App() {
   const [client] = useState(() => new ProcessingClient());
   const [manifest, setManifest] = useState<LutManifest>();
@@ -77,7 +141,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string>();
   const [lutId, setLutId] = useState("fuji-classic-negative");
   const [ev, setEv] = useState(0);
-  const [preview, setPreview] = useState<PreviewResult>();
+  const [preview, setPreview] = useState<DisplayedPreview>();
   const [cameraPreview, setCameraPreview] = useState<{
     fileId: string;
     url: string;
@@ -88,20 +152,62 @@ export default function App() {
   const [exportSummary, setExportSummary] = useState<string>();
   const [queueUndo, setQueueUndo] = useState<QueueUndo>();
   const [lookQuery, setLookQuery] = useState("");
+  const [lookBrowserOpen, setLookBrowserOpen] = useState(false);
+  const [previewView, setPreviewView] = useState<PreviewView>("fit");
+  const previewFocus = useRef<PreviewFocus>({
+    x: 0.5,
+    y: 0.5,
+  });
+  const previewGrid = useRef<HTMLDivElement>(null);
+  const [mobilePreview, setMobilePreview] = useState<MobilePreview>("look");
+  const [theme, setTheme] = useState<Theme>(initialTheme);
   const [recentLutIds, setRecentLutIds] = useState<string[]>(() => {
     try {
-      return JSON.parse(
+      const stored: unknown = JSON.parse(
         localStorage.getItem("raw-alchemy-recent-luts") ?? "[]",
-      ) as string[];
+      );
+      return Array.isArray(stored) &&
+        stored.every((value) => typeof value === "string")
+        ? stored
+        : [];
     } catch {
       return [];
     }
   });
   const decodedFileId = useRef<string | undefined>(undefined);
+  const settledBaseRecipe = useRef<string | undefined>(undefined);
+  const nextPreviewGeneration = useRef(0);
+  const lastPaintedGeneration = useRef(0);
+  const desiredPreview = useRef<
+    | {
+        generation: number;
+        fileId: string;
+        lutId: string;
+      }
+    | undefined
+  >(undefined);
   const [renderedRecipe, setRenderedRecipe] = useState<string>();
   const fileInput = useRef<HTMLInputElement>(null);
   const exposureInput = useRef<HTMLInputElement>(null);
+  const exposureRange = useRef<HTMLInputElement>(null);
+  const exposureCommitTimer = useRef<number | undefined>(undefined);
+  const pendingExposure = useRef(ev);
+  const exposureHasPendingRecipe = useRef(false);
+  const lastExposureCommitAt = useRef(0);
   const stopAfterCurrent = useRef(false);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute("content", theme === "dark" ? "#121318" : "#eceef2");
+    try {
+      localStorage.setItem("raw-alchemy-theme", theme);
+    } catch {
+      // A persisted theme is a convenience, not a processing requirement.
+    }
+  }, [theme]);
 
   const selected = items.find((item) => item.id === selectedId);
   const selectedLut = manifest?.luts.find((lut) => lut.id === lutId);
@@ -116,6 +222,53 @@ export default function App() {
       hasUsablePreview(selected) &&
       renderedRecipe === currentRecipe,
   );
+  const isPreviewProcessing = Boolean(
+    selected &&
+      selectedLut &&
+      !isDecodeFailure(selected) &&
+      (!hasUsablePreview(selected) || renderedRecipe !== currentRecipe),
+  );
+
+  useEffect(() => {
+    setPreviewView("fit");
+    previewFocus.current = { x: 0.5, y: 0.5 };
+    setMobilePreview("look");
+  }, [selectedId]);
+
+  const getPreviewFocus = useCallback(() => previewFocus.current, []);
+
+  const updatePreviewFocus = useCallback((next: PreviewFocus) => {
+    previewFocus.current = next;
+    for (const canvas of previewGrid.current?.querySelectorAll("canvas") ??
+      []) {
+      canvas.style.left = `calc(50% + ${(0.5 - next.x) * canvas.width}px)`;
+      canvas.style.top = `calc(50% + ${(0.5 - next.y) * canvas.height}px)`;
+    }
+  }, []);
+
+  useEffect(() => {
+    const changePreviewView = (event: KeyboardEvent) => {
+      if (!selected || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLButtonElement ||
+        event.target instanceof HTMLTextAreaElement ||
+        event.target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+      if (event.key.toLocaleLowerCase() === "f") {
+        setPreviewView("fit");
+      } else if (event.key === "1") {
+        setPreviewView("actual");
+      } else {
+        return;
+      }
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", changePreviewView);
+    return () => window.removeEventListener("keydown", changePreviewView);
+  }, [selected]);
 
   const updateItem = useCallback((id: string, patch: Partial<QueueItem>) => {
     setItems((current) =>
@@ -123,8 +276,47 @@ export default function App() {
     );
   }, []);
 
+  const setExposure = useCallback((value: number) => {
+    const next = Math.max(-4, Math.min(4, value));
+    pendingExposure.current = next;
+    exposureHasPendingRecipe.current = true;
+    setRenderedRecipe(undefined);
+    if (exposureCommitTimer.current !== undefined) {
+      window.clearTimeout(exposureCommitTimer.current);
+      exposureCommitTimer.current = undefined;
+    }
+    lastExposureCommitAt.current = performance.now();
+    setEv(next);
+  }, []);
+
+  const scheduleExposurePreview = useCallback((input: HTMLInputElement) => {
+    const next = Number(input.value);
+    pendingExposure.current = next;
+    if (!exposureHasPendingRecipe.current) {
+      exposureHasPendingRecipe.current = true;
+      setRenderedRecipe(undefined);
+    }
+    input.style.setProperty("--range-progress", `${((next + 4) / 8) * 100}%`);
+    input.setAttribute("aria-valuetext", `${next} EV`);
+    if (exposureInput.current) exposureInput.current.value = String(next);
+    if (exposureCommitTimer.current !== undefined) return;
+
+    const elapsed = lastExposureCommitAt.current
+      ? performance.now() - lastExposureCommitAt.current
+      : 0;
+    exposureCommitTimer.current = window.setTimeout(
+      () => {
+        exposureCommitTimer.current = undefined;
+        lastExposureCommitAt.current = performance.now();
+        startTransition(() => setEv(pendingExposure.current));
+      },
+      Math.max(0, EXPOSURE_PREVIEW_INTERVAL_MS - elapsed),
+    );
+  }, []);
+
   const releasePreview = useCallback(() => {
     decodedFileId.current = undefined;
+    settledBaseRecipe.current = undefined;
     setRenderedRecipe(undefined);
     setPreview(undefined);
     setCameraPreview(undefined);
@@ -165,11 +357,20 @@ export default function App() {
 
   useEffect(() => {
     const unsubscribe = client.onThumbnail(({ fileId, jpeg }) => {
+      performance.mark("raw-alchemy:thumbnail");
       const url = URL.createObjectURL(new Blob([jpeg], { type: "image/jpeg" }));
       setCameraPreview({ fileId, url });
     });
     return unsubscribe;
   }, [client]);
+
+  useEffect(() => {
+    return client.onPreviewFrame((result) => {
+      if (result.fileId !== selectedId) return;
+      setPreview((current) => mergePreview(current, result));
+      setCameraPreview(undefined);
+    });
+  }, [client, selectedId]);
 
   useEffect(
     () => () => {
@@ -183,6 +384,8 @@ export default function App() {
     let active = true;
     const decodeRecipe = previewRecipeKey(selected.id, ev, selectedLut.id);
     decodedFileId.current = undefined;
+    settledBaseRecipe.current = undefined;
+    desiredPreview.current = undefined;
     setRenderedRecipe(undefined);
     setPreview(undefined);
     setCameraPreview(undefined);
@@ -192,14 +395,25 @@ export default function App() {
       error: undefined,
     });
 
+    const fileReadStartedAt = performance.now();
     selected.file
       .arrayBuffer()
+      .then((buffer) => {
+        performance.mark("raw-alchemy:file-read", {
+          detail: { durationMs: performance.now() - fileReadStartedAt },
+        });
+        return buffer;
+      })
       .then((buffer) => client.decode(selected.id, buffer, ev, selectedLut))
       .then((result) => {
         if (!active) return;
         decodedFileId.current = selected.id;
+        settledBaseRecipe.current = basePreviewRecipeKey(selected.id, ev);
+        if (pendingExposure.current === ev) {
+          exposureHasPendingRecipe.current = false;
+        }
         setRenderedRecipe(decodeRecipe);
-        setPreview(result);
+        setPreview(mergePreview(undefined, result));
         setCameraPreview(undefined);
         updateItem(selected.id, {
           status: "ready",
@@ -226,28 +440,71 @@ export default function App() {
       !selected ||
       !selectedLut ||
       !hasUsablePreview(selected) ||
-      decodedFileId.current !== selected.id
+      decodedFileId.current !== selected.id ||
+      (exposureHasPendingRecipe.current && pendingExposure.current !== ev)
     )
       return;
     const recipe = previewRecipeKey(selected.id, ev, selectedLut.id);
     if (renderedRecipe === recipe) return;
+    const generation = ++nextPreviewGeneration.current;
+    desiredPreview.current = {
+      generation,
+      fileId: selected.id,
+      lutId: selectedLut.id,
+    };
+    const baseRecipe = basePreviewRecipeKey(selected.id, ev);
+    const includeBase = settledBaseRecipe.current !== baseRecipe;
     let active = true;
-    const timer = window.setTimeout(() => {
-      client
-        .render(selected.id, ev, selectedLut)
-        .then((result) => {
-          if (active) {
-            setRenderedRecipe(recipe);
-            setPreview(result);
-          }
-        })
-        .catch((error: Error) => {
-          if (active) setGlobalError(error.message);
+    let settleTimer: number | undefined;
+    const render = async () => {
+      try {
+        const interactive = await client.render(selected.id, ev, selectedLut, {
+          maxEdge: INTERACTIVE_PREVIEW_MAX_EDGE,
+          includeBase,
         });
-    }, PREVIEW_RENDER_DEBOUNCE_MS);
+        const desired = desiredPreview.current;
+        if (
+          desired?.fileId === selected.id &&
+          desired.lutId === selectedLut.id &&
+          generation > lastPaintedGeneration.current
+        ) {
+          lastPaintedGeneration.current = generation;
+          setPreview((current) => mergePreview(current, interactive));
+        }
+        if (!active) return;
+
+        if (includeBase) {
+          await new Promise<void>((resolve) => {
+            settleTimer = window.setTimeout(resolve, SETTLED_PREVIEW_IDLE_MS);
+          });
+          if (!active) return;
+        }
+
+        const settled = await client.render(selected.id, ev, selectedLut, {
+          maxEdge: SETTLED_PREVIEW_MAX_EDGE,
+          includeBase,
+        });
+        if (!active) return;
+        if (pendingExposure.current !== ev) return;
+        settledBaseRecipe.current = baseRecipe;
+        exposureHasPendingRecipe.current = false;
+        setRenderedRecipe(recipe);
+        setPreview((current) => mergePreview(current, settled));
+      } catch (error) {
+        if (active) {
+          setGlobalError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
+    };
+    void render();
     return () => {
       active = false;
-      window.clearTimeout(timer);
+      if (desiredPreview.current?.generation === generation) {
+        desiredPreview.current = undefined;
+      }
+      if (settleTimer !== undefined) window.clearTimeout(settleTimer);
     };
   }, [
     client,
@@ -265,10 +522,28 @@ export default function App() {
     ) {
       exposureInput.current.value = String(ev);
     }
+    if (exposureRange.current && pendingExposure.current === ev) {
+      exposureRange.current.value = String(ev);
+      exposureRange.current.style.setProperty(
+        "--range-progress",
+        `${((ev + 4) / 8) * 100}%`,
+      );
+      exposureRange.current.setAttribute("aria-valuetext", `${ev} EV`);
+    }
   }, [ev]);
+
+  useEffect(
+    () => () => {
+      if (exposureCommitTimer.current !== undefined) {
+        window.clearTimeout(exposureCommitTimer.current);
+      }
+    },
+    [],
+  );
 
   const addFiles = useCallback((files: File[]) => {
     if (files.length === 0) return;
+    performance.mark("raw-alchemy:file-selected");
     setGlobalError(undefined);
     setQueueUndo(undefined);
     setExportSummary(undefined);
@@ -351,8 +626,8 @@ export default function App() {
     stopAfterCurrent.current = false;
     const single = targets.length === 1;
     const outputNames = new Set<string>();
-    // TIFF payloads are already Deflate-compressed. Pass-through ZIP entries
-    // avoid redundant compression and a second contiguous archive buffer.
+    // Keep batch export on the same fast, uncompressed path as single export.
+    // Pass-through ZIP entries also avoid a second contiguous archive buffer.
     const archiveChunks: Uint8Array<ArrayBuffer>[] = [];
     let archiveError: Error | undefined;
     const archive = single
@@ -524,13 +799,20 @@ export default function App() {
     ];
   }, [lookQuery, lutId, manifest, recentLutIds]);
 
+  const workingLuts = useMemo(() => {
+    const ids = Array.from(new Set([lutId, ...recentLutIds])).slice(0, 4);
+    return ids
+      .map((id) => manifest?.luts.find((lut) => lut.id === id))
+      .filter((lut) => lut !== undefined);
+  }, [lutId, manifest, recentLutIds]);
+
   const chooseLut = (value: string) => {
     setLutId(value);
     setLookQuery("");
-    const next = [
-      value,
-      ...recentLutIds.filter((candidate) => candidate !== value),
-    ].slice(0, 4);
+    const next = Array.from(new Set([value, lutId, ...recentLutIds])).slice(
+      0,
+      4,
+    );
     setRecentLutIds(next);
     try {
       localStorage.setItem("raw-alchemy-recent-luts", JSON.stringify(next));
@@ -551,17 +833,37 @@ export default function App() {
           <div className="brand-mark" aria-hidden="true">
             RA
           </div>
-          <div>
-            <h1>RAW Alchemy</h1>
-            <p>Private color lab</p>
-          </div>
+          <h1>RAW Alchemy</h1>
         </div>
-        <div className="privacy-note">
-          <LockKeyhole size={16} aria-hidden="true" />
-          <span>Files stay on this device</span>
+        <div
+          className="document-context"
+          aria-label="Current document"
+          aria-live="polite"
+        >
+          <strong>{selected?.file.name ?? "Local color workspace"}</strong>
+          <span>
+            {selected
+              ? selected.dimensions || STATUS_LABELS[selected.status]
+              : "No file open"}
+          </span>
         </div>
         <div className="topbar-actions">
-          <span className="file-count">{statusText}</span>
+          <div className="privacy-note">
+            <LockKeyhole size={15} aria-hidden="true" />
+            <span>Files stay on this device</span>
+          </div>
+          <Button
+            size="icon"
+            variant="quiet"
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          >
+            {theme === "dark" ? (
+              <Sun size={17} aria-hidden="true" />
+            ) : (
+              <Moon size={17} aria-hidden="true" />
+            )}
+          </Button>
           <Button
             variant="secondary"
             aria-label="Add RAW files"
@@ -594,8 +896,11 @@ export default function App() {
         >
           <div className="queue-heading">
             <div className="queue-heading-copy">
-              <h2>Queue</h2>
-              <p>Full-resolution export runs one at a time.</p>
+              <div className="queue-title-row">
+                <h2>Queue</h2>
+                <span>{statusText}</span>
+              </div>
+              <p>Local files in this session</p>
             </div>
             {items.length > 0 && (
               <Button
@@ -617,8 +922,8 @@ export default function App() {
               onClick={() => fileInput.current?.click()}
             >
               <FolderOpen size={24} aria-hidden="true" />
-              <strong>0 local files</strong>
-              <span>Drop camera RAW files here.</span>
+              <strong>Add camera RAWs</strong>
+              <span>Drop files here or choose from this device.</span>
             </button>
           ) : (
             <div className="queue-list">
@@ -668,6 +973,7 @@ export default function App() {
           <input
             ref={fileInput}
             className="visually-hidden"
+            tabIndex={-1}
             type="file"
             accept={RAW_ACCEPT}
             multiple
@@ -677,33 +983,179 @@ export default function App() {
         </aside>
 
         <main className="workspace">
-          {selected && selectedLut && (
-            <section className="control-bar" aria-label="Processing controls">
-              <div className="control-group lut-control">
-                <label htmlFor="look-search">Look</label>
-                <div className="look-picker">
-                  <input
-                    id="look-search"
-                    type="search"
-                    value={lookQuery}
-                    disabled={exporting}
-                    placeholder={`Filter ${manifest?.luts.length ?? 27} looks`}
-                    onChange={(event) => setLookQuery(event.target.value)}
-                  />
-                  <Select
-                    label="Built-in V-Log look"
-                    value={lutId}
-                    onValueChange={chooseLut}
-                    options={selectOptions}
-                    disabled={exporting}
-                  />
-                </div>
-                <p className="lut-assumption">
-                  Output profile is undeclared; preview assumes sRGB.
-                </p>
+          <div className="notification-stack">
+            {manifestError && (
+              <div className="error-banner" role="alert">
+                <span>{manifestError}</span>
+                <Button variant="secondary" onClick={() => location.reload()}>
+                  Reload
+                </Button>
               </div>
-              <div className="exposure-actions">
-                <div className="control-group exposure-control">
+            )}
+            {globalError && (
+              <div className="error-banner" role="alert">
+                <span>{globalError}</span>
+                <div className="banner-actions">
+                  {selected && isDecodeFailure(selected) && (
+                    <>
+                      <Button
+                        variant="secondary"
+                        onClick={() => removeItem(selected.id)}
+                      >
+                        Remove file
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => fileInput.current?.click()}
+                      >
+                        Choose another RAW
+                      </Button>
+                    </>
+                  )}
+                  <Button
+                    size="icon"
+                    variant="quiet"
+                    aria-label="Dismiss error"
+                    onClick={() => setGlobalError(undefined)}
+                  >
+                    <X size={17} />
+                  </Button>
+                </div>
+              </div>
+            )}
+            {queueUndo && (
+              <div className="undo-banner" role="status">
+                <span>{queueUndo.message}</span>
+                <div className="banner-actions">
+                  <Button variant="secondary" onClick={restoreQueue}>
+                    Undo
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="quiet"
+                    aria-label="Dismiss undo"
+                    onClick={() => setQueueUndo(undefined)}
+                  >
+                    <X size={17} />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className={`workspace-layout ${selected ? "" : "is-empty"}`}>
+            {selected && selectedLut && (
+              <section
+                className="control-panel"
+                aria-label="Processing controls"
+              >
+                <div className="panel-heading">
+                  <div className="panel-heading-copy">
+                    <h2>Adjustments</h2>
+                  </div>
+                  <div className="panel-heading-actions">
+                    {isPreviewProcessing && (
+                      <span
+                        className="processing-indicator"
+                        role="status"
+                        aria-label="Preview processing"
+                      >
+                        <LoaderCircle
+                          className="processing-spinner"
+                          size={14}
+                          aria-hidden="true"
+                        />
+                        Processing
+                      </span>
+                    )}
+                    <Button
+                      size="icon"
+                      variant="quiet"
+                      aria-label="Reset exposure"
+                      onClick={() => setExposure(0)}
+                      disabled={exporting || ev === 0}
+                    >
+                      <RotateCcw size={15} aria-hidden="true" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="control-section">
+                  <label>Look</label>
+                  <div className="look-picker">
+                    <div className="look-current">
+                      <strong>{selectedLut.name}</strong>
+                      <span>{selectedLut.group} · built-in transform</span>
+                    </div>
+                    {workingLuts.length > 1 && (
+                      <div
+                        className="look-working-set"
+                        aria-label="Recent looks"
+                      >
+                        {workingLuts.map((lut) => (
+                          <button
+                            key={lut.id}
+                            type="button"
+                            className={lut.id === lutId ? "is-active" : ""}
+                            aria-pressed={lut.id === lutId}
+                            disabled={exporting}
+                            onClick={() => chooseLut(lut.id)}
+                          >
+                            {lut.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <Button
+                      size="compact"
+                      variant="secondary"
+                      aria-expanded={lookBrowserOpen}
+                      onClick={() => setLookBrowserOpen((open) => !open)}
+                      disabled={exporting}
+                    >
+                      <Search size={14} aria-hidden="true" />
+                      {lookBrowserOpen
+                        ? "Close look browser"
+                        : `Browse all ${manifest?.luts.length ?? 27} looks`}
+                    </Button>
+                    {lookBrowserOpen && (
+                      <div className="look-browser">
+                        <div className="search-control">
+                          <Search size={14} aria-hidden="true" />
+                          <input
+                            id="look-search"
+                            type="search"
+                            aria-label="Look"
+                            value={lookQuery}
+                            disabled={exporting}
+                            placeholder="Search by name or camera family"
+                            onChange={(event) =>
+                              setLookQuery(event.target.value)
+                            }
+                          />
+                        </div>
+                        <Select
+                          label="Built-in V-Log look"
+                          value={lutId}
+                          onValueChange={chooseLut}
+                          options={selectOptions}
+                          disabled={exporting}
+                        />
+                      </div>
+                    )}
+                    <details className="control-help">
+                      <summary>How built-in looks work</summary>
+                      <p>
+                        RAW Alchemy converts camera color to V-Gamut and V-Log,
+                        then applies the selected display transform. Compare the
+                        result before export because each look responds
+                        differently to exposure and color.
+                      </p>
+                    </details>
+                  </div>
+                </div>
+
+                <div className="control-section exposure-control">
                   <div className="control-label-row">
                     <label htmlFor="exposure">Exposure</label>
                     <label className="ev-value">
@@ -719,7 +1171,7 @@ export default function App() {
                         onChange={(event) => {
                           const value = event.currentTarget.valueAsNumber;
                           if (Number.isFinite(value)) {
-                            setEv(Math.max(-4, Math.min(4, value)));
+                            setExposure(value);
                           }
                         }}
                         onBlur={(event) => {
@@ -730,235 +1182,282 @@ export default function App() {
                     </label>
                   </div>
                   <input
+                    ref={exposureRange}
                     id="exposure"
                     type="range"
                     min="-4"
                     max="4"
                     step="0.1"
-                    value={ev}
+                    defaultValue={ev}
+                    aria-valuetext={`${ev} EV`}
                     disabled={exporting}
-                    onChange={(event) => setEv(Number(event.target.value))}
+                    style={
+                      {
+                        "--range-progress": `${((ev + 4) / 8) * 100}%`,
+                      } as CSSProperties
+                    }
+                    onInput={(event) =>
+                      scheduleExposurePreview(event.currentTarget)
+                    }
+                    onChange={(event) =>
+                      scheduleExposurePreview(event.currentTarget)
+                    }
                   />
+                  <div className="range-scale" aria-hidden="true">
+                    <span>−4</span>
+                    <span>0</span>
+                    <span>+4</span>
+                  </div>
                 </div>
-                <Button
-                  variant="quiet"
-                  onClick={() => setEv(0)}
-                  disabled={exporting || ev === 0}
-                >
-                  <RotateCcw size={16} aria-hidden="true" /> Reset
-                </Button>
-              </div>
-            </section>
-          )}
+              </section>
+            )}
 
-          {manifestError && (
-            <div className="error-banner" role="alert">
-              <span>{manifestError}</span>
-              <div className="banner-actions">
-                <Button variant="secondary" onClick={() => location.reload()}>
-                  Reload
-                </Button>
+            <section
+              className="comparison"
+              aria-label="Base and LUT comparison"
+              aria-busy={selected ? isPreviewProcessing : undefined}
+              data-decode-count={preview?.decodeCount}
+            >
+              <div className="canvas-toolbar">
+                <div className="canvas-title">
+                  <strong>{selected ? "Compare" : "Workspace"}</strong>
+                  <span>{selectedLut?.name ?? "Local RAW processing"}</span>
+                </div>
+                <div className="canvas-actions">
+                  {selected && (
+                    <>
+                      <div
+                        className="mobile-preview-switch"
+                        aria-label="Mobile comparison view"
+                      >
+                        <button
+                          type="button"
+                          aria-pressed={mobilePreview === "base"}
+                          onClick={() => setMobilePreview("base")}
+                        >
+                          Base
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={mobilePreview === "look"}
+                          onClick={() => setMobilePreview("look")}
+                        >
+                          Look
+                        </button>
+                      </div>
+                      <div
+                        className="preview-view-switch"
+                        aria-label="Preview zoom"
+                      >
+                        <button
+                          type="button"
+                          aria-pressed={previewView === "fit"}
+                          title="Fit preview (F)"
+                          onClick={() => setPreviewView("fit")}
+                        >
+                          Fit
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={previewView === "actual"}
+                          title="Show preview pixels at 1:1 (1)"
+                          onClick={() => setPreviewView("actual")}
+                        >
+                          Preview 1:1
+                        </button>
+                      </div>
+                      <span className="canvas-status">
+                        {isPreviewProcessing
+                          ? "Processing"
+                          : STATUS_LABELS[selected.status]}
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
 
-          {globalError && (
-            <div className="error-banner" role="alert">
-              <span>{globalError}</span>
-              <div className="banner-actions">
-                {selected && isDecodeFailure(selected) && (
-                  <>
-                    <Button
-                      variant="secondary"
-                      onClick={() => removeItem(selected.id)}
-                    >
-                      Remove file
+              <div className="canvas-stage">
+                {!selected ? (
+                  <div className="workspace-empty">
+                    <div className="empty-icon">
+                      <FileImage size={28} />
+                    </div>
+                    <h2>Start with a camera RAW</h2>
+                    <p>
+                      Compare a neutral rendering with a curated look, then
+                      export a 16-bit TIFF. Everything stays in this browser.
+                    </p>
+                    <Button onClick={() => fileInput.current?.click()}>
+                      <FolderOpen size={17} aria-hidden="true" /> Choose RAW
+                      files
                     </Button>
-                    <Button
-                      variant="secondary"
-                      onClick={() => fileInput.current?.click()}
-                    >
-                      Choose another RAW
-                    </Button>
-                  </>
-                )}
-                <Button
-                  size="icon"
-                  variant="quiet"
-                  aria-label="Dismiss error"
-                  onClick={() => setGlobalError(undefined)}
-                >
-                  <X size={17} />
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {queueUndo && (
-            <div className="undo-banner" role="status">
-              <span>{queueUndo.message}</span>
-              <div className="banner-actions">
-                <Button variant="secondary" onClick={restoreQueue}>
-                  Undo
-                </Button>
-                <Button
-                  size="icon"
-                  variant="quiet"
-                  aria-label="Dismiss undo"
-                  onClick={() => setQueueUndo(undefined)}
-                >
-                  <X size={17} />
-                </Button>
-              </div>
-            </div>
-          )}
-
-          <section
-            className="comparison"
-            aria-label="Base and LUT comparison"
-            aria-busy={selected ? selected.status === "decoding" : undefined}
-            data-decode-count={preview?.decodeCount}
-          >
-            {!selected ? (
-              <div className="workspace-empty">
-                <div className="empty-icon">
-                  <FileImage size={30} />
-                </div>
-                <h2>Start with a camera RAW</h2>
-                <p>
-                  Decode, compare, and export locally. The image never leaves
-                  your browser.
-                </p>
-                <Button onClick={() => fileInput.current?.click()}>
-                  <FolderOpen size={17} aria-hidden="true" /> Choose RAW files
-                </Button>
-              </div>
-            ) : !selectedLut ? (
-              <div className="processing-error-state" role="status">
-                <FileImage size={30} aria-hidden="true" />
-                <h2>
-                  {manifestError
-                    ? "Built-in looks unavailable"
-                    : "Loading looks…"}
-                </h2>
-                <p>
-                  {manifestError
-                    ? "Reload after the application assets are available. This RAW has not been decoded."
-                    : "The selected RAW will be decoded when its processing assets are ready."}
-                </p>
-              </div>
-            ) : isDecodeFailure(selected) ? (
-              <div className="processing-error-state">
-                <FileImage size={30} aria-hidden="true" />
-                <h2>Preview unavailable</h2>
-                <p>
-                  Remove this file or choose another RAW to continue. Other
-                  ready files can still be exported.
-                </p>
-              </div>
-            ) : !preview && cameraPreview?.fileId === selected.id ? (
-              <figure className="camera-preview">
-                <figcaption>
-                  <strong>Camera preview</strong>
-                  <span>Embedded JPEG · color not processed</span>
-                </figcaption>
-                <div className="camera-preview-image">
-                  <img src={cameraPreview.url} alt="Embedded camera preview" />
-                </div>
-              </figure>
-            ) : (
-              <div
-                className={`preview-grid ${selected.status === "decoding" ? "is-loading" : ""}`}
-              >
-                <PreviewCanvas
-                  label="Base"
-                  detail="Neutral tone map · sRGB"
-                  pixels={preview?.base}
-                  width={preview?.width}
-                  height={preview?.height}
-                />
-                <PreviewCanvas
-                  label={selectedLut?.name || "LUT"}
-                  detail="V-Gamut · V-Log · LUT"
-                  pixels={preview?.lut}
-                  width={preview?.width}
-                  height={preview?.height}
-                />
-                {selected.status === "decoding" && (
-                  <div className="loading-label" role="status">
-                    Decoding preview…
+                    <span className="empty-detail">
+                      Multiple files supported · sequential local export
+                    </span>
+                  </div>
+                ) : !selectedLut ? (
+                  <div className="processing-error-state" role="status">
+                    <FileImage size={28} aria-hidden="true" />
+                    <h2>
+                      {manifestError
+                        ? "Built-in looks unavailable"
+                        : "Loading looks…"}
+                    </h2>
+                    <p>
+                      {manifestError
+                        ? "Reload after the application assets are available. This RAW has not been decoded."
+                        : "The selected RAW will be decoded when its processing assets are ready."}
+                    </p>
+                  </div>
+                ) : isDecodeFailure(selected) ? (
+                  <div className="processing-error-state">
+                    <FileImage size={28} aria-hidden="true" />
+                    <h2>Preview unavailable</h2>
+                    <p>
+                      Remove this file or choose another RAW to continue. Other
+                      ready files can still be exported.
+                    </p>
+                  </div>
+                ) : !preview && cameraPreview?.fileId === selected.id ? (
+                  <figure className="camera-preview">
+                    <figcaption>
+                      <strong>Camera preview</strong>
+                      <span>Embedded JPEG · color not processed</span>
+                    </figcaption>
+                    <div className="camera-preview-image">
+                      <img
+                        src={cameraPreview.url}
+                        alt="Embedded camera preview"
+                      />
+                    </div>
+                  </figure>
+                ) : (
+                  <div
+                    ref={previewGrid}
+                    className={`preview-grid mobile-show-${mobilePreview} ${selected.status === "decoding" ? "is-loading" : ""}`}
+                  >
+                    <PreviewCanvas
+                      label="Base"
+                      detail="Neutral tone map · sRGB"
+                      pixels={preview?.base?.pixels}
+                      width={preview?.base?.width}
+                      height={preview?.base?.height}
+                      viewMode={previewView}
+                      focus={previewFocus.current}
+                      getFocus={getPreviewFocus}
+                      onFocusChange={updatePreviewFocus}
+                    />
+                    <PreviewCanvas
+                      label={selectedLut?.name || "LUT"}
+                      detail="V-Gamut · V-Log · LUT"
+                      pixels={preview?.lut?.pixels}
+                      width={preview?.lut?.width}
+                      height={preview?.lut?.height}
+                      viewMode={previewView}
+                      focus={previewFocus.current}
+                      getFocus={getPreviewFocus}
+                      onFocusChange={updatePreviewFocus}
+                    />
+                    {selected.status === "decoding" && (
+                      <div className="loading-label" role="status">
+                        Decoding preview…
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
-          </section>
-
-          {selected && selectedLut && (
-            <section className="output-bar" aria-label="Export controls">
-              <div className="selected-meta">
-                <strong>{selected.file.name}</strong>
-                <span
-                  className={
-                    selected.status === "export-error"
-                      ? "selected-error"
-                      : undefined
-                  }
-                  role={
-                    selected.status === "export-error" ? "alert" : undefined
-                  }
-                >
-                  {selected.status === "decode-error"
-                    ? "Unable to decode"
-                    : selected.status === "export-error"
-                      ? selected.error
-                      : selected.dimensions || STATUS_LABELS[selected.status]}
-                </span>
-              </div>
-              <div className="export-feedback" aria-live="polite">
-                {exportProgress ? (
-                  <strong>
-                    Exporting {exportProgress.current} of {exportProgress.total}
-                    <span> · {exportProgress.fileName}</span>
-                  </strong>
-                ) : (
-                  exportSummary && <span>{exportSummary}</span>
-                )}
-              </div>
-              {exporting && exportProgress && exportProgress.total > 1 ? (
-                <Button
-                  variant="quiet"
-                  disabled={exportProgress.stopRequested}
-                  onClick={() => {
-                    stopAfterCurrent.current = true;
-                    setExportProgress((current) =>
-                      current ? { ...current, stopRequested: true } : current,
-                    );
-                  }}
-                >
-                  <CircleStop size={16} aria-hidden="true" />
-                  {exportProgress.stopRequested
-                    ? "Stopping after current…"
-                    : "Stop after current"}
-                </Button>
-              ) : (
-                <Button
-                  variant={items.length > 1 ? "secondary" : "primary"}
-                  onClick={() => void exportItems([selected])}
-                  disabled={
-                    isDecodeFailure(selected) || exporting || !canStartExport
-                  }
-                >
-                  Export selected
-                </Button>
-              )}
             </section>
-          )}
+
+            {selected && selectedLut && (
+              <section className="output-panel" aria-label="Export controls">
+                <div className="panel-heading">
+                  <div className="panel-heading-copy">
+                    <h2>Output</h2>
+                    <p>16-bit uncompressed TIFF</p>
+                  </div>
+                </div>
+                <dl className="file-details">
+                  <div>
+                    <dt>Camera</dt>
+                    <dd>{selected.camera || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Size</dt>
+                    <dd>{selected.dimensions || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Look</dt>
+                    <dd>{selectedLut.name}</dd>
+                  </div>
+                </dl>
+                <details className="lut-assumption">
+                  <summary>
+                    Verify color space in your destination editor
+                  </summary>
+                  <p>
+                    This look does not declare an output color space, so another
+                    editor may interpret the TIFF differently. Check the result
+                    in your destination editor before production use.
+                  </p>
+                  <p>
+                    <strong>Why?</strong> The browser preview displays the LUT
+                    values as sRGB. The exported TIFF intentionally has no
+                    embedded profile rather than claiming one the source LUT
+                    does not provide.
+                  </p>
+                </details>
+                <div className="export-feedback" aria-live="polite">
+                  {selected.status === "export-error" ? (
+                    <span className="selected-error" role="alert">
+                      {selected.error}
+                    </span>
+                  ) : exportProgress ? (
+                    <strong>
+                      Exporting {exportProgress.current} of{" "}
+                      {exportProgress.total}
+                      <span> · {exportProgress.fileName}</span>
+                    </strong>
+                  ) : exportSummary ? (
+                    <span>{exportSummary}</span>
+                  ) : (
+                    <span>Full-resolution processing starts on export.</span>
+                  )}
+                </div>
+                {exporting && exportProgress && exportProgress.total > 1 ? (
+                  <Button
+                    variant="quiet"
+                    disabled={exportProgress.stopRequested}
+                    onClick={() => {
+                      stopAfterCurrent.current = true;
+                      setExportProgress((current) =>
+                        current ? { ...current, stopRequested: true } : current,
+                      );
+                    }}
+                  >
+                    <CircleStop size={16} aria-hidden="true" />
+                    {exportProgress.stopRequested
+                      ? "Stopping after current…"
+                      : "Stop after current"}
+                  </Button>
+                ) : (
+                  <Button
+                    variant={items.length > 1 ? "secondary" : "primary"}
+                    onClick={() => void exportItems([selected])}
+                    disabled={
+                      isDecodeFailure(selected) || exporting || !canStartExport
+                    }
+                  >
+                    <ImageDown size={16} aria-hidden="true" /> Export selected
+                  </Button>
+                )}
+              </section>
+            )}
+          </div>
 
           <footer className="workspace-footer">
-            <span>
-              Uses camera white balance and color matrix · automatic boost and
-              lens correction are off.
-            </span>
+            <span>Camera white balance + color matrix</span>
+            <span>Automatic boost off</span>
+            <span>Lens correction off</span>
           </footer>
         </main>
       </div>

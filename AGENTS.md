@@ -169,8 +169,9 @@ All features and journeys listed in `docs/spec.md` _must_ be covered by e2e test
 - Test cases must be simple, expressive, effective, and non-redundant
 - Use simple and expanded test assertions over dynamic ones (even if it is not DRY)
 - Always run e2e tests to test against real environment, make sure it works before finishing your work
-- All tests must be portable and runnable in any Linux machine, e.g. in GitHub Action, instead of rely on something that only dev vm provides
+- All tests must be portable and runnable in any Linux machine, e.g. in GitHub Action, instead of rely on something that only dev vm or local host provides
   Environment setup is necessary and acceptable, should be defined in GitHub Action workflow as SSOT
+- GPU related tests or benchmarks may need to run on a dev VM (which should be a g4dn.xlarge instance), if local host does not have GPU
 
 **Test efficiency is critical:**
 
@@ -180,6 +181,22 @@ All features and journeys listed in `docs/spec.md` _must_ be covered by e2e test
 - Slow e2e tests should be proactively refactored, simplified, enhanced, or even removed
 - Do not blindly split tests to fulfill time requirement, but rather think how to make it efficient
 - Stale, duplicated or redundant test cases should be proactively removed or merged
+
+### Dev VM
+
+- See docs/local_dev/dev_vm.md for the current dev vm for this branch (and update it accordingly)
+- Never access any dev vm not belonging to current branch, even if name looks similar
+- If this file is missing, bootstrap a dev vm by yourself using AWS CLI and follow requirements below
+- ALWAYS stop dev_vm when you finished your work, and remove dev_vm if worktree is deleted or branch is merged to main
+
+Dev VM requirement:
+
+- g4dn.xlarge + Ubuntu 24.04 + 100GB gp3
+- Name it as lut-dev-{branch_name}
+- Record necessary connection info (like IP) in docs/local_dev/dev_vm.md
+- VM ssh key pairs should be generated and stored locally in docs/local_dev/id
+- MUST change SSH port to use 2222 instead of 22. Allow 0.0.0.0 inbound access to use this port in security group
+- See docs/local_dev/ref.md for some known steps of setup up a dev vm in a reproducible way
 
 ### Web UI E2E Tests (Playwright)
 

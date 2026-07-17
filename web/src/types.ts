@@ -47,6 +47,7 @@ export interface LibRawDecodeTimings {
   demosaicMs: number;
   postprocessMs: number;
   colorConversionMs: number;
+  previewResizeMs: number;
   processRemainderMs: number;
   rgb16Ms: number;
   totalMs: number;
@@ -73,6 +74,7 @@ export interface DemosaicBenchmarkReport {
 export interface PreviewTimings {
   libraw: LibRawDecodeTimings;
   previewSourceMs: number;
+  lutLoadMs: number;
   previewColorMs: number;
   workerTotalMs: number;
 }
@@ -81,7 +83,7 @@ export interface ExportTimings {
   libraw: LibRawDecodeTimings;
   colorBackend: "cpu" | "webgpu" | "onnx";
   colorProcessingMs: number;
-  deflateMs: number;
+  tiffEncodingMs: number;
   workerTotalMs: number;
   gpuInputPreparationMs?: number;
   gpuExecutionAndReadbackMs?: number;
@@ -104,7 +106,7 @@ export interface PreviewResult {
   fileId: string;
   width: number;
   height: number;
-  base: Uint8Array<ArrayBuffer>;
+  base?: Uint8Array<ArrayBuffer>;
   lut: Uint8Array<ArrayBuffer>;
   metadata: {
     camera: string;
@@ -139,6 +141,8 @@ export type WorkerCommand =
       fileId: string;
       ev: number;
       lut: LutDefinition;
+      maxEdge: number;
+      includeBase: boolean;
     }
   | {
       requestId: number;
@@ -179,6 +183,12 @@ export type WorkerReply =
       ok: true;
       type: "thumbnail";
       result: CameraPreview;
+    }
+  | {
+      requestId: number;
+      ok: true;
+      type: "preview-frame";
+      result: PreviewResult;
     }
   | {
       requestId: number;

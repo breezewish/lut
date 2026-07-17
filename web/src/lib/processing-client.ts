@@ -22,8 +22,12 @@ type RenderBatch = {
   fileId: string;
   ev: number;
   lut: LutDefinition;
+  maxEdge: number;
+  includeBase: boolean;
   pending: PreviewPending;
 };
+
+type PreviewRenderOptions = Pick<RenderBatch, "maxEdge" | "includeBase">;
 
 type WorkerRequest = WorkerCommand extends infer Command
   ? Command extends { requestId: number }
@@ -39,6 +43,7 @@ export class ProcessingClient {
   private readonly pending = new Map<number, Pending>();
   private nextRequestId = 1;
   private thumbnailListener?: (preview: CameraPreview) => void;
+  private previewFrameListener?: (preview: PreviewResult) => void;
   private activeRender?: RenderBatch;
   private queuedRender?: RenderBatch;
   private stoppedError?: Error;
@@ -53,6 +58,13 @@ export class ProcessingClient {
     this.worker.onmessage = ({ data }: MessageEvent<WorkerReply>) => {
       if (data.ok && data.type === "thumbnail") {
         this.thumbnailListener?.(data.result);
+        return;
+      }
+      if (data.ok && data.type === "preview-frame") {
+        performance.mark("raw-alchemy:initial-preview-frame", {
+          detail: data.result.timings,
+        });
+        this.previewFrameListener?.(data.result);
         return;
       }
       const pending = this.pending.get(data.requestId);
@@ -77,6 +89,14 @@ export class ProcessingClient {
     return () => {
       if (this.thumbnailListener === listener)
         this.thumbnailListener = undefined;
+    };
+  }
+
+  onPreviewFrame(listener: (preview: PreviewResult) => void): () => void {
+    this.previewFrameListener = listener;
+    return () => {
+      if (this.previewFrameListener === listener)
+        this.previewFrameListener = undefined;
     };
   }
 
@@ -114,13 +134,14 @@ export class ProcessingClient {
     fileId: string,
     ev: number,
     lut: LutDefinition,
+    options: PreviewRenderOptions = { maxEdge: 1_024, includeBase: true },
   ): Promise<PreviewResult> {
     if (this.stoppedError) return Promise.reject(this.stoppedError);
 
     return new Promise((resolve, reject) => {
       const pending = { resolve, reject };
       if (!this.activeRender) {
-        this.startRender({ fileId, ev, lut, pending });
+        this.startRender({ fileId, ev, lut, ...options, pending });
         return;
       }
 
@@ -129,7 +150,13 @@ export class ProcessingClient {
           new Error("Preview render was superseded by a newer recipe."),
         );
       }
-      this.queuedRender = { fileId, ev, lut, pending };
+      this.queuedRender = {
+        fileId,
+        ev,
+        lut,
+        ...options,
+        pending,
+      };
     });
   }
 
@@ -224,11 +251,23 @@ export class ProcessingClient {
       fileId: batch.fileId,
       ev: batch.ev,
       lut: batch.lut,
+      maxEdge: batch.maxEdge,
+      includeBase: batch.includeBase,
     })
       .then((reply) => {
         if (!reply.ok || reply.type !== "preview") {
           throw new Error("Worker returned an unexpected render response.");
         }
+        performance.mark("raw-alchemy:preview-render", {
+          detail: {
+            fileId: batch.fileId,
+            ev: batch.ev,
+            lutId: batch.lut.id,
+            maxEdge: batch.maxEdge,
+            includeBase: batch.includeBase,
+            ...reply.result.timings,
+          },
+        });
         batch.pending.resolve(reply.result);
       })
       .catch((error: unknown) => {

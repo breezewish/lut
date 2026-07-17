@@ -18,17 +18,46 @@ const execFileAsync = promisify(execFile);
 test("shows an embedded camera JPEG before the processed preview", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1_440, height: 900 });
   await page.goto("/");
   await page.evaluate(() => {
-    const observedWindow = window as Window & { cameraPreviewSeen?: boolean };
+    const observedWindow = window as Window & {
+      cameraPreviewSeen?: boolean;
+      previewGeometry?: Array<{
+        cssWidth: number;
+        cssHeight: number;
+        pixelWidth: number;
+      }>;
+    };
     observedWindow.cameraPreviewSeen = false;
+    observedWindow.previewGeometry = [];
     const observer = new MutationObserver(() => {
       if (document.querySelector('img[alt="Embedded camera preview"]')) {
         observedWindow.cameraPreviewSeen = true;
-        observer.disconnect();
       }
+      requestAnimationFrame(() => {
+        const canvas = document.querySelector<HTMLCanvasElement>(
+          'canvas[aria-label="Base preview"]',
+        );
+        if (!canvas) return;
+        const bounds = canvas.getBoundingClientRect();
+        const geometry = {
+          cssWidth: bounds.width,
+          cssHeight: bounds.height,
+          pixelWidth: canvas.width,
+        };
+        const previous = observedWindow.previewGeometry?.at(-1);
+        if (previous?.pixelWidth !== geometry.pixelWidth) {
+          observedWindow.previewGeometry?.push(geometry);
+        }
+      });
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["width", "height"],
+      childList: true,
+      subtree: true,
+    });
   });
 
   await page.locator('input[type="file"]').setInputFiles(sonyFixture);
@@ -46,6 +75,128 @@ test("shows an embedded camera JPEG before the processed preview", async ({
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 30_000,
   });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as Window & {
+              previewGeometry?: Array<{ pixelWidth: number }>;
+            }
+          ).previewGeometry?.at(-1)?.pixelWidth,
+      ),
+    )
+    .toBe(1_024);
+  const geometry = await page.evaluate(
+    () =>
+      (
+        window as Window & {
+          previewGeometry?: Array<{ cssWidth: number; cssHeight: number }>;
+        }
+      ).previewGeometry ?? [],
+  );
+  expect(geometry.length).toBeGreaterThanOrEqual(2);
+  expect(new Set(geometry.map(({ cssWidth }) => Math.round(cssWidth)))).toEqual(
+    new Set([Math.round(geometry[0].cssWidth)]),
+  );
+  expect(
+    new Set(geometry.map(({ cssHeight }) => Math.round(cssHeight))),
+  ).toEqual(new Set([Math.round(geometry[0].cssHeight)]));
+});
+
+test("keeps the previous canvases visible until interaction frames are ready", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const originalPostMessage = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (...args) {
+      const message = args[0] as { type?: string };
+      const state = window as Window & { delayPreviewRenders?: boolean };
+      if (state.delayPreviewRenders && message?.type === "render") {
+        window.setTimeout(() => {
+          Reflect.apply(originalPostMessage, this, args);
+        }, 300);
+        return;
+      }
+      return Reflect.apply(originalPostMessage, this, args);
+    };
+  });
+
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(linearFixture);
+  const basePreview = page.getByRole("img", {
+    name: "Base preview",
+    exact: true,
+  });
+  const lutPreview = page.getByLabel("Classic Negative preview");
+  await expect(basePreview).toBeVisible({ timeout: 20_000 });
+  await expect(lutPreview).toBeVisible();
+  const processing = page.getByRole("status", {
+    name: "Preview processing",
+  });
+  await expect(processing).toHaveCount(0);
+  const previousBase = await basePreview.evaluate((canvas: HTMLCanvasElement) =>
+    canvas.toDataURL(),
+  );
+  const previousLut = await lutPreview.evaluate((canvas: HTMLCanvasElement) =>
+    canvas.toDataURL(),
+  );
+
+  await page.evaluate(() => {
+    (window as Window & { delayPreviewRenders?: boolean }).delayPreviewRenders =
+      true;
+  });
+  await page.getByRole("slider", { name: "Exposure" }).fill("1");
+  await page.waitForTimeout(100);
+  await expect(processing).toBeVisible();
+
+  expect(await basePreview.count()).toBe(1);
+  expect(await basePreview.isVisible()).toBe(true);
+  expect(await lutPreview.count()).toBe(1);
+  expect(await lutPreview.isVisible()).toBe(true);
+  expect(
+    await basePreview.evaluate((canvas: HTMLCanvasElement) =>
+      canvas.toDataURL(),
+    ),
+  ).toBe(previousBase);
+  expect(
+    await lutPreview.evaluate((canvas: HTMLCanvasElement) =>
+      canvas.toDataURL(),
+    ),
+  ).toBe(previousLut);
+  await expect
+    .poll(() =>
+      basePreview.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
+    )
+    .not.toBe(previousBase);
+
+  await expect(
+    page.getByRole("button", { name: "Export selected" }),
+  ).toBeEnabled();
+  await expect(processing).toHaveCount(0);
+  const currentLut = await lutPreview.evaluate((canvas: HTMLCanvasElement) =>
+    canvas.toDataURL(),
+  );
+  await page.getByRole("button", { name: /Browse all/ }).click();
+  await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
+  await page.getByRole("option", { name: "PROVIA", exact: true }).click();
+  await page.waitForTimeout(100);
+  await expect(processing).toBeVisible();
+
+  const proviaPreview = page.getByLabel("PROVIA preview");
+  expect(await proviaPreview.count()).toBe(1);
+  expect(await proviaPreview.isVisible()).toBe(true);
+  expect(
+    await proviaPreview.evaluate((canvas: HTMLCanvasElement) =>
+      canvas.toDataURL(),
+    ),
+  ).toBe(currentLut);
+  await expect
+    .poll(() =>
+      proviaPreview.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
+    )
+    .not.toBe(currentLut);
+  await expect(processing).toHaveCount(0);
 });
 
 test("decodes, re-renders exposure, and exports a local RAW", async ({
@@ -61,7 +212,9 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
   ).toBeVisible();
 
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
-  await expect(page.getByText("Base", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("figure", { name: /Base Neutral tone map/ }),
+  ).toBeVisible();
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 20_000,
   });
@@ -112,10 +265,15 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
   await page.getByRole("slider", { name: "Exposure" }).fill("1");
   await expect(exposureValue).toHaveValue("1");
   await expect(comparison).toHaveAttribute("data-decode-count", "1");
+  const exportSelected = page.getByRole("button", {
+    name: "Export selected",
+  });
+  await expect(exportSelected).toBeEnabled();
 
   const classicNegativePreview = await page
     .getByLabel("Classic Negative preview")
     .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
+  await page.getByRole("button", { name: /Browse all/ }).click();
   await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
   await page.getByRole("option", { name: "PROVIA", exact: true }).click();
   await expect(page.getByLabel("PROVIA preview")).toBeVisible();
@@ -142,7 +300,7 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
   await expect(comparison).toHaveAttribute("data-decode-count", "1");
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
+  await exportSelected.click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/fuji-classic-negative\.tif$/);
 
@@ -243,6 +401,8 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
   await expect(
     page.getByRole("button", { name: "Export selected" }),
   ).toHaveClass(/button-secondary/);
+
+  await page.getByRole("button", { name: /Browse all/ }).click();
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export all" }).click();
@@ -397,6 +557,17 @@ test("batch export continues after a corrupt file without contaminating later ou
 
 test("batch export stops after the active file", async ({ page }) => {
   const bytes = await readFile(lossyFixture);
+  await page.addInitScript(() => {
+    const postMessage = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (...args) {
+      const message = args[0] as { type?: string };
+      if (message?.type === "export") {
+        window.setTimeout(() => Reflect.apply(postMessage, this, args), 250);
+        return;
+      }
+      return Reflect.apply(postMessage, this, args);
+    };
+  });
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles([
     { name: "one.dng", mimeType: "image/x-adobe-dng", buffer: bytes },
@@ -438,6 +609,7 @@ test("all built-in LUTs match optimized native RGB16 exports", async ({
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 20_000,
   });
+  await page.getByRole("button", { name: /Browse all/ }).click();
 
   for (const look of manifest.luts) {
     await page
@@ -635,4 +807,150 @@ test("mobile empty state keeps import primary and defers processing controls", a
     page.getByRole("region", { name: "Processing controls" }),
   ).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Export all" })).toHaveCount(0);
+});
+
+test("supports focused look discovery, synchronized preview inspection, and a compact mobile comparison", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(sonyFixture);
+  const basePreview = page.getByRole("img", {
+    name: "Base preview",
+    exact: true,
+  });
+  await expect(basePreview).toHaveAttribute("width", "1024", {
+    timeout: 30_000,
+  });
+
+  await expect(page.getByRole("searchbox", { name: "Look" })).toHaveCount(0);
+  await page.getByRole("button", { name: /Browse all 27 looks/ }).click();
+  await page.getByRole("searchbox", { name: "Look" }).fill("PROVIA");
+  await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
+  await page.getByRole("option", { name: "PROVIA", exact: true }).click();
+  await expect(page.getByLabel("PROVIA preview")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "PROVIA", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", { name: "Preview 1:1", exact: true }).click();
+  await expect(basePreview.locator("..")).toHaveClass(/is-actual/);
+  await expect(basePreview).toHaveCSS("width", "1024px");
+  const lookPreview = page.getByRole("img", {
+    name: "PROVIA preview",
+    exact: true,
+  });
+  const before = await basePreview.evaluate(
+    (canvas: HTMLCanvasElement) => canvas.style.left,
+  );
+  const imageWell = await basePreview.locator("..").boundingBox();
+  if (!imageWell) throw new Error("Base preview image well is unavailable.");
+  await page.mouse.move(
+    imageWell.x + imageWell.width / 2,
+    imageWell.y + imageWell.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    imageWell.x + imageWell.width / 2 + 80,
+    imageWell.y + imageWell.height / 2 + 40,
+  );
+  await page.mouse.up();
+  const focused = await basePreview.evaluate(
+    (canvas: HTMLCanvasElement) => canvas.style.left,
+  );
+  expect(focused).not.toBe(before);
+  expect(
+    await lookPreview.evaluate(
+      (canvas: HTMLCanvasElement) => canvas.style.left,
+    ),
+  ).toBe(focused);
+  const imageBounds = await basePreview.boundingBox();
+  const wellBounds = await basePreview.locator("..").boundingBox();
+  if (!imageBounds || !wellBounds) {
+    throw new Error("Preview inspection geometry is unavailable.");
+  }
+  expect(imageBounds.x).toBeLessThanOrEqual(wellBounds.x + 0.5);
+  expect(imageBounds.x + imageBounds.width).toBeGreaterThanOrEqual(
+    wellBounds.x + wellBounds.width - 0.5,
+  );
+
+  const beforeKeyboardPan = focused;
+  await basePreview.locator("..").focus();
+  await basePreview.locator("..").press("ArrowRight");
+  const keyboardFocused = await basePreview.evaluate(
+    (canvas: HTMLCanvasElement) => canvas.style.left,
+  );
+  expect(keyboardFocused).not.toBe(beforeKeyboardPan);
+  expect(
+    await lookPreview.evaluate(
+      (canvas: HTMLCanvasElement) => canvas.style.left,
+    ),
+  ).toBe(keyboardFocused);
+  await page.getByRole("button", { name: "Fit", exact: true }).click();
+  await expect(basePreview.locator("..")).toHaveClass(/is-fit/);
+  await page.locator(".canvas-title").click();
+  await page.keyboard.press("1");
+  await expect(basePreview.locator("..")).toHaveClass(/is-actual/);
+  await page.keyboard.press("f");
+  await expect(basePreview.locator("..")).toHaveClass(/is-fit/);
+
+  await page.getByText("Verify color space in your destination editor").click();
+  await expect(
+    page.getByText(/Check the result in your destination editor/),
+  ).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(basePreview).toBeHidden();
+  await expect(lookPreview).toBeVisible();
+  await page.getByRole("button", { name: "Base", exact: true }).click();
+  await expect(basePreview).toBeVisible();
+  await expect(lookPreview).toBeHidden();
+
+  const touchTargets = [
+    page.getByRole("button", { name: /Switch to (light|dark) mode/ }),
+    page.getByRole("button", { name: "Add RAW files" }),
+    page.getByRole("button", { name: "Base", exact: true }),
+    page.getByRole("button", { name: "Look", exact: true }),
+    page.getByRole("button", { name: "Fit", exact: true }),
+    page.getByRole("button", { name: "Preview 1:1", exact: true }),
+    page.getByRole("spinbutton", { name: "Exposure value" }),
+    page.getByRole("slider", { name: "Exposure" }),
+    page.getByText("How built-in looks work", { exact: true }),
+    page.getByText("Verify color space in your destination editor", {
+      exact: true,
+    }),
+  ];
+  for (const target of touchTargets) {
+    const bounds = await target.boundingBox();
+    expect(bounds?.width).toBeGreaterThanOrEqual(44);
+    expect(bounds?.height).toBeGreaterThanOrEqual(44);
+  }
+  await expect(page.locator('input[type="file"]')).toHaveAttribute(
+    "tabindex",
+    "-1",
+  );
+  expect(
+    await page
+      .locator(".panel-heading")
+      .evaluateAll((headings) =>
+        headings.every((heading) => heading.scrollWidth <= heading.clientWidth),
+      ),
+  ).toBe(true);
+});
+
+test("workspace theme persists across reloads", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(() => {
+    localStorage.setItem("raw-alchemy-theme", "dark");
+  });
+  await page.reload();
+
+  await page.getByRole("button", { name: "Switch to light mode" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(
+    page.getByRole("button", { name: "Switch to dark mode" }),
+  ).toBeVisible();
 });

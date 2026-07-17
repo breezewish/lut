@@ -15,7 +15,6 @@ dependencies = [
  "alchemy-core",
  "alchemy-libraw",
  "clap",
- "serde",
  "serde_json",
  "tempfile",
  "tiff",
@@ -26,7 +25,6 @@ name = "alchemy-core"
 version = "0.1.0"
 dependencies = [
  "alchemy-libraw",
- "flate2",
  "ndarray",
  "ndarray-npy",
  "serde",

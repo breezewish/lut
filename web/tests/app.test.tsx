@@ -11,6 +11,7 @@ import App from "../src/App";
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -46,6 +47,47 @@ test("teaches the private local workflow before files are selected", async () =>
   ).not.toBeInTheDocument();
 });
 
+test("switches and persists the workspace theme", () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    () => new Promise<Response>(() => {}),
+  );
+
+  render(<App />);
+  expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+
+  fireEvent.click(screen.getByRole("button", { name: "Switch to light mode" }));
+
+  expect(document.documentElement).toHaveAttribute("data-theme", "light");
+  expect(localStorage.getItem("raw-alchemy-theme")).toBe("light");
+});
+
+test("ignores malformed recent-look preferences", async () => {
+  localStorage.setItem("raw-alchemy-recent-luts", JSON.stringify({}));
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        version: 1,
+        contract: { outputStatus: "unverified" },
+        luts: [
+          {
+            id: "fuji-classic-negative",
+            group: "Fujifilm",
+            name: "Classic Negative",
+            file: "look.cube",
+            sha256: "00",
+          },
+        ],
+      }),
+      { status: 200 },
+    ),
+  );
+
+  render(<App />);
+  expect(
+    await screen.findByRole("heading", { name: "Start with a camera RAW" }),
+  ).toBeVisible();
+});
+
 test("deduplicates one input batch and accepts drops after the queue is populated", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(
     () => new Promise<Response>(() => {}),
@@ -71,6 +113,8 @@ test("renders only after the exposure recipe changes", async () => {
     type: "clear" | "decode" | "render" | "export";
     fileId?: string;
     ev?: number;
+    maxEdge?: number;
+    includeBase?: boolean;
   };
 
   class RecipeWorker {
@@ -108,9 +152,12 @@ test("renders only after the exposure recipe changes", async () => {
               type: "preview",
               result: {
                 fileId: command.fileId,
-                width: 1,
-                height: 1,
-                base: new Uint8Array([red, 0, 0, 255]),
+                width: command.maxEdge ?? 1,
+                height: command.maxEdge ?? 1,
+                base:
+                  command.includeBase === false
+                    ? undefined
+                    : new Uint8Array([red, 0, 0, 255]),
                 lut: new Uint8Array([red + 1, 0, 0, 255]),
                 metadata: { camera: "Test Camera", width: 1, height: 1 },
                 decodeCount: 1,
@@ -190,7 +237,20 @@ test("renders only after the exposure recipe changes", async () => {
   await waitFor(() =>
     expect(
       RecipeWorker.instance.commands.filter(({ type }) => type === "render"),
-    ).toEqual([expect.objectContaining({ type: "render", ev: 1 })]),
+    ).toEqual([
+      expect.objectContaining({
+        type: "render",
+        ev: 1,
+        maxEdge: 256,
+        includeBase: true,
+      }),
+      expect.objectContaining({
+        type: "render",
+        ev: 1,
+        maxEdge: 1024,
+        includeBase: true,
+      }),
+    ]),
   );
   await waitFor(() => expect(paintedRedValues.slice(-2)).toEqual([101, 102]));
   expect(exportButton).toBeEnabled();

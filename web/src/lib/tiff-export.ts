@@ -15,7 +15,7 @@ export interface GpuStripTiffEncoder extends StripTiffEncoder {
 export interface RenderedTiff {
   bytes: Uint8Array;
   colorProcessingMs: number;
-  deflateMs: number;
+  tiffEncodingMs: number;
 }
 
 export interface GpuStripRenderer {
@@ -64,7 +64,7 @@ export function renderTiffInStrips(
   let offset = 0;
   let consumed = false;
   let colorProcessingMs = 0;
-  let deflateMs = 0;
+  let tiffEncodingMs = 0;
   try {
     for (;;) {
       const requested = encoder.next_strip_samples();
@@ -80,7 +80,7 @@ export function renderTiffInStrips(
       colorProcessingMs += performance.now() - startedAt;
       startedAt = performance.now();
       encoder.write_strip();
-      deflateMs += performance.now() - startedAt;
+      tiffEncodingMs += performance.now() - startedAt;
       offset += requested;
     }
     if (offset !== sampleCount) {
@@ -92,8 +92,8 @@ export function renderTiffInStrips(
     // `finish` consumes the WASM encoder even when it returns an error.
     consumed = true;
     const bytes = encoder.finish();
-    deflateMs += performance.now() - startedAt;
-    return { bytes, colorProcessingMs, deflateMs };
+    tiffEncodingMs += performance.now() - startedAt;
+    return { bytes, colorProcessingMs, tiffEncodingMs };
   } finally {
     if (!consumed) encoder.free();
   }
@@ -111,7 +111,7 @@ export async function renderTiffInGpuStrips(
   let offset = 0;
   let consumed = false;
   let colorProcessingMs = 0;
-  let deflateMs = 0;
+  let tiffEncodingMs = 0;
   let gpuInputPreparationMs = 0;
   let gpuExecutionAndReadbackMs = 0;
   let gpuOutputPreparationMs = 0;
@@ -179,9 +179,9 @@ export async function renderTiffInGpuStrips(
             maximumDifference = Math.max(maximumDifference, difference);
           }
         }
-        const deflateStartedAt = performance.now();
+        const encodingStartedAt = performance.now();
         encoder.write_rendered_strip(renderedStrip);
-        deflateMs += performance.now() - deflateStartedAt;
+        tiffEncodingMs += performance.now() - encodingStartedAt;
         batchOffset += stripSamples;
         offset += stripSamples;
       }
@@ -194,11 +194,11 @@ export async function renderTiffInGpuStrips(
     const startedAt = performance.now();
     consumed = true;
     const bytes = encoder.finish();
-    deflateMs += performance.now() - startedAt;
+    tiffEncodingMs += performance.now() - startedAt;
     return {
       bytes,
       colorProcessingMs,
-      deflateMs,
+      tiffEncodingMs,
       gpuInputPreparationMs,
       gpuExecutionAndReadbackMs,
       gpuOutputPreparationMs,
