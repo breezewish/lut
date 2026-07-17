@@ -79,6 +79,61 @@ The LibRaw oracle can capture `horizontal`, `vertical`, `directions`, `aahd`,
 and `final`. Keep it opt-in. Normal production decode must not pay for capture
 allocations or copies.
 
+## Test Baseline and Authority
+
+“Correct” means matching the current production pipeline, not Studio and not a
+new WGSL output. The normative end-to-end reference is:
+
+```text
+pinned project LibRaw AAHD
+    -> LibRaw Blend highlight and linear ProPhoto RGB16
+    -> Rust corrected-v2 exposure and 3D LUT
+    -> decoded RGB16 pixels from the produced TIFF
+```
+
+The demosaic reference is the project's pinned LibRaw source and build
+semantics. It is not a Python implementation. The independent Python float64
+oracle mentioned in the browser change tests validates corrected-v2 color and
+LUT processing only; it does not implement RAW scaling or AAHD.
+
+Use this baseline matrix. A lower row does not replace the authority of an
+earlier row.
+
+| Boundary under test                       | Normative reference                                                                                                               | Required comparison                                                                                                                                          |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Visible raw mosaic and sensor metadata    | The values returned by the same pinned LibRaw instance after unpack                                                               | Exact dimensions, CFA, levels, matrices, metadata, and packed samples                                                                                        |
+| Scaled CFA before AAHD defect handling    | `aahdInputView` captured inside pinned LibRaw                                                                                     | Exact for every sample                                                                                                                                       |
+| Horizontal and vertical AAHD candidates   | `aahdHorizontalView` and `aahdVerticalView` captured inside pinned LibRaw, including its serial hot/dead scan                     | Exact for every RGB channel if claiming LibRaw parity                                                                                                        |
+| Refined direction flags                   | `aahdDirectionView` captured inside pinned LibRaw                                                                                 | Exact for every pixel if claiming LibRaw parity                                                                                                              |
+| Selected camera-space AAHD RGB            | `aahdOutputView` captured immediately after LibRaw AAHD                                                                           | Exact for every RGB channel if claiming LibRaw parity                                                                                                        |
+| Blend highlight and linear ProPhoto RGB16 | Pinned LibRaw `imageView` from the production parameters                                                                          | Exact is the target; at most one code value may be proposed only as an explicitly reported floating-point portability tolerance, with zero samples above one |
+| Exposure and 3D LUT RGB16                 | Current Rust corrected-v2 CPU/WASM renderer for the same ProPhoto RGB16 input, independently covered by the Python float64 oracle | Use the existing WebGPU color contract: report every difference and reject any sample above two code values                                                  |
+| Complete export                           | Decoded RGB16 samples from the current production browser/native CLI TIFF for the same RAW, EV, and LUT                           | Compare dimensions and every decoded RGB16 sample; do not use compressed TIFF byte identity as the image criterion                                           |
+
+The tiled full-frame WGSL output is only a derived regression oracle. It proves
+that tiling did not change already accepted math. It cannot prove that the math
+matches LibRaw. A full-frame WGSL implementation must first pass the normative
+stage references above before tiled output may use it as an oracle.
+
+The current parallel defect experiment does not pass the normative LibRaw
+baseline because some final differences exceed one code value. Its 0.00385%
+difference rate and high PSNR do not make it a parity implementation.
+
+A deterministic parallel defect policy has a different authority:
+
+- Its independent scalar CPU implementation is normative only for that
+  experimental policy.
+- WGSL preprocessing, AAHD stages, and final RGB16 must match that CPU reference
+  at every corresponding boundary.
+- Passing this comparison proves faithful implementation of the proposed new
+  policy. It does not prove compatibility with current LibRaw output.
+- It may replace the production golden only after the user explicitly accepts
+  the behavior change, including the localized high-code-value differences.
+
+Until that decision exists, maintain two clearly named benchmark results:
+`libraw-parity` and `deterministic-parallel-candidate`. Never mix their metrics
+or describe the candidate's CPU oracle as the product baseline.
+
 ## Established Evidence
 
 The 6240 x 4168 Sony fixture contains 78,024,960 RGB16 channel values. On an
@@ -126,10 +181,10 @@ LibRaw unpack and metadata
     -> TIFF predictor, Deflate, and Blob
 ```
 
-LibRaw remains responsible for RAW unpack and metadata. It also remains the
-legacy image reference, except where its result depends on the rejected serial
-defect-scan order. For that boundary, an independent deterministic CPU
-implementation must define the new golden output.
+LibRaw remains responsible for RAW unpack and metadata. Current pinned LibRaw
+output remains the product image reference, including its serial defect-scan
+effects. A deterministic parallel policy is a performance and image-semantics
+candidate, not an accepted replacement baseline.
 
 Do not introduce ONNX. AAHD depends on mutable integer neighborhoods, defined
 integer wrapping, atomic homogeneity accumulation, and discrete refinements.
@@ -147,7 +202,7 @@ Do not change the production default during the implementation phases below.
 the same dispatch. Invocation order is not defined. This is both the source of
 the LibRaw mismatch and a cross-device nondeterminism risk.
 
-Replace it with an immutable-neighborhood rule:
+Evaluate an immutable-neighborhood rule as the fully parallel candidate:
 
 1. Read every center and neighbor from the original scaled mosaic.
 2. Classify the center once.
@@ -162,9 +217,17 @@ final selected camera RGB. This separates neighbor reconstruction from sensor
 sample ownership.
 
 The WGSL implementation is not its own oracle. First implement the same
-immutable-neighborhood rule as a small independent CPU reference. The WGSL
-scaled corrected mosaic and packed defect mask must match that CPU reference
-exactly.
+immutable-neighborhood rule as a small independent CPU reference. The CPU
+reference must cover every downstream AAHD boundary affected by the changed
+mosaic, not only the defect mask. The WGSL corrected mosaic, packed defect
+mask, candidates, directions, selected AAHD, and final ProPhoto RGB16 must
+match the corresponding candidate reference contract.
+
+Separately retain a LibRaw-parity route for the feasibility decision. That
+route must preserve the serial `hide_hots` result, either by extracting that
+bounded pass into CPU/WASM before GPU AAHD or by another implementation proven
+exact against the internal LibRaw candidate captures. The measured 434 ms CPU
+cost is part of this route's performance result and must not be omitted.
 
 Avoid a full separate unpacked/scaled `u32` full-frame buffer. The defect pass
 can scale the packed raw center and neighbors directly, then write a packed
@@ -175,8 +238,11 @@ is about 52 MB and a one-bit-per-pixel mask is about 3.25 MB.
 
 `refine_isolated` also reads and writes `directions` in one dispatch. A local
 experiment that disabled it changed only 169 channel values, but the pass is
-still nondeterministic by contract. Convert it to out-of-place ping-pong
-storage and validate it against an independent CPU reference.
+still nondeterministic by contract. For the deterministic parallel candidate,
+convert it to out-of-place ping-pong storage and validate it against the
+candidate CPU reference. For the LibRaw-parity route, preserve and verify the
+pinned row-major result; out-of-place refinement is not equivalent merely
+because it is deterministic.
 
 `refine_checker_even` and `refine_checker_odd` are intentionally separate and
 parity-safe. Each pass writes one checker parity and reads orthogonal neighbors
@@ -265,24 +331,33 @@ Gate: record a fresh baseline with environment, adapter, fixture, commit, cold
 run, and at least four warm runs. Investigate material deviations before
 proceeding.
 
-### Phase 1: Make the full-frame math deterministic
+### Phase 1: Establish parity and candidate references
 
-- Add the independent CPU preprocessing reference.
-- Replace the in-place serial-like defect emulation with the immutable
-  corrected-mosaic and defect-mask contract.
-- Make isolated direction refinement out-of-place.
+- Make the internal pinned LibRaw captures the executable stage-by-stage parity
+  tests described in the baseline matrix.
+- Implement and measure the LibRaw-parity route, including the exact serial
+  defect and isolated-direction semantics wherever parallel WGSL cannot
+  reproduce them.
+- Add an independent scalar CPU reference for the immutable-neighborhood
+  parallel candidate.
+- Replace in-place defect and isolated-direction writes in that candidate with
+  immutable or ping-pong storage.
 - Keep candidate interpolation, checker refinement, homogeneity selection,
   highlight behavior, matrix conversion, and quantization semantically
-  unchanged unless a reference test proves an existing error.
-- Review and record the new golden output. Do not describe expected
-  defect-policy differences as LibRaw regressions.
+  identical to pinned LibRaw unless a reference test proves an existing port
+  error.
+- Report the two routes separately. Do not regenerate or rename the production
+  golden in this phase.
 
-Gate: repeated WGSL runs are bitwise identical. The corrected mosaic, defect
-mask, and direction refinements bit-match their independent CPU references.
-Ordinary, non-defect pixels retain the established LibRaw parity. All remaining
-differences are localized and explained by the documented defect contract.
+Gate: the `libraw-parity` route exactly matches all integer LibRaw boundaries
+and has no final ProPhoto RGB16 difference above one code value. The
+`deterministic-parallel-candidate` is bitwise repeatable and matches its
+independent CPU reference at every affected stage. Any difference between the
+candidate and LibRaw is reported separately with counts, maxima, coordinates,
+and affected images. Passing the candidate reference does not pass the product
+parity gate.
 
-### Phase 2: Tile AAHD
+### Phase 2: Tile the accepted AAHD math
 
 - Add bounded halo input and core output coordinates to every dependent pass.
 - Reuse a bounded workspace across tiles.
@@ -290,9 +365,11 @@ differences are localized and explained by the documented defect contract.
 - Add synthetic seam and dependency fixtures.
 - Measure live allocation and maximum binding size.
 
-Gate: every RGB16 channel in the tiled output bit-matches the deterministic
-full-frame WGSL oracle. There are zero seam differences. Peak GPU allocation is
-at most 256 MB and no storage binding exceeds the intended browser limit.
+Gate: every RGB16 channel in the tiled output bit-matches the corresponding
+accepted full-frame route. There are zero seam differences. The full-frame
+route must also still pass its normative LibRaw or candidate CPU reference;
+tiled/full-frame equality alone is insufficient. Peak GPU allocation is at
+most 256 MB and no storage binding exceeds the intended browser limit.
 
 This is the immediate required deliverable. Do not start Phase 3 until this
 gate is met and reported.
@@ -306,10 +383,11 @@ gate is met and reported.
 - Quantize once, after the final color operation.
 
 Gate: there is no intermediate CPU RGB16 transfer. For operations that are
-defined in integer code values, require exact output. For floating-point color
-operations, require exact output where feasible; otherwise document the count,
-maximum, and location of every nonzero code-value difference and obtain an
-explicit acceptance threshold. Never hide a large local error behind PSNR.
+defined in integer code values, require exact output. Compare color and LUT
+output against the current Rust corrected-v2 CPU/WASM renderer for the same
+accepted ProPhoto input. Reject any sample above the existing two-code-value
+contract and report the count, maximum, and location of every nonzero
+difference. Never hide a large local error behind PSNR.
 
 ### Phase 4: Stream export
 
@@ -465,12 +543,14 @@ unidentified result.
 
 The immediate assignment is complete only when all of the following are true:
 
-- Defect preprocessing and isolated direction refinement are deterministic and
-  match independent CPU references.
-- The new defect-policy golden is documented and reviewed rather than inferred
-  from one GPU output.
-- Tiled AAHD bit-matches deterministic full-frame AAHD for every tested sample,
-  with zero tile-seam differences.
+- The LibRaw-parity route passes the pinned internal LibRaw references at every
+  AAHD boundary and has no final ProPhoto RGB16 difference above one code.
+- The deterministic parallel candidate, if retained, matches its independent
+  CPU reference and is clearly reported as a separate behavior proposal rather
+  than a new production golden.
+- Tiled AAHD bit-matches its accepted full-frame route for every tested sample,
+  with zero tile-seam differences; that full-frame route independently passes
+  its normative algorithm reference.
 - Peak GPU allocation is at most 256 MB and the implementation does not depend
   on the current 417 MB binding.
 - A non-fallback hardware WebGPU run records cold and warm timings plus stage

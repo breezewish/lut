@@ -1,6 +1,26 @@
 # LibRaw AAHD WebGPU Prototype Tests
 
+- The product correctness baseline is the current pinned LibRaw AAHD pipeline,
+  followed by the Rust corrected-v2 color/LUT pipeline; Studio and ONNX outputs
+  are not correctness references, and the Python float64 oracle covers only the
+  corrected-v2 color/LUT layer.
 - The LibRaw oracle captures the exact scaled CFA, both AAHD candidates, refined direction flags, selected camera RGB, final ProPhoto RGB16, matrices, extrema, and scale parameters from the pinned production configuration.
+- A LibRaw-parity implementation matches every captured integer AAHD boundary
+  exactly and may propose at most a one-code-value final ProPhoto tolerance only
+  when every nonzero floating-point difference is explicitly reported.
+- A deterministic parallel defect implementation compares every affected AAHD
+  boundary with an independent scalar CPU implementation of that new policy;
+  this proves the candidate implementation, not compatibility with the product
+  baseline, and cannot replace the golden without explicit approval.
+- Tiled output matches the corresponding accepted full-frame output exactly,
+  while the full-frame output is independently checked against LibRaw or the
+  explicitly approved candidate CPU reference.
+- WebGPU exposure and LUT output compares against the current Rust corrected-v2
+  CPU/WASM renderer for the same ProPhoto input and rejects any sample more than
+  two code values away.
+- Complete export correctness compares every decoded RGB16 TIFF sample with the
+  current production browser/native CLI export; compressed TIFF byte identity
+  is not used as the image-quality criterion.
 - The horizontal and vertical candidate comparisons check every RGB channel value and report counts, thresholds, maximum location, MAE, RMSE, and PSNR.
 - The direction comparison expands each captured direction to three channels and proves that the selected-candidate mismatch is independently measurable from candidate interpolation.
 - The selected-AAHD and final-ProPhoto comparisons check all 78,024,960 RGB16 channel values on the Sony fixture.
