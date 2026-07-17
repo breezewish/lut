@@ -888,7 +888,7 @@ test("supports focused look discovery, synchronized preview inspection, and a co
   ).toBe(keyboardFocused);
   await page.getByRole("button", { name: "Fit", exact: true }).click();
   await expect(basePreview.locator("..")).toHaveClass(/is-fit/);
-  await page.locator(".canvas-title").click();
+  await basePreview.click();
   await page.keyboard.press("1");
   await expect(basePreview.locator("..")).toHaveClass(/is-actual/);
   await page.keyboard.press("f");

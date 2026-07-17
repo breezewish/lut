@@ -821,11 +821,6 @@ export default function App() {
     }
   };
 
-  const statusText =
-    items.length === 0
-      ? "No files"
-      : `${items.length} local file${items.length === 1 ? "" : "s"}`;
-
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -882,15 +877,20 @@ export default function App() {
           onDrop={onDrop}
         >
           {items.length === 0 ? (
-            <button
-              type="button"
-              className="drop-zone"
-              onClick={() => fileInput.current?.click()}
-            >
-              <FolderOpen size={20} aria-hidden="true" />
-              <strong>Add RAWs</strong>
-              <span>Drop files or choose from device</span>
-            </button>
+            <>
+              <span className="visually-hidden" aria-live="polite">
+                No files
+              </span>
+              <button
+                type="button"
+                className="drop-zone"
+                onClick={() => fileInput.current?.click()}
+              >
+                <FolderOpen size={20} aria-hidden="true" />
+                <strong>Add RAWs</strong>
+                <span>Drop files or choose from device</span>
+              </button>
+            </>
           ) : (
             <>
               <div className="queue-meta">
@@ -928,10 +928,13 @@ export default function App() {
                           {item.status === "decode-error"
                             ? "Could not decode"
                             : item.status === "export-error"
-                              ? "Export failed"
+                              ? "Export failed · retry available"
                               : item.camera ||
                                 `${(item.file.size / 1_048_576).toFixed(1)} MB`}
                         </span>
+                      </span>
+                      <span className="visually-hidden">
+                        {STATUS_LABELS[item.status]}
                       </span>
                     </button>
                     <button
@@ -1289,27 +1292,19 @@ export default function App() {
                 <div className="canvas-file-info" aria-live="polite">
                   {selected ? (
                     <>
-                      <span className="canvas-filename">{selected.file.name}</span>
+                      <span className="canvas-filename">
+                        {selected.file.name}
+                      </span>
                       {selected.dimensions && (
-                        <span className="canvas-dims">{selected.dimensions}</span>
-                      )}
-                      {isPreviewProcessing && (
-                        <span
-                          className="processing-indicator"
-                          role="status"
-                          aria-label="Preview processing"
-                        >
-                          <LoaderCircle
-                            className="processing-spinner"
-                            size={11}
-                            aria-hidden="true"
-                          />
-                          Processing
+                        <span className="canvas-dims">
+                          {selected.dimensions}
                         </span>
                       )}
                     </>
                   ) : (
-                    <span className="canvas-bar-label">Local RAW processing</span>
+                    <span className="canvas-bar-label">
+                      Local RAW processing
+                    </span>
                   )}
                 </div>
                 <div className="canvas-actions">
@@ -1348,6 +1343,7 @@ export default function App() {
                         </button>
                         <button
                           type="button"
+                          aria-label="Preview 1:1"
                           aria-pressed={previewView === "actual"}
                           title="1:1 pixels (1)"
                           onClick={() => setPreviewView("actual")}
