@@ -833,22 +833,11 @@ export default function App() {
           <div className="brand-mark" aria-hidden="true" />
           <h1>RAW Alchemy</h1>
         </div>
-        <div
-          className="document-context"
-          aria-label="Current document"
-          aria-live="polite"
-        >
-          <strong>{selected?.file.name ?? "Local color workspace"}</strong>
-          <span>
-            {selected
-              ? selected.dimensions || STATUS_LABELS[selected.status]
-              : "No file open"}
-          </span>
-        </div>
+        <div className="topbar-spacer" />
         <div className="topbar-actions">
-          <div className="privacy-note">
-            <LockKeyhole size={15} aria-hidden="true" />
-            <span>Files stay on this device</span>
+          <div className="privacy-badge">
+            <LockKeyhole size={12} aria-hidden="true" />
+            <span>Local</span>
           </div>
           <Button
             size="icon"
@@ -857,9 +846,9 @@ export default function App() {
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
           >
             {theme === "dark" ? (
-              <Sun size={17} aria-hidden="true" />
+              <Sun size={15} aria-hidden="true" />
             ) : (
-              <Moon size={17} aria-hidden="true" />
+              <Moon size={15} aria-hidden="true" />
             )}
           </Button>
           <Button
@@ -868,7 +857,7 @@ export default function App() {
             disabled={exporting}
             onClick={() => fileInput.current?.click()}
           >
-            <Plus size={17} aria-hidden="true" />
+            <Plus size={15} aria-hidden="true" />
             <span className="add-raw-label">Add RAWs</span>
           </Button>
           {items.length > 1 && (
@@ -878,7 +867,7 @@ export default function App() {
                 exportableItems.length === 0 || exporting || !canStartExport
               }
             >
-              <ImageDown size={17} aria-hidden="true" />
+              <ImageDown size={15} aria-hidden="true" />
               {exporting ? "Exporting…" : "Export all"}
             </Button>
           )}
@@ -892,81 +881,67 @@ export default function App() {
           onDragOver={(event) => event.preventDefault()}
           onDrop={onDrop}
         >
-          <div className="queue-heading">
-            <div className="queue-heading-copy">
-              <div className="queue-title-row">
-                <h2>Queue</h2>
-                <span>{statusText}</span>
-              </div>
-              <p>Local files in this session</p>
-            </div>
-            {items.length > 0 && (
-              <Button
-                size="icon"
-                variant="quiet"
-                aria-label="Clear queue"
-                disabled={exporting}
-                onClick={clearQueue}
-              >
-                <Trash2 size={17} />
-              </Button>
-            )}
-          </div>
-
           {items.length === 0 ? (
             <button
               type="button"
               className="drop-zone"
               onClick={() => fileInput.current?.click()}
             >
-              <FolderOpen size={24} aria-hidden="true" />
-              <strong>Add camera RAWs</strong>
-              <span>Drop files here or choose from this device.</span>
+              <FolderOpen size={20} aria-hidden="true" />
+              <strong>Add RAWs</strong>
+              <span>Drop files or choose from device</span>
             </button>
           ) : (
-            <div className="queue-list">
-              {items.map((item) => (
-                <div
-                  key={item.id}
-                  className={`queue-item ${item.id === selectedId ? "is-selected" : ""}`}
+            <>
+              <div className="queue-meta">
+                <span>{items.length} file{items.length !== 1 ? "s" : ""}</span>
+                <Button
+                  size="icon"
+                  variant="quiet"
+                  aria-label="Clear queue"
+                  disabled={exporting}
+                  onClick={clearQueue}
                 >
-                  <button
-                    className="queue-select"
-                    aria-current={item.id === selectedId ? "true" : undefined}
-                    disabled={exporting}
-                    onClick={() => setSelectedId(item.id)}
+                  <Trash2 size={13} />
+                </Button>
+              </div>
+              <div className="queue-list">
+                {items.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`queue-item status-${item.status} ${item.id === selectedId ? "is-selected" : ""}`}
                   >
-                    <FileImage size={18} aria-hidden="true" />
-                    <span className="queue-copy">
-                      <strong>{item.file.name}</strong>
-                      <span>
-                        {item.status === "decode-error"
-                          ? "Could not decode"
-                          : item.status === "export-error"
-                            ? "Export failed · retry available"
-                            : item.camera ||
-                              `${(item.file.size / 1_048_576).toFixed(1)} MB`}
+                    <button
+                      className="queue-select"
+                      aria-current={item.id === selectedId ? "true" : undefined}
+                      disabled={exporting}
+                      onClick={() => setSelectedId(item.id)}
+                    >
+                      <span className="queue-item-bar" aria-hidden="true" />
+                      <span className="queue-copy">
+                        <strong>{item.file.name}</strong>
+                        <span>
+                          {item.status === "decode-error"
+                            ? "Could not decode"
+                            : item.status === "export-error"
+                              ? "Export failed"
+                              : item.camera ||
+                                `${(item.file.size / 1_048_576).toFixed(1)} MB`}
+                        </span>
                       </span>
-                    </span>
-                    <span className="queue-status">
-                      <span
-                        className={`status-dot status-${item.status}`}
-                        aria-hidden="true"
-                      />
-                      {STATUS_LABELS[item.status]}
-                    </span>
-                  </button>
-                  <button
-                    className="remove-file"
-                    aria-label={`Remove ${item.file.name}`}
-                    disabled={exporting}
-                    onClick={() => removeItem(item.id)}
-                  >
-                    <X size={15} />
-                  </button>
-                </div>
-              ))}
-            </div>
+                    </button>
+                    <button
+                      className="remove-file"
+                      aria-label={`Remove ${item.file.name}`}
+                      disabled={exporting}
+                      onClick={() => removeItem(item.id)}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
           <input
             ref={fileInput}
@@ -1306,10 +1281,32 @@ export default function App() {
               aria-busy={selected ? isPreviewProcessing : undefined}
               data-decode-count={preview?.decodeCount}
             >
-              <div className="canvas-toolbar">
-                <div className="canvas-title">
-                  <strong>{selected ? "Compare" : "Workspace"}</strong>
-                  <span>{selectedLut?.name ?? "Local RAW processing"}</span>
+              <div className="canvas-bar">
+                <div className="canvas-file-info" aria-live="polite">
+                  {selected ? (
+                    <>
+                      <span className="canvas-filename">{selected.file.name}</span>
+                      {selected.dimensions && (
+                        <span className="canvas-dims">{selected.dimensions}</span>
+                      )}
+                      {isPreviewProcessing && (
+                        <span
+                          className="processing-indicator"
+                          role="status"
+                          aria-label="Preview processing"
+                        >
+                          <LoaderCircle
+                            className="processing-spinner"
+                            size={11}
+                            aria-hidden="true"
+                          />
+                          Processing
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="canvas-bar-label">Local RAW processing</span>
+                  )}
                 </div>
                 <div className="canvas-actions">
                   {selected && (
@@ -1348,10 +1345,10 @@ export default function App() {
                         <button
                           type="button"
                           aria-pressed={previewView === "actual"}
-                          title="Show preview pixels at 1:1 (1)"
+                          title="1:1 pixels (1)"
                           onClick={() => setPreviewView("actual")}
                         >
-                          Preview 1:1
+                          1:1
                         </button>
                       </div>
                       <span className="canvas-status">
