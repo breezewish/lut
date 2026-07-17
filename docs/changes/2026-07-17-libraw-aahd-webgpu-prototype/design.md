@@ -162,6 +162,35 @@ the first workspace use, and 286 ms on the first readback. Runtime and workspace
 caching remove the device cost and reduce initialization and readback on warm
 runs.
 
+### Phase 0 Reproduction After Main Integration
+
+The prototype was reproduced again at commit `315e4ea` after integrating the
+current `main`. The run used Ubuntu 24.04 on an AWS `g4dn.xlarge`, NVIDIA Tesla
+T4 with driver 595.71.05, and Playwright Chrome 149.0.7827.55. The adapter
+reported NVIDIA Turing and `isFallbackAdapter: false`. The input was the same
+31,793,152-byte Sony fixture with 6240 x 4168 visible pixels.
+
+Across four warm runs, LibRaw unpack plus mosaic copy took 208-210 ms, the AAHD
+core took 78-79 ms, final GPU processing including RGB16 readback took 370-407
+ms, and Worker time took 580-616 ms. The separate production LibRaw AAHD run
+measured a 7,257 ms demosaic median and an 8,958 ms complete-decode median.
+These results reproduce the established warm performance shape.
+
+Chrome 149 spent 3,489 ms creating the device and pipelines in the first
+hardware run, compared with 179 ms in the earlier report. A separate process
+that also captured the LibRaw oracle spent 258 ms at the same boundary, while
+all warm runs spent effectively zero. The current evidence therefore treats
+pipeline creation as a cold-browser cost with substantial cache variance; it
+does not attribute that difference to AAHD execution.
+
+Two repeated final-stage oracle runs were stable within this environment but
+reported 2,942 differing RGB16 samples, rather than the earlier 3,003. Both
+runs had 2,452 samples above one code, maximum difference 1,033 at sample index
+1,291,537, and 102.22 dB PSNR. No relevant AAHD shader math changed between
+the reports. This runtime-dependent result reinforces that the in-place defect
+and isolated-direction dispatches are not a portable deterministic contract,
+even when one browser and driver happen to repeat a result.
+
 ## Resource Trade-offs
 
 The full-frame workspace allocates approximately 2.19 GiB and its largest
