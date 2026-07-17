@@ -378,15 +378,6 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       if (data.rawBackend === "webgpu-aahd") {
         exportRaw.open(new Uint8Array(data.buffer), false);
         const sensor = exportRaw.sensorInfo();
-        const preprocessInfo = exportRaw.aahdPreprocessInfo();
-        const preprocessed = {
-          corrected: exportRaw.aahdCorrectedView(0, preprocessInfo.sampleCount),
-          defects: exportRaw.aahdDefectView(0, preprocessInfo.defectWordCount),
-          extrema: new Uint32Array(preprocessInfo.extrema),
-          totalMs: preprocessInfo.totalMs,
-        };
-        // Preprocessing may grow LibRaw's WASM memory. Acquire every zero-copy
-        // view only after its allocations are complete so none is detached.
         const mosaic = exportRaw.sensorView(0, sensor.sampleCount);
         gpuRenderer = await WebGpuColorRenderer.create(lut);
         const stream = new RenderedTiffStream(
@@ -400,7 +391,6 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
             undefined,
             { renderer: gpuRenderer, ev: data.ev },
             (pixels) => stream.write(pixels),
-            preprocessed,
           );
           const rendered = stream.finish(sensor.sampleCount * 3);
           const sensorTimings = exportRaw.sensorTimings();

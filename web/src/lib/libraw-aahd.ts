@@ -4,6 +4,7 @@ import { refineImmutableIsolatedDirections } from "./aahd-candidate-reference";
 import {
   blendLibRawHighlights,
   correctLibRawSerialDefects,
+  correctLibRawSparseDefects,
   createLibRawGammaLut,
   refineLibRawSerialDirections,
 } from "./aahd-parity-cpu";
@@ -111,6 +112,8 @@ export interface LibRawAahdResult {
 }
 
 const ENTRY_POINTS = [
+  "preprocess_scale_pairs",
+  "preprocess_classify_defects",
   "clear",
   "clear_tile",
   "initialize",
@@ -176,6 +179,8 @@ interface PassCommand {
 const LINEAR_DISPATCH_WIDTH = 65535;
 
 const BINDINGS: Record<EntryPoint, number[]> = {
+  preprocess_scale_pairs: [0, 8, 10, 11],
+  preprocess_classify_defects: [10, 11, 12],
   clear: [5, 6, 7, 11],
   clear_tile: [1, 2, 3, 4, 5, 6, 7, 11],
   initialize: [1, 2, 8, 11, 12, 13],
@@ -244,12 +249,14 @@ export interface TiledAahdColor {
   ev: number;
 }
 
-/** Exact row-ordered LibRaw AAHD inputs prepared by the C++ WASM wrapper. */
-export interface LibRawAahdPreprocessed {
+interface SparsePreprocessingResult {
   corrected: Uint16Array<ArrayBuffer>;
   defects: Uint32Array<ArrayBuffer>;
   extrema: Uint32Array<ArrayBuffer>;
-  totalMs: number;
+  gpuMs: number;
+  serialMs: number;
+  peakGpuBytes: number;
+  maximumBufferBytes: number;
 }
 
 export type TiledAahdBandWriter = (
@@ -658,44 +665,31 @@ export async function demosaicLibRawAahdTiledWithWgsl(
   capture?: Uint16Array,
   color?: TiledAahdColor,
   writeBand?: TiledAahdBandWriter,
-  preprocessed?: LibRawAahdPreprocessed,
 ): Promise<LibRawAahdResult> {
   validateInput(mosaic, info);
-  // Native preprocessing completes before this function is entered. Include
-  // its measured duration so totalMs remains the full post-unpack AAHD cost.
-  const startedAt = performance.now() - (preprocessed?.totalMs ?? 0);
+  const startedAt = performance.now();
   const tiles = createAahdTiles(info.width, info.height);
   const deviceStartedAt = performance.now();
   const runtime = await getRuntime(
     Math.max(mosaic.byteLength, tiledVectorBytes(info)),
   );
   const deviceCreateMs = performance.now() - deviceStartedAt;
+  const sparsePreprocessing = await preprocessLibRawDefectsWithWgsl(
+    runtime,
+    mosaic,
+    info,
+  );
   const workspaceStartedAt = performance.now();
   const workspace = getTiledWorkspace(runtime.device, info, mosaic.byteLength);
   const workspaceCreateMs = performance.now() - workspaceStartedAt;
   const baseParameters = createTiledParameters(info, workspace, tiles[0]);
-  const scaleMultipliers = new Float32Array(
-    baseParameters.buffer,
-    12 * Uint32Array.BYTES_PER_ELEMENT,
-    4,
-  );
   const preMultipliers = new Float32Array(
     baseParameters.buffer,
     16 * Uint32Array.BYTES_PER_ELEMENT,
     4,
   );
 
-  const serialDefectStartedAt = performance.now();
-  const correction =
-    preprocessed ??
-    correctLibRawSerialDefects(
-      mosaic,
-      info.width,
-      info.height,
-      info.cfaPattern,
-      info.blackLevels,
-      scaleMultipliers,
-    );
+  const correction = sparsePreprocessing;
   if (
     correction.corrected.length !== info.sampleCount ||
     correction.defects.length !== Math.ceil(info.sampleCount / 32) ||
@@ -703,9 +697,7 @@ export async function demosaicLibRawAahdTiledWithWgsl(
   ) {
     throw new Error("LibRaw AAHD preprocessing returned invalid dimensions.");
   }
-  const serialDefectMs = preprocessed
-    ? preprocessed.totalMs
-    : performance.now() - serialDefectStartedAt;
+  const serialDefectMs = sparsePreprocessing.serialMs;
   const scaleStartedAt = performance.now();
   runtime.device.queue.writeBuffer(
     workspace.resources[0],
@@ -722,7 +714,8 @@ export async function demosaicLibRawAahdTiledWithWgsl(
     0,
     correction.defects,
   );
-  const scaleAndInitializeMs = performance.now() - scaleStartedAt;
+  const scaleAndInitializeMs =
+    sparsePreprocessing.gpuMs + performance.now() - scaleStartedAt;
 
   const chosenDirections = new Uint16Array(info.sampleCount);
   let interpolateMs = 0;
@@ -875,15 +868,23 @@ export async function demosaicLibRawAahdTiledWithWgsl(
   const validation =
     reference && pixels ? compareRgb16(pixels, reference) : undefined;
   const validationMs = performance.now() - validationStartedAt;
-  const peakGpuBytes = [
+  const tiledPeakGpuBytes = [
     ...workspace.resources,
     workspace.readback,
     ...outputReadbacks,
   ].reduce((sum, buffer) => sum + buffer.size, 0);
-  const maximumBufferBytes = Math.max(
+  const tiledMaximumBufferBytes = Math.max(
     workspace.readback.size,
     ...outputReadbacks.map((buffer) => buffer.size),
     ...workspace.resources.map((buffer) => buffer.size),
+  );
+  const peakGpuBytes = Math.max(
+    tiledPeakGpuBytes,
+    sparsePreprocessing.peakGpuBytes,
+  );
+  const maximumBufferBytes = Math.max(
+    tiledMaximumBufferBytes,
+    sparsePreprocessing.maximumBufferBytes,
   );
   return {
     width: info.width,
@@ -925,6 +926,156 @@ export async function demosaicLibRawAahdTiledWithWgsl(
     },
     ...(validation ? { validation } : {}),
   };
+}
+
+async function preprocessLibRawDefectsWithWgsl(
+  runtime: Runtime,
+  mosaic: Uint16Array,
+  info: SensorImageInfo,
+): Promise<SparsePreprocessingResult> {
+  const startedAt = performance.now();
+  const device = runtime.device;
+  const sampleBytes = mosaic.byteLength;
+  const defectBytes =
+    Math.ceil(info.sampleCount / 32) * Uint32Array.BYTES_PER_ELEMENT;
+  const extremaBytes = 6 * Uint32Array.BYTES_PER_ELEMENT;
+  const readbackBytes = sampleBytes + defectBytes + extremaBytes;
+  const create = (size: number, usage: GPUBufferUsageFlags) =>
+    device.createBuffer({ size, usage });
+  const raw = create(
+    sampleBytes,
+    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  );
+  const scaled = create(
+    sampleBytes,
+    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+  );
+  const candidates = create(
+    defectBytes,
+    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+  );
+  const extrema = create(
+    extremaBytes,
+    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+  );
+  const parameterBuffer = create(
+    64 * Uint32Array.BYTES_PER_ELEMENT,
+    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  );
+  const readback = create(
+    readbackBytes,
+    GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+  );
+  const buffers = [raw, scaled, candidates, extrema, parameterBuffer, readback];
+
+  try {
+    const parameters = createPreprocessingParameters(info);
+    const scale = new Float32Array(parameters.buffer, 12 * 4, 4);
+    const firstColor = normalizedCfa(info.cfaPattern[0]);
+    const initialExtrema = new Uint32Array(6);
+    initialExtrema[firstColor] = scaleSample(
+      mosaic[0],
+      info.blackLevels[firstColor],
+      scale[firstColor],
+    );
+    device.queue.writeBuffer(
+      raw,
+      0,
+      mosaic.buffer as ArrayBuffer,
+      mosaic.byteOffset,
+      mosaic.byteLength,
+    );
+    device.queue.writeBuffer(extrema, 0, initialExtrema);
+    device.queue.writeBuffer(parameterBuffer, 0, parameters);
+
+    const encoder = device.createCommandEncoder();
+    encoder.clearBuffer(candidates);
+    const pass = encoder.beginComputePass();
+    for (const entryPoint of [
+      "preprocess_scale_pairs",
+      "preprocess_classify_defects",
+    ] as const) {
+      const pipeline = runtime.pipelines[entryPoint];
+      pass.setPipeline(pipeline);
+      const resources: Partial<Record<number, GPUBuffer>> = {
+        0: raw,
+        8: extrema,
+        10: scaled,
+        11: parameterBuffer,
+        12: candidates,
+      };
+      pass.setBindGroup(
+        0,
+        device.createBindGroup({
+          layout: pipeline.getBindGroupLayout(0),
+          entries: BINDINGS[entryPoint].map((binding) => ({
+            binding,
+            resource: { buffer: resources[binding]! },
+          })),
+        }),
+      );
+      pass.dispatchWorkgroups(
+        Math.ceil(
+          (entryPoint === "preprocess_scale_pairs"
+            ? info.width / 2
+            : info.width) / 16,
+        ),
+        Math.ceil(info.height / 16),
+      );
+    }
+    pass.end();
+    encoder.copyBufferToBuffer(scaled, 0, readback, 0, sampleBytes);
+    encoder.copyBufferToBuffer(
+      candidates,
+      0,
+      readback,
+      sampleBytes,
+      defectBytes,
+    );
+    encoder.copyBufferToBuffer(
+      extrema,
+      0,
+      readback,
+      sampleBytes + defectBytes,
+      extremaBytes,
+    );
+    device.queue.submit([encoder.finish()]);
+    await readback.mapAsync(GPUMapMode.READ);
+    const gpuMs = performance.now() - startedAt;
+    const mapped = readback.getMappedRange();
+    const corrected = new Uint16Array(
+      new Uint16Array(mapped, 0, info.sampleCount),
+    );
+    const candidateWords = new Uint32Array(
+      new Uint32Array(mapped, sampleBytes, defectBytes / 4),
+    );
+    const resultExtrema = new Uint32Array(
+      new Uint32Array(mapped, sampleBytes + defectBytes, 6),
+    );
+    readback.unmap();
+
+    const serialStartedAt = performance.now();
+    const defects = correctLibRawSparseDefects(
+      corrected,
+      info.width,
+      info.height,
+      info.cfaPattern,
+      candidateWords,
+    );
+    const serialMs = performance.now() - serialStartedAt;
+    return {
+      corrected,
+      defects,
+      extrema: resultExtrema,
+      gpuMs,
+      serialMs,
+      peakGpuBytes: buffers.reduce((sum, buffer) => sum + buffer.size, 0),
+      maximumBufferBytes: Math.max(...buffers.map((buffer) => buffer.size)),
+    };
+  } finally {
+    if (readback.mapState === "mapped") readback.unmap();
+    for (const buffer of buffers) buffer.destroy();
+  }
 }
 
 async function readDirectionCore(
@@ -1510,6 +1661,22 @@ function createParameters(
   parameters.set(info.cfaPattern, 48);
   parameters[58] = workspace.coreWidth;
   parameters[59] = workspace.coreHeight;
+  return parameters;
+}
+
+function createPreprocessingParameters(
+  info: SensorImageInfo,
+): Uint32Array<ArrayBuffer> {
+  const parameters = new Uint32Array(64);
+  const floats = new Float32Array(parameters.buffer);
+  parameters[0] = info.width;
+  parameters[1] = info.height;
+  parameters[4] = info.width;
+  for (let channel = 0; channel < 4; channel += 1) {
+    floats[8 + channel] = info.blackLevels[channel];
+  }
+  floats.set(calculateScale(info).scale, 12);
+  parameters.set(info.cfaPattern, 48);
   return parameters;
 }
 

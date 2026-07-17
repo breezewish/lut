@@ -18,6 +18,9 @@
 - The immutable defect test uses adjacent defects whose classifications would
   cascade under in-place writes and verifies the corrected samples and packed
   defect mask against the original mosaic.
+- The sparse parity defect test starts with a second defect that is not an
+  initial candidate and proves that correcting its dependency schedules it at
+  the exact later row-order position.
 - The LibRaw isolated-direction test uses adjacent direction choices whose
   refinements cascade, verifies the row-ordered in-place result, and checks the
   packed four-bit plane emitted by the same scan.

@@ -244,6 +244,194 @@ export function correctLibRawSerialDefects(
   return { corrected, defects, extrema };
 }
 
+const DEFECT_DEPENDENCIES = [
+  [-2, -2],
+  [0, -2],
+  [2, -2],
+  [0, -1],
+  [-2, 0],
+  [-1, 0],
+  [1, 0],
+  [2, 0],
+  [0, 1],
+  [-2, 2],
+  [0, 2],
+  [2, 2],
+] as const;
+
+/** Classifies the exact defect candidates visible before ordered corrections. */
+export function classifyLibRawDefectCandidates(
+  scaled: Uint16Array,
+  width: number,
+  height: number,
+): Uint32Array<ArrayBuffer> {
+  if (
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width <= 0 ||
+    height <= 0 ||
+    scaled.length !== width * height
+  ) {
+    throw new Error("LibRaw defect classification requires a complete plane.");
+  }
+  const candidates = new Uint32Array(Math.ceil(scaled.length / 32));
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      if (libRawDefectReplacement(scaled, width, height, x, y) !== undefined) {
+        candidates[index >>> 5] |= 1 << (index & 31);
+      }
+    }
+  }
+  return candidates;
+}
+
+/**
+ * Applies the ordered LibRaw scan to a GPU-produced initial candidate mask.
+ * A correction schedules every later classification that can observe it, so
+ * cascades remain exact without evaluating unaffected pixels.
+ */
+export function correctLibRawSparseDefects(
+  scaled: Uint16Array<ArrayBuffer>,
+  width: number,
+  height: number,
+  cfaPattern: ArrayLike<number>,
+  candidates: Uint32Array<ArrayBuffer>,
+): Uint32Array<ArrayBuffer> {
+  if (
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width <= 0 ||
+    height <= 0 ||
+    scaled.length !== width * height ||
+    cfaPattern.length !== 4 ||
+    candidates.length !== Math.ceil(scaled.length / 32)
+  ) {
+    throw new Error("Sparse LibRaw defect correction requires complete input.");
+  }
+
+  const defects = new Uint32Array(candidates.length);
+  const correctParity = (y: number, start: number) => {
+    const rowStart = y * width;
+    const rowEnd = rowStart + width;
+    const indexParity = (rowStart + start) & 1;
+    let nextIndex = rowStart + start;
+    while (nextIndex < rowEnd) {
+      const wordIndex = nextIndex >>> 5;
+      const wordStart = wordIndex * 32;
+      const firstBit = nextIndex - wordStart;
+      const bitCount = Math.min(rowEnd - wordStart, 32);
+      const lowerMask = firstBit === 0 ? 0xffffffff : 0xffffffff << firstBit;
+      const upperMask =
+        bitCount === 32 ? 0xffffffff : 0xffffffff >>> (32 - bitCount);
+      const parityMask = indexParity === 0 ? 0x55555555 : 0xaaaaaaaa;
+      const pending =
+        candidates[wordIndex] & lowerMask & upperMask & parityMask;
+      if (pending === 0) {
+        nextIndex = wordStart + 32 + indexParity;
+        if ((nextIndex & 1) !== indexParity) nextIndex += 1;
+        continue;
+      }
+      const bit = 31 - Math.clz32(pending & -pending);
+      const index = wordStart + bit;
+      const x = index - rowStart;
+      nextIndex = index + 2;
+      const replacement = libRawDefectReplacement(scaled, width, height, x, y);
+      if (replacement === undefined) continue;
+      scaled[index] = replacement;
+      defects[index >>> 5] |= 1 << (index & 31);
+      for (const [dx, dy] of DEFECT_DEPENDENCIES) {
+        const affectedX = x + dx;
+        const affectedY = y + dy;
+        if (
+          affectedX < 0 ||
+          affectedX >= width ||
+          affectedY < 0 ||
+          affectedY >= height
+        ) {
+          continue;
+        }
+        const affected = affectedY * width + affectedX;
+        candidates[affected >>> 5] |= 1 << (affected & 31);
+      }
+    }
+  };
+
+  for (let y = 0; y < height; y += 1) {
+    const firstChannel = cfaPattern[(y & 1) * 2];
+    const nonGreenStart = (firstChannel === 3 ? 1 : firstChannel) & 1;
+    correctParity(y, nonGreenStart);
+    correctParity(y, nonGreenStart ^ 1);
+  }
+  return defects;
+}
+
+function libRawDefectReplacement(
+  samples: Uint16Array,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+): number | undefined {
+  const sample = (sampleX: number, sampleY: number) =>
+    sampleX >= 0 && sampleX < width && sampleY >= 0 && sampleY < height
+      ? samples[sampleY * width + sampleX]
+      : 0;
+  const center = sample(x, y);
+  const west2 = sample(x - 2, y);
+  const east2 = sample(x + 2, y);
+  const north2 = sample(x, y - 2);
+  const south2 = sample(x, y + 2);
+  const west = sample(x - 1, y);
+  const east = sample(x + 1, y);
+  const north = sample(x, y - 1);
+  const south = sample(x, y + 1);
+  const hot =
+    center > west2 &&
+    center > east2 &&
+    center > north2 &&
+    center > south2 &&
+    center > west &&
+    center > east &&
+    center > north &&
+    center > south;
+  const dead =
+    center < west2 &&
+    center < east2 &&
+    center < north2 &&
+    center < south2 &&
+    center < west &&
+    center < east &&
+    center < north &&
+    center < south;
+  if (!hot && !dead) return undefined;
+
+  const average = Math.trunc(
+    (sample(x - 2, y - 2) +
+      north2 +
+      sample(x + 2, y - 2) +
+      west2 +
+      east2 +
+      sample(x - 2, y + 2) +
+      south2 +
+      sample(x + 2, y + 2)) /
+      8,
+  );
+  if (center >> 4 <= average && center << 4 >= average) return undefined;
+
+  const horizontal =
+    Math.abs(west2 - east2) +
+    Math.abs(west - east) +
+    Math.abs(west - east + east2 - west2);
+  const vertical =
+    Math.abs(north2 - south2) +
+    Math.abs(north - south) +
+    Math.abs(north - south + south2 - north2);
+  return Math.trunc(
+    vertical > horizontal ? (west2 + east2) / 2 : (north2 + south2) / 2,
+  );
+}
+
 /**
  * Reproduces LibRaw AAHD's final ordered isolated-direction scan in place.
  * When supplied, `packed` receives eight four-bit results per word during the

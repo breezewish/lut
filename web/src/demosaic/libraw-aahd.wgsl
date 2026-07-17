@@ -70,6 +70,65 @@ fn scaled_sample(x: u32, y: u32) -> u32 {
   return u32(clamp(value * parameter(12u + channel), 0.0, 65535.0));
 }
 
+fn preprocessed_sample(x: i32, y: i32) -> i32 {
+  if x < 0 || y < 0 || x >= i32(width()) || y >= i32(height()) { return 0; }
+  let index = u32(y) * width() + u32(x);
+  let word = output[index / 2u];
+  return i32(select(word >> 16u, word & 0xffffu, index % 2u == 0u));
+}
+
+fn preprocess_scaled_sample(x: u32, y: u32) -> u32 {
+  let channel = cfa_color(x, y);
+  let value = max(f32(sensor_sample(local_image_index(x, y))) - parameter(8u + channel), 0.0);
+  return u32(clamp(value * parameter(12u + channel), 0.0, 65535.0));
+}
+
+@compute @workgroup_size(16, 16)
+fn preprocess_scale_pairs(@builtin(global_invocation_id) id: vec3u) {
+  let pairs_per_row = width() / 2u;
+  if id.x >= pairs_per_row || id.y >= height() { return; }
+  let x = id.x * 2u;
+  let first = preprocess_scaled_sample(x, id.y);
+  let second = preprocess_scaled_sample(x + 1u, id.y);
+  output[id.y * pairs_per_row + id.x] = first | (second << 16u);
+  if first != 0u {
+    let channel = cfa_color(x, id.y);
+    atomicMin(&channel_extrema[channel], first);
+    atomicMax(&channel_extrema[channel + 3u], first);
+  }
+  if second != 0u {
+    let channel = cfa_color(x + 1u, id.y);
+    atomicMin(&channel_extrema[channel], second);
+    atomicMax(&channel_extrema[channel + 3u], second);
+  }
+}
+
+@compute @workgroup_size(16, 16)
+fn preprocess_classify_defects(@builtin(global_invocation_id) id: vec3u) {
+  if !in_image(id) { return; }
+  let x = i32(id.x);
+  let y = i32(id.y);
+  let center = preprocessed_sample(x, y);
+  let west2 = preprocessed_sample(x - 2, y);
+  let east2 = preprocessed_sample(x + 2, y);
+  let north2 = preprocessed_sample(x, y - 2);
+  let south2 = preprocessed_sample(x, y + 2);
+  let west = preprocessed_sample(x - 1, y);
+  let east = preprocessed_sample(x + 1, y);
+  let north = preprocessed_sample(x, y - 1);
+  let south = preprocessed_sample(x, y + 1);
+  if !hot_or_dead(center, west2, east2, north2, south2,
+                  west, east, north, south) { return; }
+
+  let average = (preprocessed_sample(x - 2, y - 2) + north2 +
+    preprocessed_sample(x + 2, y - 2) + west2 + east2 +
+    preprocessed_sample(x - 2, y + 2) + south2 +
+    preprocessed_sample(x + 2, y + 2)) / 8;
+  if (center >> 4) <= average && (center << 4) >= average { return; }
+  let index = id.y * width() + id.x;
+  atomicOr(&defect_mask[index / 32u], 1u << (index & 31u));
+}
+
 fn rgb_at(direction: u32, index: u32) -> vec4u {
   if direction == 0u { return horizontal_rgb[index]; }
   return vertical_rgb[index];

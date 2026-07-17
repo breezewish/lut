@@ -51,13 +51,6 @@ declare module "*libraw.js" {
     channelMaximum: number[];
   }
 
-  interface AahdPreprocessInfo {
-    sampleCount: number;
-    defectWordCount: number;
-    extrema: number[];
-    totalMs: number;
-  }
-
   class LibRawInstance {
     open(buffer: Uint8Array, halfSize: boolean): void;
     openPreview(buffer: Uint8Array, maxEdge: number): void;
@@ -81,9 +74,6 @@ declare module "*libraw.js" {
     aahdHighlightView(offset: number, length: number): Uint16Array;
     sensorInfo(): import("./lib/onnx-demosaic").SensorImageInfo;
     sensorView(offset: number, length: number): Uint16Array;
-    aahdPreprocessInfo(): AahdPreprocessInfo;
-    aahdCorrectedView(offset: number, length: number): Uint16Array<ArrayBuffer>;
-    aahdDefectView(offset: number, length: number): Uint32Array<ArrayBuffer>;
     sensorTimings(): import("./types").LibRawSensorTimings;
     timings(): DecodeTimings;
     thumbnailData(): Thumbnail | undefined;

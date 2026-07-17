@@ -290,7 +290,7 @@ target.
 
 ### GPU-Resident Color and Streamed Export
 
-The productized experimental route uses 1024 x 1024 cores and one shared
+The experimental product route uses 1024 x 1024 cores and one shared
 WebGPU adapter and device. AAHD writes its selected, highlighted ProPhoto RGB16
 core into a GPU buffer consumed directly by the existing corrected-v2 exposure
 and 3D LUT shader. Only the final quantized RGB16 core is read back. A bounded
@@ -303,20 +303,32 @@ transfer into the other. The previous result is mapped before the next tile is
 submitted, and its consumer must finish before that readback can be reused two
 tiles later. The exact compact Blend-highlight transform keeps a separate
 scratch buffer because its CPU row-order statement semantics are part of the
-accepted parity contract. LibRaw's C++ WASM wrapper also performs
-scaling, extrema collection, and the serial defect scan in one traversal before
-exposing zero-copy corrected-mosaic and defect-mask views. The complete live
-WebGPU allocation is 225,772,668 bytes and the largest binding is 52,016,640
-bytes.
+accepted parity contract.
+
+Defect preprocessing keeps exact row-order behavior without a full scalar
+classification scan. One GPU submission scales the complete CFA, collects
+extrema, and classifies every defect visible in the initial plane. The CPU
+enumerates only set bits in row and CFA-parity order. When a correction occurs,
+it schedules every later center whose predicate can observe that sample. This
+dependency propagation preserves cascades because an initially unclassified
+center can change only after one of its sampled neighbors changes. The exact
+corrected CFA and defect mask are uploaded for the tiled passes. Temporary
+preprocessing buffers are destroyed before the tile workspace is allocated.
+
+The complete live WebGPU allocation is 225,772,668 bytes. The preprocessing
+readback is the largest individual buffer at 55,267,704 bytes; the persistent
+corrected CFA is 52,016,640 bytes.
 
 On the 6240 x 4168 Sony fixture, the complete experimental TIFF differed from
 the default production export in 51,361 of 78,024,960 channel samples. Every
 difference was one code value, no sample exceeded the two-code corrected-v2
 contract, and MAE was 0.0006583. One cold and four warm T4 runs measured warm
-Worker totals of 2.79-3.18 seconds and TIFF work of 0.31-0.32 seconds. The
+Worker totals of 2.42-2.90 seconds and TIFF work of 0.31-0.32 seconds. The
 streamed demosaic call, which includes overlapped TIFF callbacks, took
-2.45-2.81 seconds. Exact C++ defect preprocessing took 0.60-0.65 seconds and
-color took 0.07-0.08 seconds. Once streaming overlaps GPU waits, individual
+2.07-2.54 seconds. GPU scaling, candidate classification, full scaled-CFA
+readback, and corrected-CFA upload took 0.27-0.32 seconds; the exact sparse CPU
+defect scan took 0.028-0.035 seconds. Color took 0.065-0.073 seconds. Once
+streaming overlaps GPU waits, individual
 wall-time stage counters also include time when their completion callback was
 delayed by synchronous TIFF work; they are not additive GPU timestamps. The
 500 ms post-unpack target is not met.
@@ -337,10 +349,11 @@ full-resolution export backend.
 
 The full-frame workspace allocates approximately 2.19 GiB and its largest
 buffer is 417 MB. The final 1024-core experimental route instead measures
-225.8 MB of live WebGPU buffers with a 52.0 MB maximum binding. This includes
+225.8 MB of live WebGPU buffers with a 55.3 MB maximum binding. This includes
 two bounded output readbacks, one exact-highlight scratch readback, and the
-packed full-image direction plane. It excludes CPU/WASM preprocessing storage,
-the CPU direction plane, and the final compressed TIFF Blob.
+packed full-image direction plane. The non-overlapping preprocessing workspace
+uses 162.6 MB. These figures exclude the CPU corrected CFA, the CPU direction
+plane, and the final compressed TIFF Blob.
 
 Handwritten WGSL is required for this path. AAHD uses mutable neighborhoods,
 integer wrapping, atomic homogeneity accumulation, and discrete refinements.
