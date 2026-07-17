@@ -324,9 +324,10 @@ full-resolution export backend.
 ## Resource Trade-offs
 
 The full-frame workspace allocates approximately 2.19 GiB and its largest
-buffer is 417 MB. The bounded 512-core parity route instead measures 87.8 MB of
-live WebGPU buffers with a 52.0 MB maximum binding. This count includes its
-reusable readback buffer and excludes CPU direction and final output arrays.
+buffer is 417 MB. The final 1024-core experimental route instead measures
+212.8 MB of live WebGPU buffers with a 52.0 MB maximum binding. This includes
+two bounded output readbacks and one exact-highlight scratch readback. It
+excludes the CPU direction plane and the final compressed TIFF Blob.
 
 Handwritten WGSL is required for this path. AAHD uses mutable neighborhoods,
 integer wrapping, atomic homogeneity accumulation, and discrete refinements.
@@ -337,22 +338,12 @@ the browser's performance-critical implementation.
 
 ## Recommendation
 
-Continue with tiled handwritten WGSL AAHD. The hybrid full-frame parity route
-is now a bitwise LibRaw reference implementation on the tested Sony/T4 case,
-but its approximately 2.19 GiB workspace is still unsuitable for product use.
-
-Before production:
-
-- Decide whether product output keeps the proven hybrid parity contract or
-  explicitly adopts the faster deterministic defect policy with a new golden.
-- Implement bounded tiling and keep candidate/final data GPU-resident through
-  white balance, matrices, grading, and 3D LUT.
-- Replace full-frame RGB16 readback with export strips so Deflate can overlap
-  bounded GPU readback.
-- Validate multiple Bayer cameras, CFA phases, black-level layouts, clipped
-  highlights, borders, and synthetic hot/dead clusters.
-- Set product acceptance thresholds separately for ordinary pixels and the
-  explicitly chosen defect-pixel policy.
+Retain the bounded handwritten WGSL route as an explicit experimental Bayer
+backend. The current parity contract is the only route supported by product
+integration because its differences are bounded to one final color code on the
+tested golden. Production default selection still requires broader camera and
+client-GPU evidence. The deterministic defect candidate remains a separately
+named behavior proposal and must not replace the product golden implicitly.
 
 ## Open Questions
 
@@ -374,7 +365,9 @@ refined directions, selected AAHD, Blend highlight, and final ProPhoto output.
 Setting `librawReference=1` captures and compares the matching internal LibRaw
 stage. Setting `candidateReference=1` compares the candidate-only boundaries
 with their independent scalar reference. Normal application and end-to-end
-paths continue to use production LibRaw.
+paths continue to use production LibRaw. `rawBackend=webgpu-aahd` selects the
+integrated experimental export, while `AAHD_EXPORT_E2E=1` runs its complete
+hardware TIFF comparison.
 
 The CPU baseline is reproducible with:
 
