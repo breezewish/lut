@@ -93,8 +93,12 @@ public:
     aahd_input_.clear();
     aahd_horizontal_.clear();
     aahd_vertical_.clear();
+    aahd_chosen_directions_.clear();
+    aahd_horizontal_homogeneity_.clear();
+    aahd_vertical_homogeneity_.clear();
     aahd_directions_.clear();
     aahd_output_.clear();
+    aahd_highlight_.clear();
     scale_multipliers_.fill(0);
     output_matrix_.fill(0);
     pre_multipliers_.fill(0);
@@ -107,13 +111,18 @@ public:
     std::vector<std::uint16_t>().swap(aahd_input_);
     std::vector<std::uint16_t>().swap(aahd_horizontal_);
     std::vector<std::uint16_t>().swap(aahd_vertical_);
+    std::vector<std::uint8_t>().swap(aahd_chosen_directions_);
+    std::vector<std::uint8_t>().swap(aahd_horizontal_homogeneity_);
+    std::vector<std::uint8_t>().swap(aahd_vertical_homogeneity_);
     std::vector<std::uint8_t>().swap(aahd_directions_);
     std::vector<std::uint16_t>().swap(aahd_output_);
+    std::vector<std::uint16_t>().swap(aahd_highlight_);
   }
 
   const std::vector<std::uint16_t> &aahd_input() const { return aahd_input_; }
-  const std::vector<std::uint16_t> &aahd_output() const {
-    return aahd_output_;
+  const std::vector<std::uint16_t> &aahd_output() const { return aahd_output_; }
+  const std::vector<std::uint16_t> &aahd_highlight() const {
+    return aahd_highlight_;
   }
   const std::vector<std::uint16_t> &aahd_horizontal() const {
     return aahd_horizontal_;
@@ -123,6 +132,15 @@ public:
   }
   const std::vector<std::uint8_t> &aahd_directions() const {
     return aahd_directions_;
+  }
+  const std::vector<std::uint8_t> &aahd_chosen_directions() const {
+    return aahd_chosen_directions_;
+  }
+  const std::vector<std::uint8_t> &aahd_horizontal_homogeneity() const {
+    return aahd_horizontal_homogeneity_;
+  }
+  const std::vector<std::uint8_t> &aahd_vertical_homogeneity() const {
+    return aahd_vertical_homogeneity_;
   }
   const std::array<float, 4> &scale_multipliers() const {
     return scale_multipliers_;
@@ -166,7 +184,7 @@ public:
     const auto rgb_samples = static_cast<std::size_t>(width) * height * 3;
     aahd_horizontal_.resize(rgb_samples);
     aahd_vertical_.resize(rgb_samples);
-    aahd_directions_.resize(static_cast<std::size_t>(width) * height);
+    copy_aahd_directions(aahd_directions_, directions, padded_width, margin);
     for (unsigned row = 0; row < height; ++row) {
       const auto padded_offset =
           (static_cast<std::size_t>(row + margin) * padded_width + margin);
@@ -177,10 +195,26 @@ public:
       std::memcpy(aahd_vertical_.data() + rgb_offset,
                   vertical_rgb + padded_offset * 3,
                   static_cast<std::size_t>(width) * 3 * sizeof(std::uint16_t));
-      std::memcpy(aahd_directions_.data() +
-                      static_cast<std::size_t>(row) * width,
-                  directions + padded_offset, width);
     }
+  }
+
+  void capture_aahd_chosen_directions(const char *directions,
+                                      const char *horizontal_homogeneity,
+                                      const char *vertical_homogeneity,
+                                      int padded_width, int padded_height,
+                                      int margin) {
+    if (!capture_aahd_)
+      return;
+    if (padded_width != int(imgdata.sizes.iwidth) + margin * 2 ||
+        padded_height != int(imgdata.sizes.iheight) + margin * 2) {
+      throw std::runtime_error("LibRaw returned invalid AAHD capture geometry");
+    }
+    copy_aahd_directions(aahd_chosen_directions_, directions, padded_width,
+                         margin);
+    copy_aahd_directions(aahd_horizontal_homogeneity_, horizontal_homogeneity,
+                         padded_width, margin);
+    copy_aahd_directions(aahd_vertical_homogeneity_, vertical_homogeneity,
+                         padded_width, margin);
   }
 
 protected:
@@ -195,6 +229,7 @@ protected:
     if (capture_aahd_) {
       std::copy(&out_cam[0][0], &out_cam[0][0] + 12,
                 output_matrix_.begin());
+      copy_current_image(aahd_highlight_);
     }
     LibRaw::convert_to_rgb_loop(out_cam);
   }
@@ -220,8 +255,12 @@ private:
   std::vector<std::uint16_t> aahd_input_;
   std::vector<std::uint16_t> aahd_horizontal_;
   std::vector<std::uint16_t> aahd_vertical_;
+  std::vector<std::uint8_t> aahd_chosen_directions_;
+  std::vector<std::uint8_t> aahd_horizontal_homogeneity_;
+  std::vector<std::uint8_t> aahd_vertical_homogeneity_;
   std::vector<std::uint8_t> aahd_directions_;
   std::vector<std::uint16_t> aahd_output_;
+  std::vector<std::uint16_t> aahd_highlight_;
   std::array<float, 4> scale_multipliers_{};
   std::array<float, 12> output_matrix_{};
   std::array<float, 4> pre_multipliers_{};
@@ -232,6 +271,19 @@ private:
   double aahd_hot_pixel_ms_ = 0;
   double preview_resize_ms_ = 0;
   unsigned preview_max_edge_ = 0;
+
+  void copy_aahd_directions(std::vector<std::uint8_t> &destination,
+                            const char *source, int padded_width, int margin) {
+    const auto width = imgdata.sizes.iwidth;
+    const auto height = imgdata.sizes.iheight;
+    destination.resize(static_cast<std::size_t>(width) * height);
+    for (unsigned row = 0; row < height; ++row) {
+      const auto padded_offset =
+          static_cast<std::size_t>(row + margin) * padded_width + margin;
+      std::memcpy(destination.data() + static_cast<std::size_t>(row) * width,
+                  source + padded_offset, width);
+    }
+  }
 
   void capture_aahd_input() {
     static constexpr float yuv_coefficients[3][3] = {
@@ -274,16 +326,18 @@ private:
     }
   }
 
-  void capture_aahd_output() {
-    const auto samples = static_cast<std::size_t>(imgdata.sizes.iwidth) *
-                         imgdata.sizes.iheight;
-    aahd_output_.resize(samples * 3);
+  void copy_current_image(std::vector<std::uint16_t> &destination) const {
+    const auto samples =
+        static_cast<std::size_t>(imgdata.sizes.iwidth) * imgdata.sizes.iheight;
+    destination.resize(samples * 3);
     for (std::size_t index = 0; index < samples; ++index) {
       for (unsigned channel = 0; channel < 3; ++channel) {
-        aahd_output_[index * 3 + channel] = imgdata.image[index][channel];
+        destination[index * 3 + channel] = imgdata.image[index][channel];
       }
     }
   }
+
+  void capture_aahd_output() { copy_current_image(aahd_output_); }
 
   static std::size_t oriented_index(unsigned row, unsigned col,
                                     unsigned width, unsigned height,
@@ -501,6 +555,13 @@ extern "C" void alchemy_capture_aahd_candidates(
     int margin) {
   static_cast<TimedLibRaw *>(raw)->capture_aahd_candidates(
       horizontal, vertical, directions, padded_width, padded_height, margin);
+}
+
+extern "C" void alchemy_capture_aahd_chosen_directions(
+    LibRaw *raw, const char *directions, const char *horizontal,
+    const char *vertical, int padded_width, int padded_height, int margin) {
+  static_cast<TimedLibRaw *>(raw)->capture_aahd_chosen_directions(
+      directions, horizontal, vertical, padded_width, padded_height, margin);
 }
 
 extern "C" void alchemy_mark_aahd_hot_stage(LibRaw *raw, int finished) {
@@ -850,7 +911,15 @@ public:
     }
     processor_.enable_aahd_capture();
     image_info();
-    if (processor_.aahd_input().empty() || processor_.aahd_output().empty()) {
+    if (processor_.aahd_input().empty() ||
+        processor_.aahd_horizontal().empty() ||
+        processor_.aahd_vertical().empty() ||
+        processor_.aahd_chosen_directions().empty() ||
+        processor_.aahd_horizontal_homogeneity().empty() ||
+        processor_.aahd_vertical_homogeneity().empty() ||
+        processor_.aahd_directions().empty() ||
+        processor_.aahd_output().empty() ||
+        processor_.aahd_highlight().empty()) {
       throw std::runtime_error("LibRaw did not capture the AAHD boundaries");
     }
 
@@ -859,6 +928,7 @@ public:
     result.set("height", image_->height);
     result.set("inputSampleCount", processor_.aahd_input().size());
     result.set("outputSampleCount", processor_.aahd_output().size());
+    result.set("highlightSampleCount", processor_.aahd_highlight().size());
     result.set("candidateSampleCount", processor_.aahd_horizontal().size());
     result.set("directionSampleCount", processor_.aahd_directions().size());
     result.set("hotPixelMs", processor_.aahd_hot_pixel_ms());
@@ -888,6 +958,11 @@ public:
                           "AAHD output");
   }
 
+  val aahd_highlight_view(std::size_t offset, std::size_t length) const {
+    return reference_view(processor_.aahd_highlight(), offset, length,
+                          "AAHD highlight output");
+  }
+
   val aahd_horizontal_view(std::size_t offset, std::size_t length) const {
     return reference_view(processor_.aahd_horizontal(), offset, length,
                           "AAHD horizontal candidate");
@@ -907,6 +982,29 @@ public:
       throw std::runtime_error("AAHD direction view exceeds its buffer");
     }
     return val(typed_memory_view(length, source.data() + offset));
+  }
+
+  val aahd_chosen_direction_view(std::size_t offset, std::size_t length) const {
+    const auto &source = processor_.aahd_chosen_directions();
+    if (source.empty()) {
+      throw std::runtime_error("AAHD chosen directions are unavailable");
+    }
+    if (offset > source.size() || length > source.size() - offset) {
+      throw std::runtime_error("AAHD chosen direction view exceeds its buffer");
+    }
+    return val(typed_memory_view(length, source.data() + offset));
+  }
+
+  val aahd_horizontal_homogeneity_view(std::size_t offset,
+                                       std::size_t length) const {
+    return reference_view(processor_.aahd_horizontal_homogeneity(), offset,
+                          length, "AAHD horizontal homogeneity");
+  }
+
+  val aahd_vertical_homogeneity_view(std::size_t offset,
+                                     std::size_t length) const {
+    return reference_view(processor_.aahd_vertical_homogeneity(), offset,
+                          length, "AAHD vertical homogeneity");
   }
 
 private:
@@ -932,7 +1030,8 @@ private:
     return result;
   }
 
-  static val reference_view(const std::vector<std::uint16_t> &source,
+  template <typename Sample>
+  static val reference_view(const std::vector<Sample> &source,
                             std::size_t offset, std::size_t length,
                             const char *name) {
     if (source.empty()) {
@@ -1085,6 +1184,13 @@ EMSCRIPTEN_BINDINGS(raw_alchemy_libraw) {
       .function("aahdInputView", &BrowserLibRaw::aahd_input_view)
       .function("aahdHorizontalView", &BrowserLibRaw::aahd_horizontal_view)
       .function("aahdVerticalView", &BrowserLibRaw::aahd_vertical_view)
+      .function("aahdChosenDirectionView",
+                &BrowserLibRaw::aahd_chosen_direction_view)
+      .function("aahdHorizontalHomogeneityView",
+                &BrowserLibRaw::aahd_horizontal_homogeneity_view)
+      .function("aahdVerticalHomogeneityView",
+                &BrowserLibRaw::aahd_vertical_homogeneity_view)
       .function("aahdDirectionView", &BrowserLibRaw::aahd_direction_view)
-      .function("aahdOutputView", &BrowserLibRaw::aahd_output_view);
+      .function("aahdOutputView", &BrowserLibRaw::aahd_output_view)
+      .function("aahdHighlightView", &BrowserLibRaw::aahd_highlight_view);
 }

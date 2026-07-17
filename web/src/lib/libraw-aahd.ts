@@ -1,12 +1,21 @@
 import shader from "../demosaic/libraw-aahd.wgsl?raw";
 import type { SensorImageInfo } from "./onnx-demosaic";
 import { refineImmutableIsolatedDirections } from "./aahd-candidate-reference";
+import {
+  blendLibRawHighlights,
+  correctLibRawSerialDefects,
+  createLibRawGammaLut,
+  refineLibRawSerialDirections,
+} from "./aahd-parity-cpu";
+
+export type AahdContract = "deterministic-parallel-candidate" | "libraw-parity";
 
 export interface AahdReferenceInfo {
   width: number;
   height: number;
   inputSampleCount: number;
   outputSampleCount: number;
+  highlightSampleCount: number;
   candidateSampleCount: number;
   directionSampleCount: number;
   hotPixelMs: number;
@@ -23,9 +32,12 @@ export interface LibRawAahdTimings {
   workspaceCreateMs: number;
   scaleAndInitializeMs: number;
   hotPixelMs: number;
+  serialDefectMs: number;
   interpolateMs: number;
   homogeneityMs: number;
   refineAndCombineMs: number;
+  serialDirectionMs: number;
+  serialHighlightMs: number;
   highlightMs: number;
   colorMs: number;
   readbackMs: number;
@@ -42,6 +54,8 @@ export interface LibRawAahdValidation {
   maximumDifferenceIndex: number;
   actualAtMaximumDifference: number;
   expectedAtMaximumDifference: number;
+  actualPixelAtMaximumDifference?: number[];
+  expectedPixelAtMaximumDifference?: number[];
   meanAbsoluteDifference: number;
   rootMeanSquareDifference: number;
   psnrDb: number;
@@ -50,17 +64,24 @@ export interface LibRawAahdValidation {
 export interface LibRawAahdResult {
   width: number;
   height: number;
-  algorithm: "Deterministic parallel AAHD candidate";
-  contract: "deterministic-parallel-candidate";
+  algorithm: "Deterministic parallel AAHD candidate" | "LibRaw AAHD parity";
+  contract: AahdContract;
   backend: "native-wgsl";
   outputStage:
+    | "scaled"
     | "corrected"
     | "defects"
     | "horizontal"
     | "vertical"
+    | "horizontal-yuv"
+    | "vertical-yuv"
+    | "horizontal-homogeneity"
+    | "vertical-homogeneity"
+    | "chosen-directions"
     | "directions"
     | "candidate-directions"
     | "aahd"
+    | "highlight"
     | "final";
   adapterInfo: {
     vendor: string;
@@ -76,6 +97,7 @@ export interface LibRawAahdResult {
 const ENTRY_POINTS = [
   "clear",
   "initialize",
+  "initialize_parity",
   "hide_hot_pixels",
   "copy_corrected",
   "write_corrected",
@@ -84,8 +106,25 @@ const ENTRY_POINTS = [
   "interpolate_rb_at_green",
   "interpolate_remaining_rb",
   "convert_candidates_to_yuv",
+  "initialize_yuv_first_products",
+  "store_yuv_second_0",
+  "add_yuv_second_0",
+  "store_yuv_third_0",
+  "finish_yuv_0",
+  "store_yuv_second_1",
+  "add_yuv_second_1",
+  "store_yuv_third_1",
+  "finish_yuv_1",
+  "store_yuv_second_2",
+  "add_yuv_second_2",
+  "store_yuv_third_2",
+  "finish_yuv_2",
+  "write_horizontal_yuv",
+  "write_vertical_yuv",
   "evaluate_homogeneity",
   "choose_direction",
+  "write_horizontal_homogeneity",
+  "write_vertical_homogeneity",
   "refine_checker_even",
   "refine_checker_odd",
   "refine_isolated",
@@ -94,16 +133,25 @@ const ENTRY_POINTS = [
   "write_horizontal",
   "write_vertical",
   "write_directions",
+  "write_direction_plane",
+  "load_direction_plane",
   "write_aahd",
   "blend_highlights",
+  "collect_highlights",
+  "apply_highlights",
   "write_final",
 ] as const;
 
 type EntryPoint = (typeof ENTRY_POINTS)[number];
 
+// WebGPU guarantees at least 65,535 workgroups per dispatch dimension. Keep
+// this in sync with LINEAR_DISPATCH_WIDTH in the shader.
+const LINEAR_DISPATCH_WIDTH = 65535;
+
 const BINDINGS: Record<EntryPoint, number[]> = {
   clear: [5, 6, 7, 11],
   initialize: [0, 1, 2, 8, 11, 12],
+  initialize_parity: [0, 1, 2, 5, 11, 12],
   hide_hot_pixels: [1, 2, 5, 11, 12],
   copy_corrected: [1, 2, 11],
   write_corrected: [1, 10, 11],
@@ -112,8 +160,25 @@ const BINDINGS: Record<EntryPoint, number[]> = {
   interpolate_rb_at_green: [1, 2, 8, 11],
   interpolate_remaining_rb: [1, 2, 8, 11],
   convert_candidates_to_yuv: [1, 2, 3, 4, 9, 11],
+  initialize_yuv_first_products: [1, 2, 3, 4, 9, 11],
+  store_yuv_second_0: [1, 2, 9, 11],
+  add_yuv_second_0: [1, 2, 3, 4, 11],
+  store_yuv_third_0: [1, 2, 9, 11],
+  finish_yuv_0: [1, 2, 3, 4, 11],
+  store_yuv_second_1: [1, 2, 9, 11],
+  add_yuv_second_1: [1, 2, 3, 4, 11],
+  store_yuv_third_1: [1, 2, 9, 11],
+  finish_yuv_1: [1, 2, 3, 4, 11],
+  store_yuv_second_2: [1, 2, 9, 11],
+  add_yuv_second_2: [1, 2, 3, 4, 11],
+  store_yuv_third_2: [1, 2, 9, 11],
+  finish_yuv_2: [1, 2, 3, 4, 11],
+  write_horizontal_yuv: [3, 10, 11],
+  write_vertical_yuv: [4, 10, 11],
   evaluate_homogeneity: [3, 4, 6, 7, 11],
   choose_direction: [3, 4, 5, 6, 7, 11],
+  write_horizontal_homogeneity: [6, 7, 10, 11],
+  write_vertical_homogeneity: [6, 7, 10, 11],
   refine_checker_even: [5, 11],
   refine_checker_odd: [5, 11],
   refine_isolated: [5, 6, 11],
@@ -122,8 +187,12 @@ const BINDINGS: Record<EntryPoint, number[]> = {
   write_horizontal: [1, 10, 11],
   write_vertical: [2, 10, 11],
   write_directions: [5, 10, 11],
+  write_direction_plane: [5, 10, 11],
+  load_direction_plane: [0, 5, 11],
   write_aahd: [1, 10, 11],
   blend_highlights: [1, 11],
+  collect_highlights: [1, 10, 11, 12],
+  apply_highlights: [1, 10, 11],
   write_final: [1, 10, 11],
 };
 
@@ -150,19 +219,30 @@ let cachedWorkspace: Workspace | undefined;
 export async function demosaicLibRawAahdWithWgsl(
   mosaic: Uint16Array,
   info: SensorImageInfo,
+  contract: AahdContract,
   outputStage:
+    | "scaled"
     | "corrected"
     | "defects"
     | "horizontal"
     | "vertical"
+    | "horizontal-yuv"
+    | "vertical-yuv"
+    | "horizontal-homogeneity"
+    | "vertical-homogeneity"
+    | "chosen-directions"
     | "directions"
     | "candidate-directions"
     | "aahd"
+    | "highlight"
     | "final",
   reference?: Uint16Array,
   referenceInfo?: AahdReferenceInfo,
 ): Promise<LibRawAahdResult> {
   validateInput(mosaic, info, referenceInfo);
+  if (contract === "libraw-parity" && outputStage === "candidate-directions") {
+    throw new Error("Candidate directions require the deterministic contract.");
+  }
   const startedAt = performance.now();
   const deviceStartedAt = performance.now();
   const runtime = await getRuntime(largestBufferBytes(info));
@@ -170,8 +250,13 @@ export async function demosaicLibRawAahdWithWgsl(
   const workspaceStartedAt = performance.now();
   const workspace = getWorkspace(runtime.device, info, mosaic.byteLength);
   const workspaceCreateMs = performance.now() - workspaceStartedAt;
-  const parameters = createParameters(info, workspace, referenceInfo);
+  const parameters = createParameters(
+    info,
+    workspace,
+    contract === "libraw-parity" ? undefined : referenceInfo,
+  );
   const scaleMultipliers = new Float32Array(parameters.buffer, 12 * 4, 4);
+  const preMultipliers = new Float32Array(parameters.buffer, 16 * 4, 4);
   const firstColor = normalizedCfa(info.cfaPattern[0]);
   const firstScaled = scaleSample(
     mosaic[0],
@@ -194,12 +279,40 @@ export async function demosaicLibRawAahdWithWgsl(
     runtime.device.queue.writeBuffer(workspace.resources[11], 0, parameters);
     submitPass(runtime, workspace, "clear", true);
     submitPass(runtime, workspace, "initialize");
+    if (outputStage === "scaled") {
+      submitPass(runtime, workspace, "write_corrected", false, true);
+    }
     await runtime.device.queue.onSubmittedWorkDone();
     const scaleAndInitializeMs = performance.now() - scaleStartedAt;
 
     const hotStartedAt = performance.now();
-    submitPass(runtime, workspace, "hide_hot_pixels");
-    submitPass(runtime, workspace, "copy_corrected");
+    let serialDefectMs = 0;
+    if (contract === "libraw-parity") {
+      const serialStartedAt = performance.now();
+      const correction = correctLibRawSerialDefects(
+        mosaic,
+        info.width,
+        info.height,
+        info.cfaPattern,
+        info.blackLevels,
+        scaleMultipliers,
+      );
+      serialDefectMs = performance.now() - serialStartedAt;
+      runtime.device.queue.writeBuffer(
+        workspace.resources[0],
+        0,
+        correction.corrected,
+      );
+      runtime.device.queue.writeBuffer(
+        workspace.resources[12],
+        0,
+        correction.defects,
+      );
+      submitPass(runtime, workspace, "initialize_parity");
+    } else {
+      submitPass(runtime, workspace, "hide_hot_pixels");
+      submitPass(runtime, workspace, "copy_corrected");
+    }
     if (outputStage === "corrected") {
       submitPass(runtime, workspace, "write_corrected", false, true);
     } else if (outputStage === "defects") {
@@ -212,19 +325,50 @@ export async function demosaicLibRawAahdWithWgsl(
     submitPass(runtime, workspace, "interpolate_green");
     submitPass(runtime, workspace, "interpolate_rb_at_green");
     submitPass(runtime, workspace, "interpolate_remaining_rb");
-    submitPass(runtime, workspace, "convert_candidates_to_yuv", true);
+    if (contract === "libraw-parity") {
+      submitPass(runtime, workspace, "initialize_yuv_first_products", true);
+      for (const component of [0, 1, 2] as const) {
+        submitPass(runtime, workspace, `store_yuv_second_${component}`, true);
+        submitPass(runtime, workspace, `add_yuv_second_${component}`, true);
+        submitPass(runtime, workspace, `store_yuv_third_${component}`, true);
+        submitPass(runtime, workspace, `finish_yuv_${component}`, true);
+      }
+    } else {
+      submitPass(runtime, workspace, "convert_candidates_to_yuv", true);
+    }
     await runtime.device.queue.onSubmittedWorkDone();
     const interpolateMs = performance.now() - interpolateStartedAt;
 
     const homogeneityStartedAt = performance.now();
     submitPass(runtime, workspace, "evaluate_homogeneity");
+    if (outputStage === "horizontal-homogeneity") {
+      submitPass(
+        runtime,
+        workspace,
+        "write_horizontal_homogeneity",
+        false,
+        true,
+      );
+    } else if (outputStage === "vertical-homogeneity") {
+      submitPass(runtime, workspace, "write_vertical_homogeneity", false, true);
+    }
     submitPass(runtime, workspace, "choose_direction");
+    if (outputStage === "chosen-directions") {
+      submitPass(runtime, workspace, "write_directions", false, true);
+    }
     await runtime.device.queue.onSubmittedWorkDone();
     const homogeneityMs = performance.now() - homogeneityStartedAt;
 
     const refineStartedAt = performance.now();
-    submitPass(runtime, workspace, "refine_checker_even");
-    submitPass(runtime, workspace, "refine_checker_odd");
+    const stopsBeforeRefinement =
+      outputStage === "horizontal-homogeneity" ||
+      outputStage === "vertical-homogeneity" ||
+      outputStage === "chosen-directions";
+    if (!stopsBeforeRefinement) {
+      submitPass(runtime, workspace, "refine_checker_even");
+      submitPass(runtime, workspace, "refine_checker_odd");
+    }
+    let serialDirectionMs = 0;
     let candidateDirections: Uint32Array | undefined;
     if (outputStage === "candidate-directions") {
       submitPass(runtime, workspace, "write_directions", false, true);
@@ -254,14 +398,69 @@ export async function demosaicLibRawAahdWithWgsl(
         workspace.readback.unmap();
       }
     }
-    submitPass(runtime, workspace, "refine_isolated");
-    submitPass(runtime, workspace, "copy_refined_directions");
-    if (outputStage === "corrected" || outputStage === "defects") {
+    if (contract === "libraw-parity" && !stopsBeforeRefinement) {
+      submitPass(runtime, workspace, "write_direction_plane", false, true);
+      await runtime.device.queue.onSubmittedWorkDone();
+      const encoder = runtime.device.createCommandEncoder();
+      encoder.copyBufferToBuffer(
+        workspace.resources[10],
+        0,
+        workspace.readback,
+        0,
+        mosaic.byteLength,
+      );
+      runtime.device.queue.submit([encoder.finish()]);
+      await workspace.readback.mapAsync(GPUMapMode.READ, 0, mosaic.byteLength);
+      let refined: Uint16Array<ArrayBuffer>;
+      try {
+        const directions = new Uint16Array(info.sampleCount);
+        directions.set(
+          new Uint16Array(
+            workspace.readback.getMappedRange(0, mosaic.byteLength),
+          ),
+        );
+        const serialStartedAt = performance.now();
+        refined = refineLibRawSerialDirections(
+          directions,
+          info.width,
+          info.height,
+        );
+        serialDirectionMs = performance.now() - serialStartedAt;
+      } finally {
+        workspace.readback.unmap();
+      }
+      runtime.device.queue.writeBuffer(workspace.resources[0], 0, refined);
+      submitPass(runtime, workspace, "load_direction_plane");
+      // LibRaw restores each HOT pixel's original scaled CFA sample during
+      // combine. Resource 0 held the refined direction plane, so restore the
+      // original mosaic after that plane has been consumed.
+      runtime.device.queue.writeBuffer(
+        workspace.resources[0],
+        0,
+        mosaic.buffer,
+        mosaic.byteOffset,
+        mosaic.byteLength,
+      );
+    } else if (!stopsBeforeRefinement) {
+      submitPass(runtime, workspace, "refine_isolated");
+      submitPass(runtime, workspace, "copy_refined_directions");
+    }
+    if (outputStage === "horizontal-yuv") {
+      submitPass(runtime, workspace, "write_horizontal_yuv", false, true);
+    } else if (outputStage === "vertical-yuv") {
+      submitPass(runtime, workspace, "write_vertical_yuv", false, true);
+    } else if (
+      outputStage === "scaled" ||
+      outputStage === "corrected" ||
+      outputStage === "defects"
+    ) {
       // The requested preprocessing boundary was packed before interpolation.
     } else if (outputStage === "horizontal") {
       submitPass(runtime, workspace, "write_horizontal", false, true);
     } else if (outputStage === "vertical") {
       submitPass(runtime, workspace, "write_vertical", false, true);
+    } else if (stopsBeforeRefinement) {
+      // The requested diagnostic was packed before refinement.
     } else if (
       outputStage === "directions" ||
       outputStage === "candidate-directions"
@@ -274,12 +473,19 @@ export async function demosaicLibRawAahdWithWgsl(
     const refineAndCombineMs = performance.now() - refineStartedAt;
 
     let highlightMs = 0;
+    let serialHighlightMs = 0;
     const colorStartedAt = performance.now();
     if (
+      outputStage === "scaled" ||
       outputStage === "corrected" ||
       outputStage === "defects" ||
       outputStage === "horizontal" ||
       outputStage === "vertical" ||
+      outputStage === "horizontal-yuv" ||
+      outputStage === "vertical-yuv" ||
+      outputStage === "horizontal-homogeneity" ||
+      outputStage === "vertical-homogeneity" ||
+      outputStage === "chosen-directions" ||
       outputStage === "directions" ||
       outputStage === "candidate-directions"
     ) {
@@ -288,10 +494,24 @@ export async function demosaicLibRawAahdWithWgsl(
       submitPass(runtime, workspace, "write_aahd", false, true);
     } else {
       const highlightStartedAt = performance.now();
-      submitPass(runtime, workspace, "blend_highlights");
+      if (contract === "libraw-parity") {
+        serialHighlightMs = await blendLibRawHighlightsWithCpu(
+          runtime,
+          workspace,
+          preMultipliers,
+        );
+      } else {
+        submitPass(runtime, workspace, "blend_highlights");
+      }
       await runtime.device.queue.onSubmittedWorkDone();
       highlightMs = performance.now() - highlightStartedAt;
-      submitPass(runtime, workspace, "write_final", false, true);
+      submitPass(
+        runtime,
+        workspace,
+        outputStage === "highlight" ? "write_aahd" : "write_final",
+        false,
+        true,
+      );
     }
     await runtime.device.queue.onSubmittedWorkDone();
     const colorMs = performance.now() - colorStartedAt - highlightMs;
@@ -323,8 +543,11 @@ export async function demosaicLibRawAahdWithWgsl(
       return {
         width: info.width,
         height: info.height,
-        algorithm: "Deterministic parallel AAHD candidate",
-        contract: "deterministic-parallel-candidate",
+        algorithm:
+          contract === "libraw-parity"
+            ? "LibRaw AAHD parity"
+            : "Deterministic parallel AAHD candidate",
+        contract,
         backend: "native-wgsl",
         outputStage,
         adapterInfo: {
@@ -339,9 +562,12 @@ export async function demosaicLibRawAahdWithWgsl(
           workspaceCreateMs,
           scaleAndInitializeMs,
           hotPixelMs,
+          serialDefectMs,
           interpolateMs,
           homogeneityMs,
           refineAndCombineMs,
+          serialDirectionMs,
+          serialHighlightMs,
           highlightMs,
           colorMs,
           readbackMs,
@@ -469,7 +695,7 @@ function getWorkspace(
     (info.sampleCount / 2) * 3 * Uint32Array.BYTES_PER_ELEMENT;
   const create = (size: number, usage: GPUBufferUsageFlags) =>
     device.createBuffer({ size, usage });
-  const gamma = createGammaLut();
+  const gamma = createLibRawGammaLut();
   const resources = [
     create(
       Math.ceil(mosaicBytes / 4) * 4,
@@ -487,14 +713,21 @@ function getWorkspace(
       GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     ),
     create(gamma.byteLength, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
-    create(packedBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC),
+    create(
+      packedBytes,
+      GPUBufferUsage.STORAGE |
+        GPUBufferUsage.COPY_SRC |
+        GPUBufferUsage.COPY_DST,
+    ),
     create(
       64 * Uint32Array.BYTES_PER_ELEMENT,
       GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     ),
     create(
       Math.ceil(info.sampleCount / 32) * Uint32Array.BYTES_PER_ELEMENT,
-      GPUBufferUsage.STORAGE,
+      GPUBufferUsage.STORAGE |
+        GPUBufferUsage.COPY_SRC |
+        GPUBufferUsage.COPY_DST,
     ),
   ];
   device.queue.writeBuffer(resources[9], 0, gamma);
@@ -518,12 +751,89 @@ function destroyWorkspace(workspace: Workspace): void {
   workspace.readback.destroy();
 }
 
+async function blendLibRawHighlightsWithCpu(
+  runtime: Runtime,
+  workspace: Workspace,
+  preMultipliers: Float32Array,
+): Promise<number> {
+  runtime.device.queue.writeBuffer(
+    workspace.resources[12],
+    0,
+    new Uint32Array([0]),
+  );
+  submitPass(runtime, workspace, "collect_highlights");
+  await runtime.device.queue.onSubmittedWorkDone();
+
+  const countEncoder = runtime.device.createCommandEncoder();
+  countEncoder.copyBufferToBuffer(
+    workspace.resources[12],
+    0,
+    workspace.readback,
+    0,
+    Uint32Array.BYTES_PER_ELEMENT,
+  );
+  runtime.device.queue.submit([countEncoder.finish()]);
+  await workspace.readback.mapAsync(
+    GPUMapMode.READ,
+    0,
+    Uint32Array.BYTES_PER_ELEMENT,
+  );
+  let recordCount: number;
+  try {
+    recordCount = new Uint32Array(
+      workspace.readback.getMappedRange(0, Uint32Array.BYTES_PER_ELEMENT),
+    )[0];
+  } finally {
+    workspace.readback.unmap();
+  }
+
+  const recordBytes = recordCount * 4 * Uint32Array.BYTES_PER_ELEMENT;
+  if (recordBytes > workspace.resources[10].size) {
+    throw new Error(
+      `LibRaw highlight collection exceeded the ${workspace.resources[10].size}-byte scratch buffer.`,
+    );
+  }
+  if (recordCount === 0) return 0;
+
+  const recordEncoder = runtime.device.createCommandEncoder();
+  recordEncoder.copyBufferToBuffer(
+    workspace.resources[10],
+    0,
+    workspace.readback,
+    0,
+    recordBytes,
+  );
+  runtime.device.queue.submit([recordEncoder.finish()]);
+  await workspace.readback.mapAsync(GPUMapMode.READ, 0, recordBytes);
+  const records = new Uint32Array(recordCount * 4);
+  try {
+    records.set(
+      new Uint32Array(workspace.readback.getMappedRange(0, recordBytes)),
+    );
+  } finally {
+    workspace.readback.unmap();
+  }
+
+  const serialStartedAt = performance.now();
+  blendLibRawHighlights(records, preMultipliers);
+  const serialMs = performance.now() - serialStartedAt;
+  runtime.device.queue.writeBuffer(workspace.resources[10], 0, records);
+  runtime.device.queue.writeBuffer(
+    workspace.resources[11],
+    63 * Uint32Array.BYTES_PER_ELEMENT,
+    new Uint32Array([recordCount]),
+  );
+  submitPass(runtime, workspace, "apply_highlights", false, false, recordCount);
+  return serialMs;
+}
+
 function submitPass(
   runtime: Runtime,
   workspace: Workspace,
   entryPoint: EntryPoint,
   padded = false,
   paired = false,
+  linearWorkgroups?: number,
 ): void {
   const pipeline = runtime.pipelines[entryPoint];
   const bindGroup = runtime.device.createBindGroup({
@@ -539,10 +849,18 @@ function submitPass(
   pass.setBindGroup(0, bindGroup);
   const width = padded ? workspace.paddedWidth : workspace.width;
   const height = padded ? workspace.paddedHeight : workspace.height;
-  pass.dispatchWorkgroups(
-    Math.ceil((paired ? width / 2 : width) / 16),
-    Math.ceil(height / 16),
-  );
+  if (linearWorkgroups === undefined) {
+    pass.dispatchWorkgroups(
+      Math.ceil((paired ? width / 2 : width) / 16),
+      Math.ceil(height / 16),
+    );
+  } else {
+    const linearWidth = Math.min(linearWorkgroups, LINEAR_DISPATCH_WIDTH);
+    pass.dispatchWorkgroups(
+      linearWidth,
+      Math.ceil(linearWorkgroups / linearWidth),
+    );
+  }
   pass.end();
   runtime.device.queue.submit([encoder.finish()]);
 }
@@ -590,21 +908,6 @@ function calculateScale(info: SensorImageInfo): {
     );
   }
   return { scale, pre };
-}
-
-function createGammaLut(): Float32Array<ArrayBuffer> {
-  const lut = new Float32Array(65536);
-  const exponent = Math.fround(0.45);
-  const gain = Math.fround(1.0993);
-  const offset = Math.fround(0.0993);
-  for (let index = 0; index < lut.length; index += 1) {
-    const sample = Math.fround(index / 65536);
-    lut[index] =
-      sample < Math.fround(0.0181)
-        ? Math.fround(65536 * Math.fround(Math.fround(4.5) * sample))
-        : Math.fround(65536 * (gain * Math.pow(sample, exponent) - offset));
-  }
-  return lut;
 }
 
 function normalizedCfa(channel: number): number {
@@ -657,6 +960,7 @@ function compareRgb16(
   const rootMeanSquareDifference = Math.sqrt(
     squaredDifferenceSum / actual.length,
   );
+  const maximumPixel = Math.floor(maximumDifferenceIndex / 3) * 3;
   return {
     sampleCount: actual.length,
     differingSamples,
@@ -666,6 +970,12 @@ function compareRgb16(
     maximumDifferenceIndex,
     actualAtMaximumDifference: actual[maximumDifferenceIndex],
     expectedAtMaximumDifference: expected[maximumDifferenceIndex],
+    actualPixelAtMaximumDifference: Array.from(
+      actual.subarray(maximumPixel, maximumPixel + 3),
+    ),
+    expectedPixelAtMaximumDifference: Array.from(
+      expected.subarray(maximumPixel, maximumPixel + 3),
+    ),
     meanAbsoluteDifference: differenceSum / actual.length,
     rootMeanSquareDifference,
     psnrDb:

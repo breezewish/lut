@@ -39,6 +39,7 @@ declare module "*libraw.js" {
     height: number;
     inputSampleCount: number;
     outputSampleCount: number;
+    highlightSampleCount: number;
     candidateSampleCount: number;
     directionSampleCount: number;
     hotPixelMs: number;
@@ -65,8 +66,12 @@ declare module "*libraw.js" {
     aahdInputView(offset: number, length: number): Uint16Array;
     aahdHorizontalView(offset: number, length: number): Uint16Array;
     aahdVerticalView(offset: number, length: number): Uint16Array;
+    aahdChosenDirectionView(offset: number, length: number): Uint8Array;
+    aahdHorizontalHomogeneityView(offset: number, length: number): Uint8Array;
+    aahdVerticalHomogeneityView(offset: number, length: number): Uint8Array;
     aahdDirectionView(offset: number, length: number): Uint8Array;
     aahdOutputView(offset: number, length: number): Uint16Array;
+    aahdHighlightView(offset: number, length: number): Uint16Array;
     sensorInfo(): import("./lib/onnx-demosaic").SensorImageInfo;
     sensorView(offset: number, length: number): Uint16Array;
     sensorTimings(): import("./types").LibRawSensorTimings;

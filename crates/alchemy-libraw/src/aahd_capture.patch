@@ -1,6 +1,6 @@
 --- aahd_demosaic.cpp
 +++ aahd_demosaic.cpp
-@@ -18,6 +18,14 @@
+@@ -17,6 +17,18 @@
  
  #include "../../internal/dmp_include.h"
  
@@ -9,13 +9,17 @@
 +    LibRaw *raw, const void *horizontal, const void *vertical,
 +    const char *directions, int padded_width, int padded_height,
 +    int margin);
++extern "C" void alchemy_capture_aahd_chosen_directions(
++    LibRaw *raw, const char *directions, const char *horizontal_homogeneity,
++    const char *vertical_homogeneity, int padded_width, int padded_height,
++    int margin);
 +extern "C" void alchemy_mark_aahd_hot_stage(LibRaw *raw, int finished);
 +#endif
 +
  typedef ushort ushort3[3];
  typedef int int3[3];
  
-@@ -770,12 +778,23 @@
+@@ -771,11 +783,27 @@
  void LibRaw::aahd_interpolate()
  {
    AAHD aahd(*this);
@@ -29,6 +33,11 @@
    aahd.make_ahd_greens();
    aahd.make_ahd_rb();
    aahd.evaluate_ahd();
++#ifdef ALCHEMY_AAHD_CAPTURE
++  alchemy_capture_aahd_chosen_directions(
++      this, aahd.ndir, aahd.homo[0], aahd.homo[1], aahd.nr_width,
++      aahd.nr_height, AAHD::nr_margin);
++#endif
    aahd.refine_hv_dirs();
 +#ifdef ALCHEMY_AAHD_CAPTURE
 +  alchemy_capture_aahd_candidates(

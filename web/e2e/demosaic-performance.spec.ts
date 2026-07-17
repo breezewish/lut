@@ -8,6 +8,8 @@ const fixture = resolve(
 );
 const samples = Number(process.env.DEMOSAIC_PERF_SAMPLES ?? "5");
 const backend = process.env.DEMOSAIC_PERF_BACKEND ?? "onnx";
+const contract =
+  process.env.DEMOSAIC_PERF_CONTRACT ?? "deterministic-parallel-candidate";
 const outputStage =
   process.env.DEMOSAIC_PERF_OUTPUT_STAGE ??
   (backend === "native-wgsl"
@@ -35,7 +37,7 @@ test("records LibRaw-unpack plus GPU demosaic performance", async ({
   );
   page.on("pageerror", (error) => console.log(`[browser:error] ${error}`));
   await page.goto(
-    `/?demosaicBenchmark=1&demosaicBackend=${encodeURIComponent(backend)}&demosaicOutputStage=${encodeURIComponent(outputStage)}&completeExport=${completeExport ? "1" : "0"}&librawReference=${librawReference ? "1" : "0"}&candidateReference=${candidateReference ? "1" : "0"}`,
+    `/?demosaicBenchmark=1&demosaicBackend=${encodeURIComponent(backend)}&demosaicContract=${encodeURIComponent(contract)}&demosaicOutputStage=${encodeURIComponent(outputStage)}&completeExport=${completeExport ? "1" : "0"}&librawReference=${librawReference ? "1" : "0"}&candidateReference=${candidateReference ? "1" : "0"}`,
   );
   await expect(page.locator("body")).toHaveAttribute(
     "data-benchmark-status",
@@ -97,6 +99,7 @@ test("records LibRaw-unpack plus GPU demosaic performance", async ({
         fixtureBytes: fixtureStat.size,
         samples,
         backend,
+        contract,
         outputStage,
         completeExport,
         librawReference,

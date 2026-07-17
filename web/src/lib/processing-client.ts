@@ -199,15 +199,26 @@ export class ProcessingClient {
         ? requestedBackend
         : "onnx";
     const requestedStage = search.get("demosaicOutputStage");
+    const demosaicContract =
+      search.get("demosaicContract") === "libraw-parity"
+        ? "libraw-parity"
+        : "deterministic-parallel-candidate";
     const demosaicOutputStage =
       demosaicBackend === "libraw-aahd-wgsl"
-        ? requestedStage === "corrected" ||
+        ? requestedStage === "scaled" ||
+          requestedStage === "corrected" ||
           requestedStage === "defects" ||
           requestedStage === "horizontal" ||
           requestedStage === "vertical" ||
+          requestedStage === "horizontal-yuv" ||
+          requestedStage === "vertical-yuv" ||
+          requestedStage === "horizontal-homogeneity" ||
+          requestedStage === "vertical-homogeneity" ||
+          requestedStage === "chosen-directions" ||
           requestedStage === "directions" ||
           requestedStage === "candidate-directions" ||
-          requestedStage === "aahd"
+          requestedStage === "aahd" ||
+          requestedStage === "highlight"
           ? requestedStage
           : "final"
         : demosaicBackend === "native-wgsl"
@@ -225,6 +236,7 @@ export class ProcessingClient {
         buffer,
         referenceRgb16,
         demosaicBackend,
+        demosaicContract,
         demosaicOutputStage,
         completeExport,
         librawReference,

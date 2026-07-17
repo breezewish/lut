@@ -160,16 +160,24 @@ export type WorkerCommand =
       buffer: ArrayBuffer;
       referenceRgb16?: ArrayBuffer;
       demosaicBackend: "onnx" | "native-wgsl" | "libraw-aahd-wgsl";
+      demosaicContract: "deterministic-parallel-candidate" | "libraw-parity";
       demosaicOutputStage:
         | "demosaic"
         | "identity-lut"
+        | "scaled"
         | "corrected"
         | "defects"
         | "horizontal"
         | "vertical"
+        | "horizontal-yuv"
+        | "vertical-yuv"
+        | "horizontal-homogeneity"
+        | "vertical-homogeneity"
+        | "chosen-directions"
         | "directions"
         | "candidate-directions"
         | "aahd"
+        | "highlight"
         | "final";
       completeExport: boolean;
       librawReference: boolean;

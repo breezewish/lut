@@ -16,6 +16,8 @@ const MARGIN: u32 = 4u;
 const HOR: u32 = 2u;
 const VER: u32 = 4u;
 const HOT: u32 = 8u;
+// WebGPU's guaranteed per-dimension workgroup limit; mirrored by TypeScript.
+const LINEAR_DISPATCH_WIDTH: u32 = 65535u;
 
 fn width() -> u32 { return parameters[0]; }
 fn height() -> u32 { return parameters[1]; }
@@ -104,6 +106,22 @@ fn initialize(@builtin(global_invocation_id) id: vec3u) {
   if sample != 0u {
     atomicMin(&channel_extrema[channel], sample);
     atomicMax(&channel_extrema[channel + 3u], sample);
+  }
+}
+
+@compute @workgroup_size(16, 16)
+fn initialize_parity(@builtin(global_invocation_id) id: vec3u) {
+  if !in_image(id) { return; }
+  let source_index = image_index(id.x, id.y);
+  let channel = cfa_color(id.x, id.y);
+  let sample = sensor_sample(source_index);
+  let index = padded_index(i32(id.x), i32(id.y));
+  var rgb = vec4u(0u);
+  rgb[channel] = sample;
+  horizontal_rgb[index] = rgb;
+  vertical_rgb[index] = rgb;
+  if defect_at(source_index) != 0u {
+    directions[index] = directions[index] | HOT;
   }
 }
 
@@ -312,6 +330,115 @@ fn convert_candidates_to_yuv(@builtin(global_invocation_id) id: vec3u) {
   }
 }
 
+fn encoded_rgb(direction: u32, index: u32) -> vec3f {
+  let source = rgb_at(direction, index);
+  return vec3f(vec3u(vec3f(
+    gamma_lut[source.x], gamma_lut[source.y], gamma_lut[source.z])));
+}
+
+fn initialize_yuv_products(id: vec3u) {
+  if !in_padded(id) { return; }
+  let index = id.y * padded_width() + id.x;
+  for (var direction = 0u; direction < 2u; direction += 1u) {
+    let encoded = encoded_rgb(direction, index);
+    let products = vec4i(
+      bitcast<i32>(parameter(20) * encoded.x),
+      bitcast<i32>(parameter(23) * encoded.x),
+      bitcast<i32>(parameter(26) * encoded.x),
+      0);
+    if direction == 0u { horizontal_yuv[index] = products; }
+    else { vertical_yuv[index] = products; }
+  }
+}
+
+fn store_yuv_product(id: vec3u, component: u32, channel: u32) {
+  if !in_padded(id) { return; }
+  let index = id.y * padded_width() + id.x;
+  for (var direction = 0u; direction < 2u; direction += 1u) {
+    let encoded = encoded_rgb(direction, index);
+    let product = parameter(20u + component * 3u + channel) * encoded[channel];
+    if direction == 0u {
+      var rgb = horizontal_rgb[index];
+      rgb.w = bitcast<u32>(product);
+      horizontal_rgb[index] = rgb;
+    } else {
+      var rgb = vertical_rgb[index];
+      rgb.w = bitcast<u32>(product);
+      vertical_rgb[index] = rgb;
+    }
+  }
+}
+
+fn add_yuv_product(id: vec3u, component: u32, finish: bool) {
+  if !in_padded(id) { return; }
+  let index = id.y * padded_width() + id.x;
+  for (var direction = 0u; direction < 2u; direction += 1u) {
+    var yuv = yuv_at(direction, index);
+    let accumulator = bitcast<f32>(yuv[component]);
+    let product = bitcast<f32>(rgb_at(direction, index).w);
+    let sum = accumulator + product;
+    yuv[component] = select(bitcast<i32>(sum), i32(sum), finish);
+    if direction == 0u { horizontal_yuv[index] = yuv; }
+    else { vertical_yuv[index] = yuv; }
+  }
+}
+
+@compute @workgroup_size(16, 16)
+fn initialize_yuv_first_products(@builtin(global_invocation_id) id: vec3u) {
+  initialize_yuv_products(id);
+}
+
+@compute @workgroup_size(16, 16)
+fn store_yuv_second_0(@builtin(global_invocation_id) id: vec3u) { store_yuv_product(id, 0u, 1u); }
+@compute @workgroup_size(16, 16)
+fn add_yuv_second_0(@builtin(global_invocation_id) id: vec3u) { add_yuv_product(id, 0u, false); }
+@compute @workgroup_size(16, 16)
+fn store_yuv_third_0(@builtin(global_invocation_id) id: vec3u) { store_yuv_product(id, 0u, 2u); }
+@compute @workgroup_size(16, 16)
+fn finish_yuv_0(@builtin(global_invocation_id) id: vec3u) { add_yuv_product(id, 0u, true); }
+
+@compute @workgroup_size(16, 16)
+fn store_yuv_second_1(@builtin(global_invocation_id) id: vec3u) { store_yuv_product(id, 1u, 1u); }
+@compute @workgroup_size(16, 16)
+fn add_yuv_second_1(@builtin(global_invocation_id) id: vec3u) { add_yuv_product(id, 1u, false); }
+@compute @workgroup_size(16, 16)
+fn store_yuv_third_1(@builtin(global_invocation_id) id: vec3u) { store_yuv_product(id, 1u, 2u); }
+@compute @workgroup_size(16, 16)
+fn finish_yuv_1(@builtin(global_invocation_id) id: vec3u) { add_yuv_product(id, 1u, true); }
+
+@compute @workgroup_size(16, 16)
+fn store_yuv_second_2(@builtin(global_invocation_id) id: vec3u) { store_yuv_product(id, 2u, 1u); }
+@compute @workgroup_size(16, 16)
+fn add_yuv_second_2(@builtin(global_invocation_id) id: vec3u) { add_yuv_product(id, 2u, false); }
+@compute @workgroup_size(16, 16)
+fn store_yuv_third_2(@builtin(global_invocation_id) id: vec3u) { store_yuv_product(id, 2u, 2u); }
+@compute @workgroup_size(16, 16)
+fn finish_yuv_2(@builtin(global_invocation_id) id: vec3u) { add_yuv_product(id, 2u, true); }
+
+fn yuv_bits(source: vec4i) -> vec3u {
+  return vec3u(source.xyz) & vec3u(0xffffu);
+}
+
+@compute @workgroup_size(16, 16)
+fn write_horizontal_yuv(@builtin(global_invocation_id) id: vec3u) {
+  let pairs_per_row = width() / 2u;
+  if id.x >= pairs_per_row || id.y >= height() { return; }
+  let x = id.x * 2u;
+  let first = yuv_bits(horizontal_yuv[padded_index(i32(x), i32(id.y))]);
+  let second = yuv_bits(horizontal_yuv[padded_index(i32(x + 1u), i32(id.y))]);
+  pack_pair(first, second, id.y * pairs_per_row + id.x);
+}
+
+@compute @workgroup_size(16, 16)
+fn write_vertical_yuv(@builtin(global_invocation_id) id: vec3u) {
+  let pairs_per_row = width() / 2u;
+  if id.x >= pairs_per_row || id.y >= height() { return; }
+  let x = id.x * 2u;
+  let first = yuv_bits(vertical_yuv[padded_index(i32(x), i32(id.y))]);
+  let second = yuv_bits(vertical_yuv[padded_index(i32(x + 1u), i32(id.y))]);
+  pack_pair(first, second, id.y * pairs_per_row + id.x);
+}
+
 fn yuv_difference(direction: u32, center: u32, neighbor: u32) -> vec2i {
   let a = yuv_at(direction, center);
   let b = yuv_at(direction, neighbor);
@@ -358,6 +485,31 @@ fn evaluate_homogeneity(@builtin(global_invocation_id) id: vec3u) {
       }
     }
   }
+}
+
+fn homogeneity_at(direction: u32, index: u32) -> u32 {
+  return select(atomicLoad(&vertical_homogeneity[index]),
+                atomicLoad(&horizontal_homogeneity[index]), direction == 0u);
+}
+
+@compute @workgroup_size(16, 16)
+fn write_horizontal_homogeneity(@builtin(global_invocation_id) id: vec3u) {
+  let pairs_per_row = width() / 2u;
+  if id.x >= pairs_per_row || id.y >= height() { return; }
+  let x = id.x * 2u;
+  let first = homogeneity_at(0u, padded_index(i32(x), i32(id.y)));
+  let second = homogeneity_at(0u, padded_index(i32(x + 1u), i32(id.y)));
+  pack_pair(vec3u(first), vec3u(second), id.y * pairs_per_row + id.x);
+}
+
+@compute @workgroup_size(16, 16)
+fn write_vertical_homogeneity(@builtin(global_invocation_id) id: vec3u) {
+  let pairs_per_row = width() / 2u;
+  if id.x >= pairs_per_row || id.y >= height() { return; }
+  let x = id.x * 2u;
+  let first = homogeneity_at(1u, padded_index(i32(x), i32(id.y)));
+  let second = homogeneity_at(1u, padded_index(i32(x + 1u), i32(id.y)));
+  pack_pair(vec3u(first), vec3u(second), id.y * pairs_per_row + id.x);
 }
 
 fn homogeneity_sum(direction: u32, index: u32) -> u32 {
@@ -504,6 +656,23 @@ fn write_directions(@builtin(global_invocation_id) id: vec3u) {
 }
 
 @compute @workgroup_size(16, 16)
+fn write_direction_plane(@builtin(global_invocation_id) id: vec3u) {
+  let pairs_per_row = width() / 2u;
+  if id.x >= pairs_per_row || id.y >= height() { return; }
+  let x = id.x * 2u;
+  let first = directions[padded_index(i32(x), i32(id.y))] & 15u;
+  let second = directions[padded_index(i32(x + 1u), i32(id.y))] & 15u;
+  output[id.y * pairs_per_row + id.x] = first | (second << 16u);
+}
+
+@compute @workgroup_size(16, 16)
+fn load_direction_plane(@builtin(global_invocation_id) id: vec3u) {
+  if !in_image(id) { return; }
+  directions[padded_index(i32(id.x), i32(id.y))] =
+    sensor_sample(image_index(id.x, id.y));
+}
+
+@compute @workgroup_size(16, 16)
 fn write_aahd(@builtin(global_invocation_id) id: vec3u) {
   let pairs_per_row = width() / 2u;
   if id.x >= pairs_per_row || id.y >= height() { return; }
@@ -518,7 +687,7 @@ fn blend_highlights(@builtin(global_invocation_id) id: vec3u) {
   if !in_image(id) { return; }
   let index = padded_index(i32(id.x), i32(id.y));
   let source = horizontal_rgb[index].xyz;
-  let clip = u32(min(65535.0 * parameter(16), min(65535.0 * parameter(17), 65535.0 * parameter(18))));
+  let clip = highlight_clip();
   if all(source <= vec3u(clip)) { return; }
   let clipped = min(source, vec3u(clip));
   let source_lab = vec3f(
@@ -538,6 +707,36 @@ fn blend_highlights(@builtin(global_invocation_id) id: vec3u) {
     lab.x - 0.8660254 * lab.y - 0.5 * lab.z,
     lab.x + lab.z) / 3.0;
   horizontal_rgb[index] = vec4u(vec3u(restored), 0u);
+}
+
+fn highlight_clip() -> u32 {
+  return u32(min(65535.0 * parameter(16), min(65535.0 * parameter(17), 65535.0 * parameter(18))));
+}
+
+@compute @workgroup_size(16, 16)
+fn collect_highlights(@builtin(global_invocation_id) id: vec3u) {
+  if !in_image(id) { return; }
+  let source = horizontal_rgb[padded_index(i32(id.x), i32(id.y))].xyz;
+  if all(source <= vec3u(highlight_clip())) { return; }
+  let record = atomicAdd(&defect_mask[0], 1u);
+  let base = record * 4u;
+  if base + 3u >= arrayLength(&output) { return; }
+  output[base] = image_index(id.x, id.y);
+  output[base + 1u] = source.x;
+  output[base + 2u] = source.y;
+  output[base + 3u] = source.z;
+}
+
+@compute @workgroup_size(1)
+fn apply_highlights(@builtin(global_invocation_id) id: vec3u) {
+  let record = id.y * LINEAR_DISPATCH_WIDTH + id.x;
+  if record >= parameters[63] { return; }
+  let base = record * 4u;
+  let source = output[base];
+  let x = source % width();
+  let y = source / width();
+  horizontal_rgb[padded_index(i32(x), i32(y))] = vec4u(
+    output[base + 1u], output[base + 2u], output[base + 3u], 0u);
 }
 
 fn prophoto(rgb: vec3u) -> vec3u {

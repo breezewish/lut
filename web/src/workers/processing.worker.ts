@@ -14,6 +14,7 @@ import {
   type AahdReferenceInfo,
 } from "../lib/libraw-aahd";
 import { correctImmutableDefects } from "../lib/aahd-candidate-reference";
+import { createLibRawYuvReference } from "../lib/aahd-parity-cpu";
 import { WebGpuColorRenderer } from "../lib/webgpu-color";
 import type {
   ExportTimings,
@@ -108,20 +109,72 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
           }
           referenceInfo = raw.aahdReferenceInfo();
           reference =
-            data.demosaicOutputStage === "horizontal"
-              ? raw.aahdHorizontalView(0, referenceInfo.candidateSampleCount)
-              : data.demosaicOutputStage === "vertical"
-                ? raw.aahdVerticalView(0, referenceInfo.candidateSampleCount)
-                : data.demosaicOutputStage === "directions"
-                  ? expandDirections(
-                      raw.aahdDirectionView(
-                        0,
-                        referenceInfo.directionSampleCount,
-                      ),
-                    )
-                  : data.demosaicOutputStage === "aahd"
-                    ? raw.aahdOutputView(0, referenceInfo.outputSampleCount)
-                    : raw.imageView(0, referenceInfo.outputSampleCount);
+            data.demosaicOutputStage === "scaled"
+              ? expandScalarSamples(
+                  raw.aahdInputView(0, referenceInfo.inputSampleCount),
+                )
+              : data.demosaicOutputStage === "horizontal"
+                ? raw.aahdHorizontalView(0, referenceInfo.candidateSampleCount)
+                : data.demosaicOutputStage === "vertical"
+                  ? raw.aahdVerticalView(0, referenceInfo.candidateSampleCount)
+                  : data.demosaicOutputStage === "horizontal-yuv"
+                    ? createLibRawYuvReference(
+                        raw.aahdHorizontalView(
+                          0,
+                          referenceInfo.candidateSampleCount,
+                        ),
+                        referenceInfo.yuvMatrix,
+                      )
+                    : data.demosaicOutputStage === "vertical-yuv"
+                      ? createLibRawYuvReference(
+                          raw.aahdVerticalView(
+                            0,
+                            referenceInfo.candidateSampleCount,
+                          ),
+                          referenceInfo.yuvMatrix,
+                        )
+                      : data.demosaicOutputStage === "horizontal-homogeneity"
+                        ? expandDirections(
+                            raw.aahdHorizontalHomogeneityView(
+                              0,
+                              referenceInfo.directionSampleCount,
+                            ),
+                          )
+                        : data.demosaicOutputStage === "vertical-homogeneity"
+                          ? expandDirections(
+                              raw.aahdVerticalHomogeneityView(
+                                0,
+                                referenceInfo.directionSampleCount,
+                              ),
+                            )
+                          : data.demosaicOutputStage === "chosen-directions"
+                            ? expandDirections(
+                                raw.aahdChosenDirectionView(
+                                  0,
+                                  referenceInfo.directionSampleCount,
+                                ),
+                              )
+                            : data.demosaicOutputStage === "directions"
+                              ? expandDirections(
+                                  raw.aahdDirectionView(
+                                    0,
+                                    referenceInfo.directionSampleCount,
+                                  ),
+                                )
+                              : data.demosaicOutputStage === "aahd"
+                                ? raw.aahdOutputView(
+                                    0,
+                                    referenceInfo.outputSampleCount,
+                                  )
+                                : data.demosaicOutputStage === "highlight"
+                                  ? raw.aahdHighlightView(
+                                      0,
+                                      referenceInfo.highlightSampleCount,
+                                    )
+                                  : raw.imageView(
+                                      0,
+                                      referenceInfo.outputSampleCount,
+                                    );
         }
         // Capturing the oracle can grow WASM memory and detach earlier views.
         const mosaic = raw.sensorView(0, sensor.sampleCount);
@@ -142,17 +195,27 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
             ? await demosaicLibRawAahdWithWgsl(
                 mosaic,
                 sensor,
-                data.demosaicOutputStage === "corrected" ||
+                data.demosaicContract,
+                data.demosaicOutputStage === "scaled" ||
+                  data.demosaicOutputStage === "corrected" ||
                   data.demosaicOutputStage === "defects" ||
                   data.demosaicOutputStage === "horizontal" ||
                   data.demosaicOutputStage === "vertical" ||
+                  data.demosaicOutputStage === "horizontal-yuv" ||
+                  data.demosaicOutputStage === "vertical-yuv" ||
+                  data.demosaicOutputStage === "horizontal-homogeneity" ||
+                  data.demosaicOutputStage === "vertical-homogeneity" ||
+                  data.demosaicOutputStage === "chosen-directions" ||
                   data.demosaicOutputStage === "directions" ||
                   data.demosaicOutputStage === "candidate-directions" ||
-                  data.demosaicOutputStage === "aahd"
+                  data.demosaicOutputStage === "aahd" ||
+                  data.demosaicOutputStage === "highlight"
                   ? data.demosaicOutputStage
                   : "final",
                 reference,
-                referenceInfo,
+                data.demosaicOutputStage === "scaled"
+                  ? undefined
+                  : referenceInfo,
               )
             : data.demosaicBackend === "native-wgsl"
               ? await demosaicRcdWithNativeWgsl(

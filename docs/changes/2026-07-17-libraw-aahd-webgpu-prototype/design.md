@@ -212,8 +212,39 @@ bitwise repeatable in the tested browser and driver environment.
 The candidate still differs from pinned LibRaw at 2,942 final ProPhoto RGB16
 samples, with maximum difference 1,033. That difference is expected evidence
 of the new immutable-neighborhood policy, not a LibRaw parity result. The
-separate serial parity route and broader repeatability matrix remain required
-before the Phase 1 gate is complete.
+broader camera and device repeatability matrix remains required before the
+candidate can be considered for product use.
+
+### LibRaw Parity Route
+
+The separate `libraw-parity` contract preserves the three order-sensitive or
+numerically non-portable boundaries outside WGSL:
+
+- A scalar CPU scan reproduces LibRaw's row-ordered hot/dead correction and
+  uploads the corrected packed CFA plus defect mask.
+- The checker refinement remains on the GPU, while the final isolated-direction
+  scan reads back a packed 16-bit direction plane, applies LibRaw's row order on
+  the CPU, and uploads the refined plane.
+- The GPU compacts only pixels that require Blend highlight processing. A
+  scalar CPU transform applies LibRaw's exact `float` statement order to those
+  records and uploads them for sparse GPU writeback. The 49,408-record Sony
+  result avoids a full RGB readback at this boundary.
+
+LibRaw's YUV matrix affects discrete homogeneity decisions. The parity route
+therefore stores every multiply and add through an existing `f32` storage slot
+between dispatches. This prevents driver contraction without allocating
+another full-frame buffer. The deterministic candidate retains its shorter
+single-dispatch conversion.
+
+On the 6240 x 4168 Sony fixture, the scaled CFA, horizontal and vertical
+candidates, YUV values, homogeneity, chosen and refined directions, selected
+AAHD RGB, Blend highlight RGB, and final ProPhoto RGB16 all matched the pinned
+LibRaw captures exactly. The final cold run and two warm runs each compared all
+78,024,960 channel values with zero differences. Warm demosaic totals were
+2,434-2,577 ms. The serial defect scan took 710-735 ms, direction refinement
+100-106 ms, and compact highlight transform 36-49 ms. These full-frame numbers
+establish feasibility and numerical authority; they are not the final tiled
+performance target.
 
 ## Resource Trade-offs
 
@@ -233,15 +264,14 @@ the browser's performance-critical implementation.
 
 ## Recommendation
 
-Continue with tiled handwritten WGSL AAHD as the browser parity candidate. Do
-not adopt the current full-frame prototype and do not claim bitwise LibRaw
-parity yet.
+Continue with tiled handwritten WGSL AAHD. The hybrid full-frame parity route
+is now a bitwise LibRaw reference implementation on the tested Sony/T4 case,
+but its approximately 2.19 GiB workspace is still unsuitable for product use.
 
 Before production:
 
-- Choose and document the hot/dead-pixel contract. Prefer a deterministic
-  parallel algorithm and new golden output; use the 434 ms CPU scan only if
-  exact legacy RGB16 is a hard requirement.
+- Decide whether product output keeps the proven hybrid parity contract or
+  explicitly adopts the faster deterministic defect policy with a new golden.
 - Implement bounded tiling and keep candidate/final data GPU-resident through
   white balance, matrices, grading, and 3D LUT.
 - Replace full-frame RGB16 readback with export strips so Deflate can overlap
@@ -264,12 +294,14 @@ Before production:
 ## Appendix: Reproduction
 
 The opt-in Playwright benchmark selects
-`demosaicBackend=libraw-aahd-wgsl`. `demosaicOutputStage` accepts `corrected`,
-`defects`, `horizontal`, `vertical`, `directions`, `candidate-directions`,
-`aahd`, or `final`. Setting `librawReference=1` captures and compares the
-matching internal LibRaw stage. Setting `candidateReference=1` compares the
-candidate-only boundaries with their independent scalar reference. Normal
-application and end-to-end paths continue to use production LibRaw.
+`demosaicBackend=libraw-aahd-wgsl`. `demosaicContract` selects
+`libraw-parity` or `deterministic-parallel-candidate`. Diagnostic stages cover
+the scaled and corrected CFA, defects, candidates, YUV, homogeneity, chosen and
+refined directions, selected AAHD, Blend highlight, and final ProPhoto output.
+Setting `librawReference=1` captures and compares the matching internal LibRaw
+stage. Setting `candidateReference=1` compares the candidate-only boundaries
+with their independent scalar reference. Normal application and end-to-end
+paths continue to use production LibRaw.
 
 The CPU baseline is reproducible with:
 
