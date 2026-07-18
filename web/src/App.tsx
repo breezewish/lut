@@ -128,6 +128,10 @@ function basePreviewRecipeKey(fileId: string, ev: number): string {
   return `${fileId}\n${ev}`;
 }
 
+function evLutRecipeKey(ev: number, lutId: string): string {
+  return `${ev}\n${lutId}`;
+}
+
 function mergePreview(
   current: DisplayedPreview | undefined,
   result: PreviewResult,
@@ -203,6 +207,7 @@ export default function App() {
     | undefined
   >(undefined);
   const [renderedRecipe, setRenderedRecipe] = useState<string>();
+  const [confirmedEvLutRecipe, setConfirmedEvLutRecipe] = useState<string>();
   const fileInput = useRef<HTMLInputElement>(null);
   const exposureInput = useRef<HTMLInputElement>(null);
   const exposureRange = useRef<HTMLInputElement>(null);
@@ -237,6 +242,15 @@ export default function App() {
       selectedLut &&
       hasUsablePreview(selected) &&
       renderedRecipe === currentRecipe,
+  );
+  // Export all only needs the current EV+LUT recipe to have been reviewed
+  // on some file, not on whichever file happens to be selected right now —
+  // a broken or not-yet-decoded selection must never block the rest of the
+  // batch (see docs/ssot/web/design.md).
+  const canStartBatchExport = Boolean(
+    selectedLut &&
+      exportableItems.length > 0 &&
+      confirmedEvLutRecipe === evLutRecipeKey(ev, selectedLut.id),
   );
   const isPreviewProcessing = Boolean(
     selected &&
@@ -399,6 +413,7 @@ export default function App() {
     if (!selected || !selectedLut) return;
     let active = true;
     const decodeRecipe = previewRecipeKey(selected.id, ev, selectedLut.id);
+    const evLutRecipe = evLutRecipeKey(ev, selectedLut.id);
     decodedFileId.current = undefined;
     settledBaseRecipe.current = undefined;
     desiredPreview.current = undefined;
@@ -429,6 +444,7 @@ export default function App() {
           exposureHasPendingRecipe.current = false;
         }
         setRenderedRecipe(decodeRecipe);
+        setConfirmedEvLutRecipe(evLutRecipe);
         setPreview(mergePreview(undefined, result));
         setCameraPreview(undefined);
         updateItem(selected.id, {
@@ -492,6 +508,7 @@ export default function App() {
         settledBaseRecipe.current = baseRecipe;
         exposureHasPendingRecipe.current = false;
         setRenderedRecipe(recipe);
+        setConfirmedEvLutRecipe(evLutRecipeKey(ev, selectedLut.id));
       } catch (error) {
         if (active) {
           setGlobalError(
@@ -620,12 +637,13 @@ export default function App() {
 
   const exportItems = async (targets: QueueItem[]) => {
     const eligibleTargets = targets.filter((item) => !isDecodeFailure(item));
-    if (!selectedLut || !canStartExport || eligibleTargets.length === 0) return;
+    const single = targets.length === 1;
+    const ready = single ? canStartExport : canStartBatchExport;
+    if (!selectedLut || !ready || eligibleTargets.length === 0) return;
     setExporting(true);
     setGlobalError(undefined);
     setExportSummary(undefined);
     stopAfterCurrent.current = false;
-    const single = targets.length === 1;
     const outputNames = new Set<string>();
     // Keep batch export on the same fast, uncompressed path as single export.
     // Pass-through ZIP entries also avoid a second contiguous archive buffer.
@@ -859,9 +877,7 @@ export default function App() {
           {items.length > 1 && (
             <Button
               onClick={() => void exportItems(items)}
-              disabled={
-                exportableItems.length === 0 || exporting || !canStartExport
-              }
+              disabled={exporting || !canStartBatchExport}
             >
               <ImageDown size={15} aria-hidden="true" />
               {exporting ? "Exporting…" : "Export all"}
@@ -966,66 +982,6 @@ export default function App() {
         </aside>
 
         <main className="stage">
-          <div className="notices">
-            {manifestError && (
-              <div className="notice notice-error" role="alert">
-                <span>{manifestError}</span>
-                <Button variant="secondary" onClick={() => location.reload()}>
-                  Reload
-                </Button>
-              </div>
-            )}
-            {globalError && (
-              <div className="notice notice-error" role="alert">
-                <span>{globalError}</span>
-                <div className="notice-actions">
-                  {selected && isDecodeFailure(selected) && (
-                    <>
-                      <Button
-                        variant="secondary"
-                        onClick={() => removeItem(selected.id)}
-                      >
-                        Remove file
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        onClick={() => fileInput.current?.click()}
-                      >
-                        Choose another RAW
-                      </Button>
-                    </>
-                  )}
-                  <Button
-                    size="icon"
-                    variant="quiet"
-                    aria-label="Dismiss error"
-                    onClick={() => setGlobalError(undefined)}
-                  >
-                    <X size={17} />
-                  </Button>
-                </div>
-              </div>
-            )}
-            {queueUndo && (
-              <div className="notice notice-undo" role="status">
-                <span>{queueUndo.message}</span>
-                <div className="notice-actions">
-                  <Button variant="secondary" onClick={restoreQueue}>
-                    Undo
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="quiet"
-                    aria-label="Dismiss undo"
-                    onClick={() => setQueueUndo(undefined)}
-                  >
-                    <X size={17} />
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-
           <div className={`editor ${selected ? "" : "is-empty"}`}>
             {selected && selectedLut && (
               <section className="inspector" aria-label="Processing controls">
@@ -1360,6 +1316,69 @@ export default function App() {
                 </div>
               </div>
 
+              <div className="notices">
+                {manifestError && (
+                  <div className="notice notice-error" role="alert">
+                    <span>{manifestError}</span>
+                    <Button
+                      variant="secondary"
+                      onClick={() => location.reload()}
+                    >
+                      Reload
+                    </Button>
+                  </div>
+                )}
+                {globalError && (
+                  <div className="notice notice-error" role="alert">
+                    <span>{globalError}</span>
+                    <div className="notice-actions">
+                      {selected && isDecodeFailure(selected) && (
+                        <>
+                          <Button
+                            variant="secondary"
+                            onClick={() => removeItem(selected.id)}
+                          >
+                            Remove file
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            onClick={() => fileInput.current?.click()}
+                          >
+                            Choose another RAW
+                          </Button>
+                        </>
+                      )}
+                      <Button
+                        size="icon"
+                        variant="quiet"
+                        aria-label="Dismiss error"
+                        onClick={() => setGlobalError(undefined)}
+                      >
+                        <X size={17} />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {queueUndo && (
+                  <div className="notice notice-undo" role="status">
+                    <span>{queueUndo.message}</span>
+                    <div className="notice-actions">
+                      <Button variant="secondary" onClick={restoreQueue}>
+                        Undo
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="quiet"
+                        aria-label="Dismiss undo"
+                        onClick={() => setQueueUndo(undefined)}
+                      >
+                        <X size={17} />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="canvas-viewport">
                 {!selected ? (
                   <div className="state">
@@ -1422,7 +1441,13 @@ export default function App() {
                 ) : (
                   <div
                     ref={previewGrid}
-                    className={`panes mobile-show-${mobilePreview} ${selected.status === "decoding" ? "is-loading" : ""}`}
+                    className={`panes mobile-show-${mobilePreview} ${selected.status === "decoding" ? "is-loading" : ""} ${
+                      preview?.base?.width &&
+                      preview?.base?.height &&
+                      preview.base.width > preview.base.height
+                        ? "panes-stacked"
+                        : ""
+                    }`}
                   >
                     <PreviewCanvas
                       label="Base"

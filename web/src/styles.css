@@ -25,6 +25,12 @@
   --ink: oklch(0.955 0.004 258);
   --ink-muted: oklch(0.62 0.012 258);
 
+  /* Fixed light-on-dark text for the canvas well, which stays dark in both
+     themes for neutral color judgment. Unlike --ink/--ink-muted these never
+     flip with the theme. */
+  --canvas-ink: oklch(0.96 0.004 258);
+  --canvas-ink-muted: oklch(0.72 0.012 258);
+
   /* Accent: evolved spectral blue, hue 263 */
   --accent: oklch(0.715 0.152 263);
   --accent-hover: oklch(0.765 0.148 263);
@@ -71,7 +77,6 @@
   /* Z */
   --z-sticky: 10;
   --z-popover: 30;
-  --z-notice: 50;
 
   /* Layout */
   --rail-width: 15rem;
@@ -493,7 +498,6 @@ dd {
 /* ─── Stage ──────────────────────────────────────────────────────────── */
 
 .stage {
-  position: relative;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -1128,6 +1132,16 @@ input[type="range"]:disabled {
   gap: var(--space-2);
 }
 
+/* Landscape sources split top/bottom instead of side-by-side: a wide photo
+   divided into two narrow-tall panes wastes most of its pane on empty
+   letterboxing, while a top/bottom split lets each pane run near-full-width. */
+@media (min-width: 35.01rem) {
+  .panes.panes-stacked {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .pane,
 .camera-frame {
   min-width: 0;
@@ -1241,7 +1255,7 @@ input[type="range"]:disabled {
   justify-content: center;
   gap: var(--space-3);
   margin: auto;
-  color: var(--ink);
+  color: var(--canvas-ink);
   text-align: center;
 }
 
@@ -1264,32 +1278,33 @@ input[type="range"]:disabled {
 }
 .state-copy {
   max-width: 42ch;
-  color: var(--ink-muted);
+  color: var(--canvas-ink-muted);
   font-size: var(--text-sm);
   line-height: 1.55;
   text-wrap: pretty;
 }
 .state-detail {
   margin-top: var(--space-1);
-  color: var(--ink-muted);
+  color: var(--canvas-ink-muted);
   font-size: var(--text-xs);
 }
 
 /* ─── Notices ────────────────────────────────────────────────────────── */
 
+/* Normal-flow banner inside .canvas, below .canvas-bar — pushes the
+   viewport down instead of floating over canvas or inspector controls. */
 .notices {
-  position: absolute;
-  inset: var(--space-3) var(--space-3) auto;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: var(--space-2);
-  z-index: var(--z-notice);
-  pointer-events: none;
+  padding: var(--space-3) var(--space-3) 0;
+}
+.notices:empty {
+  padding: 0;
 }
 
 .notice {
-  width: min(44rem, 100%);
   min-height: 2.75rem;
   display: flex;
   align-items: center;
@@ -1298,7 +1313,6 @@ input[type="range"]:disabled {
   padding: var(--space-2) var(--space-3) var(--space-2) var(--space-6);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
-  pointer-events: auto;
   animation: notice-in var(--duration-slow) var(--ease-out);
 }
 .notice-error {
@@ -1474,7 +1488,16 @@ input[type="range"]:disabled {
   .rail-item-select {
     padding-right: 3.25rem;
   }
-  .privacy-badge span,
+  .privacy-badge span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
   .add-raw-label {
     display: none;
   }
