@@ -3,6 +3,12 @@ import basicSsl from "@vitejs/plugin-basic-ssl";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
+const crossOriginIsolationHeaders = {
+  "Cross-Origin-Embedder-Policy": "require-corp",
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Resource-Policy": "same-origin",
+};
+
 export default defineConfig({
   base: process.env.VITE_BASE_PATH ?? "/",
   define: {
@@ -19,9 +25,11 @@ export default defineConfig({
   publicDir: "public",
   server: {
     allowedHosts: true,
+    headers: crossOriginIsolationHeaders,
   },
   preview: {
     allowedHosts: true,
+    headers: crossOriginIsolationHeaders,
   },
   build: {
     outDir: "../dist",

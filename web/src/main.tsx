@@ -12,7 +12,10 @@ async function enableCrossOriginIsolation(): Promise<void> {
     sessionStorage.removeItem(ISOLATION_RELOAD_KEY);
     return;
   }
-  if (!isSecureContext || !("serviceWorker" in navigator)) {
+  // Let the product mount on an insecure origin so its existing WebGPU
+  // compatibility path can explain why RAW processing is unavailable.
+  if (!isSecureContext) return;
+  if (!("serviceWorker" in navigator)) {
     throw new Error(
       "RAW Alchemy requires a secure browser context with service workers",
     );
