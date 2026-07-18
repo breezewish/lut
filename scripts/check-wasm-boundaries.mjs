@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
 
-const [binding, worker, browserWrapper, previewCanvas] = await Promise.all([
+const [binding, worker, browserWrapper, compareStage] = await Promise.all([
   readFile("web/src/wasm/alchemy_core.js", "utf8"),
   readFile("web/src/workers/processing.worker.ts", "utf8"),
   readFile("crates/alchemy-libraw/src/browser_wrapper.cpp", "utf8"),
-  readFile("web/src/components/preview-canvas.tsx", "utf8"),
+  readFile("web/src/components/compare-stage.tsx", "utf8"),
 ]);
 
 function methodBody(signature) {
@@ -102,8 +102,8 @@ if (imageView.includes("new_(") || imageView.includes('call<void>("set"')) {
   );
 }
 if (
-  !previewCanvas.includes("pixels.buffer") ||
-  previewCanvas.includes("clamped.set(pixels)")
+  !compareStage.includes("pixels.buffer") ||
+  compareStage.includes("clamped.set(pixels)")
 ) {
   throw new Error(
     "Canvas rendering must reinterpret transferred RGBA8 without another complete preview copy.",
