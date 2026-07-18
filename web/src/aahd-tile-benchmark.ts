@@ -26,13 +26,19 @@ export function mountAahdTileBenchmark(): void {
 }
 
 async function runFixtures() {
-  const width = 1058;
-  const height = 1042;
-  const mosaic = createDependencyFixture(width, height);
   const results = [];
   for (const [index, cfaPattern] of CFA_PHASES.entries()) {
+    const crossesTileSeams = index === 0;
+    const width = crossesTileSeams ? 1058 : 64;
+    const height = crossesTileSeams ? 1042 : 46;
     results.push(
-      await compareFixture(mosaic, width, height, cfaPattern, index === 0),
+      await compareFixture(
+        createDependencyFixture(width, height),
+        width,
+        height,
+        cfaPattern,
+        crossesTileSeams,
+      ),
     );
   }
   const smallWidth = 64;
