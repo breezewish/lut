@@ -74,6 +74,8 @@ export interface PreviewTimings {
 export interface ExportTimings {
   libraw: LibRawDecodeTimings;
   rawBackend: "libraw" | "webgpu-aahd" | "webgpu-xtrans";
+  sensorCacheHit?: boolean;
+  sensorCacheBytes?: number;
   colorBackend: "webgpu";
   colorProcessingMs: number;
   tiffEncodingMs: number;

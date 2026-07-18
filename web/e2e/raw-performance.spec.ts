@@ -29,6 +29,7 @@ test("records phased production Worker performance", async ({
     | undefined;
 
   await page.goto("/");
+  await page.waitForFunction(() => crossOriginIsolated);
   const adapterInfo = await page.evaluate(async () => {
     if (!("gpu" in navigator)) return undefined;
     const adapter = await navigator.gpu.requestAdapter({

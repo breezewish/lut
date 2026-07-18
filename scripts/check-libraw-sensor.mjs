@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import createLibRaw from "../web/src/libraw/libraw.js";
+import createLibRaw from "./libraw-node-runtime.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const fixtures = [
@@ -84,16 +84,17 @@ if (process.env.XTRANS_FIXTURE) {
   });
 }
 
-const wasmBytes = await readFile(resolve(root, "web/src/libraw/libraw.wasm"));
+const wasmBytes = await readFile(
+  resolve(root, "web/src/libraw/threaded/libraw.wasm"),
+);
 const module = await createLibRaw({ wasmBinary: wasmBytes });
 
 for (const fixture of fixtures) {
+  const rawBytes = new Uint8Array(await readFile(resolve(root, fixture.path)));
+  let directInfoJson;
   const raw = new module.LibRaw();
   try {
-    raw.open(
-      new Uint8Array(await readFile(resolve(root, fixture.path))),
-      false,
-    );
+    raw.open(rawBytes, false);
     assertEqual(
       raw.supportsWebGpuAahd(),
       fixture.webGpuAahd,
@@ -105,6 +106,7 @@ for (const fixture of fixtures) {
       `${fixture.name} WebGPU X-Trans support`,
     );
     const info = raw.sensorInfo();
+    directInfoJson = JSON.stringify(info);
     if (process.env.PRINT_SENSOR_INFO === "1")
       console.log(JSON.stringify(info));
     const mosaic = raw.sensorView(0, info.sampleCount);
@@ -203,6 +205,41 @@ for (const fixture of fixtures) {
     );
   } finally {
     raw.delete();
+  }
+
+  const previewRaw = new module.LibRaw();
+  try {
+    previewRaw.openPreview(rawBytes, 1_024);
+    assertEqual(
+      previewRaw.supportsWebGpuAahd() || previewRaw.supportsWebGpuXtrans(),
+      true,
+      `${fixture.name} preview sensor capture route`,
+    );
+    previewRaw.captureSensorMosaic();
+    previewRaw.imageInfoRetainingDecoder();
+    const capturedInfo = previewRaw.finishSensorInfo();
+    assertEqual(
+      JSON.stringify(capturedInfo),
+      directInfoJson,
+      `${fixture.name} preview/export sensor metadata parity`,
+    );
+    const capturedMosaic = previewRaw.sensorView(0, capturedInfo.sampleCount);
+    let capturedSum = 0;
+    for (const sample of capturedMosaic) capturedSum += sample;
+    assertEqual(
+      capturedSum,
+      fixture.sum,
+      `${fixture.name} preview/export mosaic parity`,
+    );
+
+    previewRaw.discardImage();
+    assertEqual(
+      previewRaw.sensorView(0, 1)[0],
+      fixture.samples[0],
+      `${fixture.name} captured mosaic lifetime`,
+    );
+  } finally {
+    previewRaw.delete();
   }
 }
 

@@ -36,7 +36,8 @@
       "camera": "Fujifilm X-A5",
       "mode": "14-bit uncompressed Bayer",
       "width": 6016,
-      "height": 4014
+      "height": 4014,
+      "sensorCache": false
     },
     {
       "id": "fujifilm-x-t2-xtrans-raf",
@@ -62,7 +63,8 @@
       "mode": "14-bit uncompressed X-Trans",
       "width": 4934,
       "height": 3296,
-      "rawBackend": "webgpu-xtrans"
+      "rawBackend": "webgpu-xtrans",
+      "sensorCache": false
     }
   ]
 }

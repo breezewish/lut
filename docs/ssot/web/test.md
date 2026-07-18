@@ -14,6 +14,7 @@
 - Real Leica DNG and Sony ARW files render nonblank previews and export full-resolution TIFFs; browser output matches native corrected-v2 output within one code value.
 - The HTTPS production bundle previews and exports where WebGPU is available; browsers without WebGPU show the required compatibility error without a fake preview.
 - The GitHub Pages repository-path bundle loads its manifest, LUT, Worker, and WASM assets below `/lut/` and previews a DNG without root-path requests or failed responses.
+- Root and repository-path production bundles become cross-origin isolated through the scoped same-origin service worker before starting the application, and Chromium, Firefox, and WebKit complete the browser smoke journey.
 - A non-secure remote HTTP origin that cannot expose WebGPU rejects RAW processing with the required compatibility error.
 - Every built-in LUT produces browser WASM RGB16 output within one code value of the optimized native corrected-v2 export.
 - Two different RAW files make batch export the sole primary action, lock import, queue selection, EV, and LUT controls for the operation, and export as separately named RGB16 TIFF entries in one ZIP; each extracted TIFF matches its independent native export within one code value, proving isolated sequential processing state.
@@ -36,6 +37,14 @@
   Bayer input, verifies GPU Markesteijn for both X-Trans generations, retains
   LibRaw demosaic for unsupported Panasonic geometry,
   and compares every browser TIFF channel with an independent native export.
+- The hardware camera matrix reuses the Preview-unpacked mosaic for compressed
+  Nikon Z 6 and Fujifilm X-T2 export, reports zero second-decode time, skips the
+  cache for uncompressed X-A5 and X-T1 input, and stays within one RGB16 code of
+  the native oracle on all five cameras.
+- A T4 production benchmark compares the same single-thread and selective
+  pthread bundles. Fujifilm compressed-block unpack improves materially, while
+  Nikon sequential unpack and uncompressed Bayer Preview remain aligned with
+  the single-thread baseline.
 - A test-only hardware entry compares GPU X-Trans camera RGB with a captured
   LibRaw result before highlights and color. X-T1 and X-T2 must match every
   RGB16 sample exactly; X-T1 also supplies nonempty Blend-highlight coverage to

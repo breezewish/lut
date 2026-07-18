@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import createLibRaw from "../web/src/libraw/libraw.js";
+import createLibRaw from "./libraw-node-runtime.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const temporaryDirectory = await mkdtemp(join(tmpdir(), "raw-alchemy-"));
@@ -33,7 +33,9 @@ const fixtures = [
 ];
 
 try {
-  const wasmBytes = await readFile(join(root, "web/src/libraw/libraw.wasm"));
+  const wasmBytes = await readFile(
+    join(root, "web/src/libraw/threaded/libraw.wasm"),
+  );
   const module = await createLibRaw({ wasmBinary: wasmBytes });
 
   for (const fixture of fixtures) {

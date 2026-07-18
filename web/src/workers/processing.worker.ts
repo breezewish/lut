@@ -11,6 +11,7 @@ import { sha256Hex } from "../lib/hash";
 import { RenderedTiffStream, renderTiffInGpuStrips } from "../lib/tiff-export";
 import { demosaicLibRawAahdTiledWithWgsl } from "../lib/libraw-aahd";
 import { demosaicLibRawXtransTiledWithWgsl } from "../lib/libraw-xtrans";
+import type { SensorImageInfo } from "../lib/sensor-image";
 import { WebGpuColorRenderer } from "../lib/webgpu-color";
 import {
   prepareWebGpuPreview,
@@ -30,6 +31,9 @@ const context: DedicatedWorkerGlobalScope =
 const runtime = Promise.all([createLibRaw(), initAlchemy()]).then(
   ([module]) => ({ module }),
 );
+type LibRawModule = Awaited<ReturnType<typeof createLibRaw>>;
+type LibRawInstance = InstanceType<LibRawModule["LibRaw"]>;
+let parallelRuntime: Promise<LibRawModule> | undefined;
 const previewGpuPreparation = prepareWebGpuPreview();
 void previewGpuPreparation.catch(() => undefined);
 
@@ -39,6 +43,13 @@ type CachedPreview = {
   metadata: PreviewResult["metadata"];
   timings: PreviewResult["timings"];
   renderer: WebGpuPreviewRenderer;
+  sensor?: {
+    module: LibRawModule;
+    raw: LibRawInstance;
+    info: SensorImageInfo;
+    backend: "webgpu-aahd" | "webgpu-xtrans";
+    bytes: number;
+  };
 };
 
 let cached: CachedPreview | undefined;
@@ -49,6 +60,7 @@ let decodeCount = 0;
 // source keeps high-DPI UI detail while bounding every interactive Base + LUT
 // rerender to 42% of the pixels used by the previous 1600px cache.
 const PREVIEW_MAX_EDGE = 1_024;
+const SENSOR_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 
 let tail = Promise.resolve();
 
@@ -64,8 +76,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
   try {
     module = (await runtime).module;
     if (data.type === "clear") {
-      cached?.renderer.free();
-      cached = undefined;
+      releaseCachedPreview();
       const reply: WorkerReply = {
         requestId: data.requestId,
         ok: true,
@@ -76,9 +87,15 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
     }
     if (data.type === "decode") {
       const workerStartedAt = performance.now();
-      cached?.renderer.free();
-      cached = undefined;
-      const previewRaw = new module.LibRaw();
+      releaseCachedPreview();
+      let previewRaw = new module.LibRaw();
+      let retainPreviewRaw = false;
+      let sensorCache:
+        | {
+            backend: "webgpu-aahd" | "webgpu-xtrans";
+            bytes: number;
+          }
+        | undefined;
       try {
         // Preview has its own display-sized decode contract. LibRaw keeps RAW
         // identification, unpack, black levels, WB, CFA handling, crop, and
@@ -97,7 +114,36 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
           };
           context.postMessage(reply, [thumbnail.data.buffer]);
         }
-        const image = previewRaw.imageInfo();
+        if (previewRaw.usesParallelUnpack()) {
+          const parallelModule = await loadParallelLibRaw();
+          const parallelRaw = new parallelModule.LibRaw();
+          previewRaw.delete();
+          module = parallelModule;
+          previewRaw = parallelRaw;
+          previewRaw.openPreview(new Uint8Array(data.buffer), PREVIEW_MAX_EDGE);
+        }
+        const sensorBackend = previewRaw.supportsWebGpuAahd()
+          ? "webgpu-aahd"
+          : previewRaw.supportsWebGpuXtrans()
+            ? "webgpu-xtrans"
+            : undefined;
+        const visibleSensorBytes = metadata.width * metadata.height * 2;
+        sensorCache =
+          sensorBackend &&
+          visibleSensorBytes <= SENSOR_CACHE_MAX_BYTES &&
+          // Copying an uncompressed mosaic costs more Preview time than its
+          // later unpack saves. Retain only inputs whose file is at least 25%
+          // smaller than the visible sensor, a conservative compression signal.
+          data.buffer.byteLength * 4 < visibleSensorBytes * 3
+            ? {
+                backend: sensorBackend,
+                bytes: visibleSensorBytes,
+              }
+            : undefined;
+        if (sensorCache) previewRaw.captureSensorMosaic();
+        const image = sensorCache
+          ? previewRaw.imageInfoRetainingDecoder()
+          : previewRaw.imageInfo();
         const libraw = previewRaw.timings();
         decodeCount += 1;
         const lut = await loadLut(data.lut);
@@ -108,7 +154,8 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
           image.height,
           lut,
         );
-        cached = {
+        previewRaw.discardImage();
+        const preview: CachedPreview = {
           fileId: data.fileId,
           renderer,
           lutId: data.lut.id,
@@ -128,33 +175,46 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
             workerTotalMs: 0,
           },
         };
-        cached.timings.previewSourceMs =
+        preview.timings.previewSourceMs =
           performance.now() - previewSourceStartedAt;
+        cached = preview;
+        retainPreviewRaw = sensorCache !== undefined;
       } finally {
-        // The persistent Rust renderer now owns only the display-sized RGB16
-        // samples. Release LibRaw's larger half-size image and processing state
-        // before rerenders or a full-resolution export add memory pressure.
-        previewRaw.delete();
+        if (!retainPreviewRaw) previewRaw.delete();
       }
-      const interactive = await renderCached(
-        data.fileId,
-        data.ev,
-        data.lut,
-        384,
-        true,
-      );
-      interactive.timings.workerTotalMs = performance.now() - workerStartedAt;
-      postPreviewFrame(data.requestId, interactive);
-      const result = await renderCached(
-        data.fileId,
-        data.ev,
-        data.lut,
-        PREVIEW_MAX_EDGE,
-        true,
-      );
-      result.timings.workerTotalMs = performance.now() - workerStartedAt;
-      postPreview(data.requestId, result);
-      return;
+      let sensorCaptured = false;
+      try {
+        const interactive = await renderCached(
+          data.fileId,
+          data.ev,
+          data.lut,
+          384,
+          true,
+        );
+        interactive.timings.workerTotalMs = performance.now() - workerStartedAt;
+        postPreviewFrame(data.requestId, interactive);
+        const result = await renderCached(
+          data.fileId,
+          data.ev,
+          data.lut,
+          PREVIEW_MAX_EDGE,
+          true,
+        );
+        result.timings.workerTotalMs = performance.now() - workerStartedAt;
+        postPreview(data.requestId, result);
+        if (sensorCache) {
+          cached!.sensor = {
+            module,
+            raw: previewRaw,
+            info: previewRaw.finishSensorInfo(),
+            ...sensorCache,
+          };
+          sensorCaptured = true;
+        }
+        return;
+      } finally {
+        if (sensorCache && !sensorCaptured) previewRaw.delete();
+      }
     }
 
     if (data.type === "render") {
@@ -173,17 +233,32 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
 
     const workerStartedAt = performance.now();
     const lut = await loadLut(data.lut);
-    const exportRaw = new module.LibRaw();
+    const cachedSensor =
+      cached?.fileId === data.fileId ? cached.sensor : undefined;
+    if (cachedSensor) module = cachedSensor.module;
+    let exportRaw = cachedSensor?.raw ?? new module.LibRaw();
     let gpuRenderer: WebGpuColorRenderer | undefined;
     try {
-      exportRaw.open(new Uint8Array(data.buffer), false);
-      const rawBackend = exportRaw.supportsWebGpuAahd()
-        ? "webgpu-aahd"
-        : exportRaw.supportsWebGpuXtrans()
-          ? "webgpu-xtrans"
-          : undefined;
-      if (rawBackend) {
-        const sensor = exportRaw.sensorInfo();
+      let rawBackend = cachedSensor?.backend;
+      let sensor = cachedSensor?.info;
+      if (!cachedSensor) {
+        exportRaw.open(new Uint8Array(data.buffer), false);
+        if (exportRaw.usesParallelUnpack()) {
+          const parallelModule = await loadParallelLibRaw();
+          const parallelRaw = new parallelModule.LibRaw();
+          exportRaw.delete();
+          module = parallelModule;
+          exportRaw = parallelRaw;
+          exportRaw.open(new Uint8Array(data.buffer), false);
+        }
+        rawBackend = exportRaw.supportsWebGpuAahd()
+          ? "webgpu-aahd"
+          : exportRaw.supportsWebGpuXtrans()
+            ? "webgpu-xtrans"
+            : undefined;
+        if (rawBackend) sensor = exportRaw.sensorInfo();
+      }
+      if (rawBackend && sensor) {
         const mosaic = exportRaw.sensorView(0, sensor.sampleCount);
         gpuRenderer = await WebGpuColorRenderer.create(lut);
         const stream = new RenderedTiffStream(
@@ -206,7 +281,6 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
                   (pixels) => stream.write(pixels),
                 );
           const rendered = stream.finish(sensor.sampleCount * 3);
-          const sensorTimings = exportRaw.sensorTimings();
           const reply: WorkerReply = {
             requestId: data.requestId,
             ok: true,
@@ -214,8 +288,12 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
             fileId: data.fileId,
             tiff: rendered.bytes,
             timings: {
-              libraw: sensorDecodeTimings(sensorTimings),
+              libraw: cachedSensor
+                ? sensorDecodeTimings(ZERO_SENSOR_TIMINGS)
+                : sensorDecodeTimings(exportRaw.sensorTimings()),
               rawBackend,
+              sensorCacheHit: cachedSensor !== undefined,
+              sensorCacheBytes: cachedSensor?.bytes,
               colorBackend: "webgpu",
               colorProcessingMs: demosaic.timings.colorMs,
               tiffEncodingMs: rendered.tiffEncodingMs,
@@ -266,7 +344,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       context.postMessage(reply, [rendered.bytes.buffer]);
     } finally {
       await gpuRenderer?.destroy();
-      exportRaw.delete();
+      if (!cachedSensor) exportRaw.delete();
     }
   } catch (error) {
     const reply: WorkerReply = {
@@ -278,6 +356,27 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
     };
     context.postMessage(reply);
   }
+}
+
+const ZERO_SENSOR_TIMINGS = {
+  inputCopyMs: 0,
+  openMs: 0,
+  unpackMs: 0,
+  mosaicCopyMs: 0,
+  totalMs: 0,
+} as const;
+
+function releaseCachedPreview(): void {
+  cached?.renderer.free();
+  cached?.sensor?.raw.delete();
+  cached = undefined;
+}
+
+function loadParallelLibRaw(): Promise<LibRawModule> {
+  parallelRuntime ??= import("../libraw/threaded/libraw.js").then(
+    ({ default: create }) => create(),
+  );
+  return parallelRuntime;
 }
 
 function sensorDecodeTimings(

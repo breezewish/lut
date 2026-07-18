@@ -13,6 +13,7 @@ test("the repository subpath loads every runtime asset and previews a RAW", asyn
   });
 
   await page.goto("./");
+  await page.waitForFunction(() => crossOriginIsolated);
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 20_000,

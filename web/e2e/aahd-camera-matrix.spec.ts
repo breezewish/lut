@@ -14,6 +14,7 @@ interface CameraFixture {
   width: number;
   height: number;
   rawBackend?: "libraw" | "webgpu-aahd" | "webgpu-xtrans";
+  sensorCache?: boolean;
 }
 
 const fixtureRoot = resolve(
@@ -57,6 +58,13 @@ for (const fixture of manifest.fixtures) {
     );
     expect(timings.rawBackend).toBe(fixture.rawBackend ?? "webgpu-aahd");
     expect(timings.colorBackend).toBe("webgpu");
+    if (fixture.sensorCache ?? timings.rawBackend !== "libraw") {
+      expect(timings.sensorCacheHit).toBe(true);
+      expect(timings.sensorCacheBytes).toBe(fixture.width * fixture.height * 2);
+      expect(timings.libraw.totalMs).toBe(0);
+    } else {
+      expect(timings.sensorCacheHit).not.toBe(true);
+    }
     const adapterInfo = await page.evaluate(async () => {
       const adapter = await navigator.gpu.requestAdapter({
         powerPreference: "high-performance",

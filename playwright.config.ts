@@ -46,6 +46,10 @@ export default defineConfig({
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
+        // Chromium does not allow service-worker installation through an
+        // ignored self-signed TLS error. Loopback HTTP remains a secure
+        // context and exercises the same isolation service worker.
+        baseURL: `http://127.0.0.1:${httpPort}`,
         launchOptions: { args: hardwareWebGpuArgs },
       },
     },
