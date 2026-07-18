@@ -87,6 +87,7 @@
     sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  line-height: 1.5;
 }
 
 :root[data-theme="light"] {
@@ -207,6 +208,7 @@ dd {
   font-weight: 600;
   letter-spacing: -0.015em;
   color: var(--ink);
+  text-wrap: balance;
 }
 
 .titlebar-spacer {
