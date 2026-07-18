@@ -1,5 +1,9 @@
 import shader from "../demosaic/libraw-aahd.wgsl?raw";
-import type { SensorImageInfo } from "./sensor-image";
+import {
+  calculateDemosaicScale,
+  scaleDemosaicSample,
+  type SensorImageInfo,
+} from "./sensor-image";
 import { refineImmutableIsolatedDirections } from "./aahd-candidate-reference";
 import {
   blendLibRawHighlights,
@@ -352,7 +356,7 @@ export async function demosaicLibRawAahdWithWgsl(
   const preMultipliers = new Float32Array(parameters.buffer, 16 * 4, 4);
   const firstSensorColor = info.cfaPattern[0];
   const firstColor = normalizedCfa(firstSensorColor);
-  const firstScaled = scaleSample(
+  const firstScaled = scaleDemosaicSample(
     mosaic[0],
     info.blackLevels[firstSensorColor],
     scaleMultipliers[firstSensorColor],
@@ -1030,7 +1034,7 @@ async function preprocessLibRawDefectsWithWgsl(
     const scale = new Float32Array(parameters.buffer, 12 * 4, 4);
     const firstColor = normalizedCfa(info.cfaPattern[0]);
     const initialExtrema = new Uint32Array(6);
-    initialExtrema[firstColor] = scaleSample(
+    initialExtrema[firstColor] = scaleDemosaicSample(
       mosaic[0],
       info.blackLevels[firstColor],
       scale[firstColor],
@@ -1187,8 +1191,8 @@ function validateInput(mosaic: Uint16Array, info: SensorImageInfo): void {
     );
   }
   if (
-    info.aahdPreMultipliers.length !== 4 ||
-    info.aahdPreMultipliers.some(
+    info.demosaicPreMultipliers.length !== 4 ||
+    info.demosaicPreMultipliers.some(
       (multiplier) => !Number.isFinite(multiplier) || multiplier <= 0,
     )
   ) {
@@ -1738,7 +1742,7 @@ function createParameters(
   }
   const { scale, pre } = reference
     ? { scale: reference.scaleMultipliers, pre: reference.preMultipliers }
-    : calculateScale(info);
+    : calculateDemosaicScale(info);
   floats.set(scale, 12);
   floats.set(pre, 16);
   floats.set(reference?.yuvMatrix ?? info.aahdYuvMatrix, 20);
@@ -1760,38 +1764,13 @@ function createPreprocessingParameters(
   for (let channel = 0; channel < 4; channel += 1) {
     floats[8 + channel] = info.blackLevels[channel];
   }
-  floats.set(calculateScale(info).scale, 12);
+  floats.set(calculateDemosaicScale(info).scale, 12);
   parameters.set(info.cfaPattern, 48);
   return parameters;
 }
 
-function calculateScale(info: SensorImageInfo): {
-  scale: Float32Array;
-  pre: Float32Array;
-} {
-  const pre = new Float32Array(4);
-  const scale = new Float32Array(4);
-  const sensorRange = info.aahdScaleRange;
-  for (let channel = 0; channel < 4; channel += 1) {
-    pre[channel] = Math.fround(info.aahdPreMultipliers[channel]);
-    scale[channel] = Math.fround(
-      Math.fround(Math.fround(pre[channel] * 65535) / sensorRange),
-    );
-  }
-  return { scale, pre };
-}
-
 function normalizedCfa(channel: number): number {
   return channel === 3 ? 1 : channel;
-}
-
-function scaleSample(sample: number, black: number, scale: number): number {
-  return Math.trunc(
-    Math.min(
-      65535,
-      Math.max(0, Math.fround(Math.fround(sample - black) * scale)),
-    ),
-  );
 }
 
 function largestBufferBytes(info: SensorImageInfo): number {

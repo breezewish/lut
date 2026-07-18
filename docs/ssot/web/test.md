@@ -31,10 +31,15 @@
 - A second opt-in hardware export compares every Leica M8 RGB16 channel with
   production LibRaw and covers its data-adjusted AAHD scaling maximum.
 - The hardware camera matrix downloads SHA-256-pinned CC0 Nikon Z 6,
-  Panasonic GH5, Bayer Fujifilm X-A5, and X-Trans Fujifilm X-T2 RAW files into
+  Panasonic GH5, Bayer Fujifilm X-A5, and X-Trans Fujifilm X-T1 and X-T2 RAW files into
   an ignored cache. It rejects fallback adapters, verifies GPU AAHD for strict
-  Bayer input, verifies LibRaw demosaic plus required GPU color for X-Trans,
+  Bayer input, verifies GPU Markesteijn for both X-Trans generations, retains
+  LibRaw demosaic for unsupported Panasonic geometry,
   and compares every browser TIFF channel with an independent native export.
+- A test-only hardware entry compares GPU X-Trans camera RGB with a captured
+  LibRaw result before highlights and color. X-T1 and X-T2 must match every
+  RGB16 sample exactly; X-T1 also supplies nonempty Blend-highlight coverage to
+  the end-to-end TIFF comparison.
 - A synthetic hardware fixture proves that sparse ordered defect correction and
   tiled AAHD bit-match the full-frame parity route across all four Bayer phases,
   both tile axes, rectangular edge tiles, a smaller-than-tile image, and

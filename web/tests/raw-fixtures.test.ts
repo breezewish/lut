@@ -75,6 +75,10 @@ test("downloadable WebGPU camera fixtures remain a pinned sensor matrix", async 
       camera: "Fujifilm X-T2",
       mode: "14-bit lossless compressed X-Trans",
     },
+    {
+      camera: "Fujifilm X-T1",
+      mode: "14-bit uncompressed X-Trans",
+    },
   ]);
   for (const fixture of manifest.fixtures) {
     expect(new URL(fixture.source).origin, fixture.id).toBe(
@@ -84,7 +88,7 @@ test("downloadable WebGPU camera fixtures remain a pinned sensor matrix", async 
     expect(fixture.bytes, fixture.id).toBeGreaterThan(20_000_000);
     expect(fixture.license, fixture.id).toBe("CC0-1.0");
     expect(fixture.width * fixture.height, fixture.id).toBeGreaterThan(
-      20_000_000,
+      15_000_000,
     );
   }
 });

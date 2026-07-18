@@ -73,7 +73,7 @@ export interface PreviewTimings {
 
 export interface ExportTimings {
   libraw: LibRawDecodeTimings;
-  rawBackend: "libraw" | "webgpu-aahd";
+  rawBackend: "libraw" | "webgpu-aahd" | "webgpu-xtrans";
   colorBackend: "webgpu";
   colorProcessingMs: number;
   tiffEncodingMs: number;
@@ -81,11 +81,17 @@ export interface ExportTimings {
   gpuInputPreparationMs?: number;
   gpuExecutionAndReadbackMs?: number;
   gpuOutputPreparationMs?: number;
-  webGpuAahd?: {
-    timings: import("./lib/libraw-aahd").LibRawAahdTimings;
-    resources: NonNullable<
-      import("./lib/libraw-aahd").LibRawAahdResult["resources"]
-    >;
+  webGpuDemosaic?: {
+    algorithm:
+      | import("./lib/libraw-aahd").LibRawAahdResult["algorithm"]
+      | import("./lib/libraw-xtrans").LibRawXtransResult["algorithm"];
+    timings:
+      | import("./lib/libraw-aahd").LibRawAahdTimings
+      | import("./lib/libraw-xtrans").LibRawXtransTimings;
+    resources: {
+      peakGpuBytes: number;
+      maximumBufferBytes: number;
+    };
   };
 }
 

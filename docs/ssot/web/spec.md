@@ -34,9 +34,10 @@ never changes to a CPU renderer. Reloading after the GPU becomes available is
 the recovery action.
 
 Export selects the demosaic stage from the RAW contract. Even, unrotated Bayer
-RAW uses tiled LibRaw-parity AAHD on WebGPU. X-Trans, Linear DNG, rotated RAW,
-odd Bayer geometry, and spatial black-level layouts retain LibRaw's
-sensor-specific demosaic and geometry processing. Both routes require WebGPU
+RAW uses tiled LibRaw-parity AAHD on WebGPU. Standard, unrotated three-color
+X-Trans RAW uses tiled LibRaw-parity Markesteijn demosaic on WebGPU. Linear DNG,
+rotated RAW, odd Bayer geometry, legacy Fuji geometry, and spatial black-level
+layouts retain LibRaw's sensor-specific demosaic and geometry processing. All routes require WebGPU
 for corrected-v2 color/LUT processing and stream bounded RGB16 bands into the
 TIFF encoder. This preserves the accepted RAW formats without treating a GPU
 failure as permission to change algorithms.

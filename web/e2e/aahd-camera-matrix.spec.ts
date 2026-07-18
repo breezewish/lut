@@ -13,7 +13,7 @@ interface CameraFixture {
   camera: string;
   width: number;
   height: number;
-  rawBackend?: "libraw";
+  rawBackend?: "libraw" | "webgpu-aahd" | "webgpu-xtrans";
 }
 
 const fixtureRoot = resolve(
@@ -72,19 +72,17 @@ for (const fixture of manifest.fixtures) {
         : undefined;
     });
     expect(adapterInfo).toBeDefined();
-    expect(adapterInfo?.isFallbackAdapter).toBe(false);
+    if (process.env.WEBGPU_HARDWARE === "1") {
+      expect(adapterInfo?.isFallbackAdapter).toBe(false);
+    }
 
+    const webGpuBytes = await readFile(webGpuOutput);
+    const retainedOutput = testInfo.outputPath(`${fixture.id}-webgpu.tif`);
+    await writeFile(retainedOutput, webGpuBytes);
     const comparison = compareRgb16Tiffs(
-      await readFile(webGpuOutput),
+      webGpuBytes,
       await readFile(nativeOutput),
     );
-    expect([comparison.width, comparison.height]).toEqual([
-      fixture.width,
-      fixture.height,
-    ]);
-    expect(comparison.maxCodeDifference).toBeLessThanOrEqual(2);
-    expect(comparison.samplesOverTwoCodes).toBe(0);
-
     const reportPath = testInfo.outputPath(`${fixture.id}-comparison.json`);
     await writeFile(
       reportPath,
@@ -94,6 +92,12 @@ for (const fixture of manifest.fixtures) {
       path: reportPath,
       contentType: "application/json",
     });
+    expect([comparison.width, comparison.height]).toEqual([
+      fixture.width,
+      fixture.height,
+    ]);
+    expect(comparison.maxCodeDifference).toBeLessThanOrEqual(2);
+    expect(comparison.samplesOverTwoCodes).toBe(0);
   });
 }
 

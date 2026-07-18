@@ -164,14 +164,15 @@ function createSensorInfo(
     cfaPattern,
     blackLevels,
     whiteLevel: 0x3fff,
-    aahdScaleRange: 0x3fff,
-    aahdPreMultipliers: [1, 0.5, 0.75, 0.5],
+    demosaicScaleRange: 0x3fff,
+    demosaicPreMultipliers: [1, 0.5, 0.75, 0.5],
     cameraWhiteBalance: [2, 1, 1.5, 1],
     xyzToCamera: [],
     rgbCamera: [],
     aahdYuvMatrix: [
       0.299, 0.587, 0.114, -0.168736, -0.331264, 0.5, 0.5, -0.418688, -0.081312,
     ],
+    xtransLabMatrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
     librawProPhotoMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
     orientation: 0,
   };

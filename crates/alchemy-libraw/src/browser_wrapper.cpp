@@ -73,6 +73,15 @@ public:
     preview_resize_ms_ = 0;
   }
 
+  void enable_demosaic_capture() {
+    capture_demosaic_ = true;
+    demosaic_capture_.clear();
+  }
+
+  const std::vector<std::uint16_t> &demosaic_capture() const {
+    return demosaic_capture_;
+  }
+
   bool has_legacy_fuji_geometry() const {
     return libraw_internal_data.internal_output_params.fuji_width != 0;
   }
@@ -107,6 +116,16 @@ public:
       }
     }
     return real_colors == 3 && bad_bayer == 0;
+  }
+
+  bool has_standard_xtrans_geometry() const {
+    const auto &sizes = imgdata.sizes;
+    const auto &identity = imgdata.idata;
+    const auto &internal = libraw_internal_data.internal_output_params;
+    return identity.colors == 3 && identity.filters == LIBRAW_XTRANS &&
+           !identity.is_foveon && !internal.zero_is_bad &&
+           internal.fuji_width == 0 && !imgdata.params.four_color_rgb &&
+           std::abs(sizes.pixel_aspect - 1.0) <= 0.005;
   }
 
   void finish_process_timings(DecodeTimings &timings) const {
@@ -146,6 +165,8 @@ private:
   double color_finished_at_ = 0;
   double preview_resize_ms_ = 0;
   unsigned preview_max_edge_ = 0;
+  bool capture_demosaic_ = false;
+  std::vector<std::uint16_t> demosaic_capture_;
 
   static std::size_t oriented_index(unsigned row, unsigned col,
                                     unsigned width, unsigned height,
@@ -343,6 +364,18 @@ private:
 
   static void finish_demosaic(void *raw) {
     auto *processor = static_cast<TimedLibRaw *>(raw);
+    if (processor->capture_demosaic_) {
+      const std::size_t pixels =
+          static_cast<std::size_t>(processor->imgdata.sizes.width) *
+          processor->imgdata.sizes.height;
+      processor->demosaic_capture_.resize(pixels * 3);
+      for (std::size_t index = 0; index < pixels; ++index) {
+        for (unsigned channel = 0; channel < 3; ++channel) {
+          processor->demosaic_capture_[index * 3 + channel] =
+              processor->imgdata.image[index][channel];
+        }
+      }
+    }
     processor->demosaic_finished_at_ = emscripten_get_now();
   }
 
@@ -480,6 +513,20 @@ public:
     return result;
   }
 
+  val xtrans_cbrt_view() const {
+    static const std::array<float, 65536> table = [] {
+      std::array<float, 65536> values{};
+      for (unsigned index = 0; index < values.size(); ++index) {
+        const float ratio = index / 65535.0f;
+        values[index] = ratio > 0.008856f
+                            ? std::pow(ratio, 1.f / 3.0f)
+                            : 7.787f * ratio + 16.f / 116.0f;
+      }
+      return values;
+    }();
+    return val(typed_memory_view(table.size(), table.data()));
+  }
+
   val image_info() {
     if (image_ == nullptr) {
       require_opened();
@@ -528,6 +575,20 @@ public:
     return result;
   }
 
+  void enable_demosaic_capture() { processor_.enable_demosaic_capture(); }
+
+  val demosaic_view(std::size_t offset, std::size_t length) const {
+    const auto &capture = processor_.demosaic_capture();
+    if (capture.empty()) {
+      throw std::runtime_error(
+          "LibRaw demosaic capture must be enabled before image_info()");
+    }
+    if (offset > capture.size() || length > capture.size() - offset) {
+      throw std::runtime_error("LibRaw demosaic view exceeds the captured image");
+    }
+    return val(typed_memory_view(length, capture.data() + offset));
+  }
+
   bool supports_webgpu_aahd() {
     require_opened();
     const int status = ensure_unpacked();
@@ -541,6 +602,28 @@ public:
         !processor_.has_standard_aahd_geometry() || sizes.flip != 0 ||
         sizes.width == 0 ||
         sizes.height == 0 || sizes.width % 2 != 0 || sizes.height % 2 != 0) {
+      return false;
+    }
+    try {
+      adjusted_black_levels();
+    } catch (const SpatialBlackLevelsUnsupported &) {
+      return false;
+    }
+    return true;
+  }
+
+  bool supports_webgpu_xtrans() {
+    require_opened();
+    const int status = ensure_unpacked();
+    if (status != LIBRAW_SUCCESS) {
+      release_decoder_state();
+      fail("unpack the sensor mosaic", status);
+    }
+
+    const auto &sizes = processor_.imgdata.sizes;
+    if (processor_.imgdata.rawdata.raw_image == nullptr ||
+        !processor_.has_standard_xtrans_geometry() || sizes.flip != 0 ||
+        sizes.width < LIBRAW_AHD_TILE || sizes.height < LIBRAW_AHD_TILE) {
       return false;
     }
     try {
@@ -589,15 +672,12 @@ public:
         auto *destination =
             sensor_.data() + static_cast<std::size_t>(row) * sizes.width;
         std::memcpy(destination, source, sizes.width * sizeof(std::uint16_t));
-        if (idata.filters != 9) {
-          for (unsigned col = 0; col < sizes.width; ++col) {
-            const unsigned channel = processor_.COLOR(row, col);
-            const unsigned sample =
-                destination[col] > black.channels[channel]
-                    ? destination[col] - black.channels[channel]
-                    : 0;
-            data_maximum = std::max(data_maximum, sample);
-          }
+        for (unsigned col = 0; col < sizes.width; ++col) {
+          const unsigned channel = processor_.COLOR(row, col);
+          const unsigned sample = destination[col] > black.channels[channel]
+                                      ? destination[col] - black.channels[channel]
+                                      : 0;
+          data_maximum = std::max(data_maximum, sample);
         }
       }
       sensor_timings_.mosaic_copy_ms = emscripten_get_now() - copy_started_at;
@@ -618,10 +698,10 @@ public:
       sensor_metadata_.set("cfaPattern", cfa);
       sensor_metadata_.set("whiteLevel", color.maximum);
       unsigned scale_range = 0;
-      if (idata.filters != 9 && color.maximum > black.common) {
-        // Mirror LibRaw's adjust_maximum() policy. Its effective AAHD range can
-        // be lower than the advertised white level on cameras whose brightest
-        // meaningful sample is close enough to that level.
+      if (color.maximum > black.common) {
+        // Mirror LibRaw's adjust_maximum() policy. Its effective demosaic range
+        // can be lower than the advertised white level when a frame's brightest
+        // meaningful sample is sufficiently close to that level.
         scale_range = color.maximum - black.common;
         libraw_decoder_info_t decoder{};
         processor_.get_decoder_info(&decoder);
@@ -636,14 +716,14 @@ public:
           scale_range = data_maximum;
         }
       }
-      sensor_metadata_.set("aahdScaleRange", scale_range);
+      sensor_metadata_.set("demosaicScaleRange", scale_range);
       const auto pre_multipliers =
           aahd_pre_multipliers(black, scale_range);
       val pre_multiplier_array = val::array();
       for (unsigned channel = 0; channel < 4; ++channel) {
         pre_multiplier_array.set(channel, pre_multipliers[channel]);
       }
-      sensor_metadata_.set("aahdPreMultipliers", pre_multiplier_array);
+      sensor_metadata_.set("demosaicPreMultipliers", pre_multiplier_array);
       sensor_metadata_.set("orientation", sizes.flip);
 
       val black_levels = val::array();
@@ -670,23 +750,36 @@ public:
       };
       val rgb_camera = val::array();
       val aahd_yuv_matrix = val::array();
+      val xtrans_lab_matrix = val::array();
       val prophoto_matrix = val::array();
+      static constexpr double xyz_rgb[3][3] = {
+          {0.4124564, 0.3575761, 0.1804375},
+          {0.2126729, 0.7151522, 0.0721750},
+          {0.0193339, 0.1191920, 0.9503041},
+      };
+      static constexpr float d65_white[3] = {0.95047f, 1.0f, 1.08883f};
       for (unsigned row = 0; row < 3; ++row) {
         for (unsigned col = 0; col < 4; ++col) {
           rgb_camera.set(row * 4 + col, color.rgb_cam[row][col]);
           float yuv = 0;
+          float lab = 0;
           float prophoto = 0;
           for (unsigned term = 0; term < 3; ++term) {
             yuv += yuv_coefficients[row][term] * color.rgb_cam[term][col];
+            lab += static_cast<float>(xyz_rgb[row][term] *
+                                      color.rgb_cam[term][col] /
+                                      d65_white[row]);
             prophoto += float(LibRaw_constants::prophoto_rgb[row][term] *
                               color.rgb_cam[term][col]);
           }
           if (col < 3) aahd_yuv_matrix.set(row * 3 + col, yuv);
+          if (col < 3) xtrans_lab_matrix.set(row * 3 + col, lab);
           prophoto_matrix.set(row * 4 + col, prophoto);
         }
       }
       sensor_metadata_.set("rgbCamera", rgb_camera);
       sensor_metadata_.set("aahdYuvMatrix", aahd_yuv_matrix);
+      sensor_metadata_.set("xtransLabMatrix", xtrans_lab_matrix);
       sensor_metadata_.set("librawProPhotoMatrix", prophoto_matrix);
       sensor_timings_.total_ms = emscripten_get_now() - total_started_at_;
       release_decoder_state();
@@ -991,8 +1084,14 @@ EMSCRIPTEN_BINDINGS(raw_alchemy_libraw) {
       .function("openWithQuality", &BrowserLibRaw::open_with_quality)
       .function("metadata", &BrowserLibRaw::metadata)
       .function("thumbnailData", &BrowserLibRaw::thumbnail_data)
+      .function("xtransCbrtView", &BrowserLibRaw::xtrans_cbrt_view)
       .function("imageInfo", &BrowserLibRaw::image_info)
+      .function("enableDemosaicCapture",
+                &BrowserLibRaw::enable_demosaic_capture)
+      .function("demosaicView", &BrowserLibRaw::demosaic_view)
       .function("supportsWebGpuAahd", &BrowserLibRaw::supports_webgpu_aahd)
+      .function("supportsWebGpuXtrans",
+                &BrowserLibRaw::supports_webgpu_xtrans)
       .function("timings", &BrowserLibRaw::timings)
       .function("imageView", &BrowserLibRaw::image_view)
       .function("sensorInfo", &BrowserLibRaw::sensor_info)

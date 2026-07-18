@@ -10,6 +10,7 @@ import { describeProcessingError } from "../lib/errors";
 import { sha256Hex } from "../lib/hash";
 import { RenderedTiffStream, renderTiffInGpuStrips } from "../lib/tiff-export";
 import { demosaicLibRawAahdTiledWithWgsl } from "../lib/libraw-aahd";
+import { demosaicLibRawXtransTiledWithWgsl } from "../lib/libraw-xtrans";
 import { WebGpuColorRenderer } from "../lib/webgpu-color";
 import {
   prepareWebGpuPreview,
@@ -176,7 +177,12 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
     let gpuRenderer: WebGpuColorRenderer | undefined;
     try {
       exportRaw.open(new Uint8Array(data.buffer), false);
-      if (exportRaw.supportsWebGpuAahd()) {
+      const rawBackend = exportRaw.supportsWebGpuAahd()
+        ? "webgpu-aahd"
+        : exportRaw.supportsWebGpuXtrans()
+          ? "webgpu-xtrans"
+          : undefined;
+      if (rawBackend) {
         const sensor = exportRaw.sensorInfo();
         const mosaic = exportRaw.sensorView(0, sensor.sampleCount);
         gpuRenderer = await WebGpuColorRenderer.create(lut);
@@ -184,12 +190,21 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
           new TiffEncoder(sensor.width, sensor.height),
         );
         try {
-          const demosaic = await demosaicLibRawAahdTiledWithWgsl(
-            mosaic,
-            sensor,
-            { renderer: gpuRenderer, ev: data.ev },
-            (pixels) => stream.write(pixels),
-          );
+          const demosaic =
+            rawBackend === "webgpu-aahd"
+              ? await demosaicLibRawAahdTiledWithWgsl(
+                  mosaic,
+                  sensor,
+                  { renderer: gpuRenderer, ev: data.ev },
+                  (pixels) => stream.write(pixels),
+                )
+              : await demosaicLibRawXtransTiledWithWgsl(
+                  mosaic,
+                  sensor,
+                  new Float32Array(exportRaw.xtransCbrtView()),
+                  { renderer: gpuRenderer, ev: data.ev },
+                  (pixels) => stream.write(pixels),
+                );
           const rendered = stream.finish(sensor.sampleCount * 3);
           const sensorTimings = exportRaw.sensorTimings();
           const reply: WorkerReply = {
@@ -200,13 +215,14 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
             tiff: rendered.bytes,
             timings: {
               libraw: sensorDecodeTimings(sensorTimings),
-              rawBackend: "webgpu-aahd",
+              rawBackend,
               colorBackend: "webgpu",
               colorProcessingMs: demosaic.timings.colorMs,
               tiffEncodingMs: rendered.tiffEncodingMs,
               workerTotalMs: performance.now() - workerStartedAt,
               gpuExecutionAndReadbackMs: demosaic.timings.totalMs,
-              webGpuAahd: {
+              webGpuDemosaic: {
+                algorithm: demosaic.algorithm,
                 timings: demosaic.timings,
                 resources: demosaic.resources!,
               },

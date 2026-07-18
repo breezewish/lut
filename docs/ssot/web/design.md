@@ -23,7 +23,7 @@ The exposure slider remains an uncontrolled native input while the pointer moves
 The WebGPU implementation evaluates the canonical Preview transfer directly. Export retains its independent exact floating-point processing path. Transferred RGBA8 results are reinterpreted directly as clamped Canvas views instead of copied into another complete preview allocation. Export receives a fresh transferable RAW buffer and performs a full decode only for that operation. A stateful Rust WASM encoder requests and copies only the next approximately 1 MB LibRaw view, so JavaScript never owns a complete decoded RGB16 image and the separate color WASM receives no second complete allocation.
 
 The production Export route asks LibRaw whether the opened RAW satisfies the
-strict WebGPU AAHD input contract before choosing a demosaic stage. LibRaw
+strict WebGPU Bayer AAHD or X-Trans contract before choosing a demosaic stage. LibRaw
 opens and unpacks the visible Bayer mosaic and exposes the effective AAHD
 scaling range after its adjusted-maximum policy. The wrapper also exposes the
 four normalized pre-multipliers selected by LibRaw's camera-white-field,
@@ -41,7 +41,27 @@ sweep. Exact YUV rounding uses one dispatch with explicit storage round trips.
 Each selected core passes directly into corrected-v2 exposure and LUT
 processing. Two fixed output readbacks overlap bounded transfer with TIFF
 prediction and Deflate; a separate scratch readback supports the compact exact
-Blend-highlight transform. RAWs outside that contract complete demosaic and
+Blend-highlight transform.
+
+Standard X-Trans export keeps LibRaw unpacking, crop metadata, black levels,
+white balance, and color matrices, then runs its three-pass eight-direction
+Markesteijn algorithm in 512px WebGPU tiles. Eight-pixel row and column overlap
+buffers reproduce LibRaw's scan-order image state. Final border interpolation
+is kept separate from that overlap state. CIELab matrix products and additions
+cross explicit storage boundaries because WGSL permits contraction while the
+pinned LibRaw build forbids it. The same rule applies to the final Lab terms.
+The bounded workspace is at most 179 MB for the verified camera matrix, with no
+full decoded RGB image in JavaScript. Blend highlight reconstruction, ProPhoto
+conversion, corrected-v2 color, readback, and TIFF writing remain on the
+streamed tile route.
+
+Preview intentionally retains LibRaw's display-sized X-Trans path. Compressed
+sensor unpack dominates measured latency, while full-resolution GPU Markesteijn
+would add work and memory before discarding almost every result pixel. Preview
+may differ slightly from export under its existing display-space quality
+contract.
+
+RAWs outside the WebGPU demosaic contracts complete demosaic and
 geometry in LibRaw, then enter the same required WebGPU color and bounded TIFF
 path. Device failures never select the LibRaw route.
 

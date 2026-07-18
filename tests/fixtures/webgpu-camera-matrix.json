@@ -23,7 +23,8 @@
       "camera": "Panasonic DC-GH5",
       "mode": "12-bit 4:3",
       "width": 5208,
-      "height": 3904
+      "height": 3904,
+      "rawBackend": "libraw"
     },
     {
       "id": "fujifilm-x-a5-raf",
@@ -48,7 +49,20 @@
       "mode": "14-bit lossless compressed X-Trans",
       "width": 6032,
       "height": 4028,
-      "rawBackend": "libraw"
+      "rawBackend": "webgpu-xtrans"
+    },
+    {
+      "id": "fujifilm-x-t1-xtrans-raf",
+      "file": "fujifilm-x-t1.RAF",
+      "source": "https://raw.pixls.us/data/Fujifilm/X-T1/20171229_110916.RAF",
+      "sha256": "e994a1fd6e87e392432fe146a35b0b88584dc2bd50bee2c8c7e886ac2b59fcde",
+      "bytes": 33806336,
+      "license": "CC0-1.0",
+      "camera": "Fujifilm X-T1",
+      "mode": "14-bit uncompressed X-Trans",
+      "width": 4934,
+      "height": 3296,
+      "rawBackend": "webgpu-xtrans"
     }
   ]
 }
