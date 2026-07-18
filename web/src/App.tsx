@@ -1,9 +1,5 @@
 import {
-  Circle,
-  CircleAlert,
-  CircleCheck,
-  CircleStop,
-  FileImage,
+  Columns2,
   FolderOpen,
   ImageDown,
   LoaderCircle,
@@ -11,44 +7,48 @@ import {
   Moon,
   Plus,
   RotateCcw,
-  Search,
+  SplitSquareHorizontal,
   Sun,
-  Trash2,
+  TriangleAlert,
   X,
 } from "lucide-react";
 import {
   type ChangeEvent,
   type CSSProperties,
   type DragEvent,
+  type PointerEvent as ReactPointerEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   startTransition,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
 import { Zip, ZipPassThrough } from "fflate";
 
-import { PreviewCanvas, type PreviewFocus } from "./components/preview-canvas";
+import {
+  CompareStage,
+  type CompareMode,
+  type StageImage,
+} from "./components/compare-stage";
+import { Filmstrip, type PhotoSelect } from "./components/filmstrip";
+import { LookPanel } from "./components/look-panel";
 import { Button } from "./components/ui/button";
-import { Select } from "./components/ui/select";
 import { ProcessingClient } from "./lib/processing-client";
 import type { LutManifest, PreviewResult, QueueItem } from "./types";
 
 const RAW_ACCEPT =
   ".3fr,.ari,.arw,.bay,.cap,.cr2,.cr3,.dcr,.dcs,.dng,.drf,.eip,.erf,.fff,.gpr,.iiq,.k25,.kdc,.mdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.pef,.ptx,.pxn,.r3d,.raf,.raw,.rwl,.rw2,.rwz,.sr2,.srf,.srw,.x3f";
+const DEFAULT_LUT_ID = "fuji-classic-negative";
 const SETTLED_PREVIEW_MAX_EDGE = 1_024;
+const THUMB_MAX_EDGE = 132;
+const FILMSTRIP_THUMB_WIDTH = 220;
 const GPU_EXPOSURE_PREVIEW_INTERVAL_MS = 16;
 
-const STATUS_LABELS: Record<QueueItem["status"], string> = {
-  queued: "Queued",
-  decoding: "Decoding",
-  ready: "Ready",
-  exporting: "Exporting",
-  done: "Exported",
-  "decode-error": "Failed",
-  "export-error": "Failed",
-};
+const PANEL_MIN = 240;
+const PANEL_MAX = 560;
+const STRIP_MIN = 76;
+const STRIP_MAX = 320;
 
 interface ExportProgress {
   current: number;
@@ -59,26 +59,31 @@ interface ExportProgress {
 
 interface QueueUndo {
   items: QueueItem[];
-  selectedId?: string;
+  activeId?: string;
   message: string;
 }
 
-interface PreviewImage {
-  pixels: Uint8Array<ArrayBuffer>;
-  width: number;
-  height: number;
-}
-
 type Theme = "light" | "dark";
-type PreviewView = "fit" | "actual";
-type MobilePreview = "base" | "look";
+
+const clamp = (value: number, lo: number, hi: number) =>
+  Math.max(lo, Math.min(hi, value));
+
+function readStoredSize(key: string, fallback: number, lo: number, hi: number) {
+  try {
+    const raw = Number(localStorage.getItem(key));
+    if (Number.isFinite(raw) && raw > 0) return clamp(raw, lo, hi);
+  } catch {
+    // Persisted sizes are a convenience only.
+  }
+  return fallback;
+}
 
 function initialTheme(): Theme {
   try {
     const saved = localStorage.getItem("raw-alchemy-theme");
     if (saved === "light" || saved === "dark") return saved;
   } catch {
-    // Storage is optional. The operating-system preference remains authoritative.
+    // Storage is optional; the OS preference remains authoritative.
   }
   return typeof window.matchMedia === "function" &&
     window.matchMedia("(prefers-color-scheme: light)").matches
@@ -88,30 +93,14 @@ function initialTheme(): Theme {
 
 interface DisplayedPreview {
   fileId: string;
-  base?: PreviewImage;
-  lut?: PreviewImage;
+  base?: StageImage;
+  lut?: StageImage;
   decodeCount: number;
 }
 
 function isDecodeFailure(item: QueueItem): boolean {
   return item.status === "decode-error";
 }
-
-function StatusIcon({ status }: { status: QueueItem["status"] }) {
-  switch (status) {
-    case "decoding":
-    case "exporting":
-      return <LoaderCircle size={13} aria-hidden="true" />;
-    case "done":
-      return <CircleCheck size={13} aria-hidden="true" />;
-    case "decode-error":
-    case "export-error":
-      return <CircleAlert size={13} aria-hidden="true" />;
-    default:
-      return <Circle size={13} aria-hidden="true" />;
-  }
-}
-
 function hasUsablePreview(item: QueueItem): boolean {
   return (
     item.status === "ready" ||
@@ -119,24 +108,18 @@ function hasUsablePreview(item: QueueItem): boolean {
     item.status === "export-error"
   );
 }
-
 function previewRecipeKey(fileId: string, ev: number, lutId: string): string {
   return `${fileId}\n${ev}\n${lutId}`;
 }
-
 function basePreviewRecipeKey(fileId: string, ev: number): string {
   return `${fileId}\n${ev}`;
-}
-
-function evLutRecipeKey(ev: number, lutId: string): string {
-  return `${ev}\n${lutId}`;
 }
 
 function mergePreview(
   current: DisplayedPreview | undefined,
   result: PreviewResult,
 ): DisplayedPreview {
-  const image = (pixels: Uint8Array<ArrayBuffer>): PreviewImage => ({
+  const image = (pixels: Uint8Array<ArrayBuffer>): StageImage => ({
     pixels,
     width: result.width,
     height: result.height,
@@ -153,14 +136,45 @@ function mergePreview(
   };
 }
 
+/** Downscales a base preview buffer to a small filmstrip JPEG data URL. */
+function makeThumbUrl(image: StageImage): string | undefined {
+  const scale = Math.min(1, FILMSTRIP_THUMB_WIDTH / image.width);
+  const tw = Math.max(1, Math.round(image.width * scale));
+  const th = Math.max(1, Math.round(image.height * scale));
+  const source = document.createElement("canvas");
+  source.width = image.width;
+  source.height = image.height;
+  const sourceContext = source.getContext("2d");
+  if (!sourceContext) return undefined;
+  sourceContext.putImageData(
+    new ImageData(
+      new Uint8ClampedArray(
+        image.pixels.buffer,
+        image.pixels.byteOffset,
+        image.pixels.byteLength,
+      ),
+      image.width,
+      image.height,
+    ),
+    0,
+    0,
+  );
+  const thumb = document.createElement("canvas");
+  thumb.width = tw;
+  thumb.height = th;
+  const thumbContext = thumb.getContext("2d");
+  if (!thumbContext) return undefined;
+  thumbContext.drawImage(source, 0, 0, tw, th);
+  return thumb.toDataURL("image/jpeg", 0.72);
+}
+
 export default function App() {
   const [client] = useState(() => new ProcessingClient());
   const [manifest, setManifest] = useState<LutManifest>();
   const [manifestError, setManifestError] = useState<string>();
   const [items, setItems] = useState<QueueItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string>();
-  const [lutId, setLutId] = useState("fuji-classic-negative");
-  const [ev, setEv] = useState(0);
+  const [activeId, setActiveId] = useState<string>();
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [preview, setPreview] = useState<DisplayedPreview>();
   const [cameraPreview, setCameraPreview] = useState<{
     fileId: string;
@@ -172,14 +186,10 @@ export default function App() {
   const [exportSummary, setExportSummary] = useState<string>();
   const [queueUndo, setQueueUndo] = useState<QueueUndo>();
   const [lookQuery, setLookQuery] = useState("");
-  const [lookBrowserOpen, setLookBrowserOpen] = useState(false);
-  const [previewView, setPreviewView] = useState<PreviewView>("fit");
-  const previewFocus = useRef<PreviewFocus>({
-    x: 0.5,
-    y: 0.5,
-  });
-  const previewGrid = useRef<HTMLDivElement>(null);
-  const [mobilePreview, setMobilePreview] = useState<MobilePreview>("look");
+  const [compareMode, setCompareMode] = useState<CompareMode>("wipe");
+  const [dragOver, setDragOver] = useState(false);
+  const [thumbs, setThumbs] = useState<Map<string, StageImage>>(new Map());
+  const [thumbTick, setThumbTick] = useState(0);
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [recentLutIds, setRecentLutIds] = useState<string[]>(() => {
     try {
@@ -194,111 +204,94 @@ export default function App() {
       return [];
     }
   });
+  const [panelWidth, setPanelWidth] = useState(() =>
+    readStoredSize("raw-alchemy-panel-w", 288, PANEL_MIN, PANEL_MAX),
+  );
+  const [stripHeight, setStripHeight] = useState(() =>
+    readStoredSize("raw-alchemy-strip-h", 104, STRIP_MIN, STRIP_MAX),
+  );
+
   const decodedFileId = useRef<string | undefined>(undefined);
   const settledBaseRecipe = useRef<string | undefined>(undefined);
   const nextPreviewGeneration = useRef(0);
   const lastPaintedGeneration = useRef(0);
   const desiredPreview = useRef<
-    | {
-        generation: number;
-        fileId: string;
-        lutId: string;
-      }
-    | undefined
+    { generation: number; fileId: string; lutId: string } | undefined
   >(undefined);
   const [renderedRecipe, setRenderedRecipe] = useState<string>();
-  const [confirmedEvLutRecipe, setConfirmedEvLutRecipe] = useState<string>();
   const fileInput = useRef<HTMLInputElement>(null);
   const exposureInput = useRef<HTMLInputElement>(null);
   const exposureRange = useRef<HTMLInputElement>(null);
   const exposureCommitTimer = useRef<number | undefined>(undefined);
-  const pendingExposure = useRef(ev);
+  const pendingExposure = useRef(0);
   const exposureHasPendingRecipe = useRef(false);
   const lastExposureCommitAt = useRef(0);
   const stopAfterCurrent = useRef(false);
+  const thumbBusy = useRef(false);
+  const failedThumbs = useRef(new Set<string>());
+  const panelWidthRef = useRef(panelWidth);
+  const stripHeightRef = useRef(stripHeight);
+
+  // ── Derived active-photo recipe ──────────────────────────────────────────
+  const active = items.find((item) => item.id === activeId);
+  const ev = active?.ev ?? 0;
+  const lutId = active?.lutId ?? DEFAULT_LUT_ID;
+  const activeLut = manifest?.luts.find((lut) => lut.id === lutId);
+  const currentRecipe = active
+    ? previewRecipeKey(active.id, ev, lutId)
+    : undefined;
+  const isPreviewProcessing = Boolean(
+    active &&
+      activeLut &&
+      !isDecodeFailure(active) &&
+      (!hasUsablePreview(active) || renderedRecipe !== currentRecipe),
+  );
+  const eligibleSelected = items.filter(
+    (item) => selectedIds.has(item.id) && !isDecodeFailure(item),
+  );
+  const selectedList = items.filter((item) => selectedIds.has(item.id));
+  const mixedEv =
+    selectedList.length > 1 &&
+    new Set(selectedList.map((item) => item.ev)).size > 1;
+  // Export stays gated on the active photo's visible recipe being fully
+  // rendered, so batch export can't ship a recipe the user hasn't seen settle.
+  const activeSettled = Boolean(
+    active &&
+      !isDecodeFailure(active) &&
+      hasUsablePreview(active) &&
+      renderedRecipe === currentRecipe,
+  );
+  const canExport = Boolean(
+    !exporting && manifest && eligibleSelected.length > 0 && activeSettled,
+  );
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
     document
       .querySelector('meta[name="theme-color"]')
-      ?.setAttribute("content", theme === "dark" ? "#121318" : "#eceef2");
+      ?.setAttribute("content", theme === "dark" ? "#1a1e24" : "#f0f1f4");
     try {
       localStorage.setItem("raw-alchemy-theme", theme);
     } catch {
-      // A persisted theme is a convenience, not a processing requirement.
+      // Persisted theme is a convenience only.
     }
   }, [theme]);
 
-  const selected = items.find((item) => item.id === selectedId);
-  const selectedLut = manifest?.luts.find((lut) => lut.id === lutId);
-  const exportableItems = items.filter((item) => !isDecodeFailure(item));
-  const currentRecipe =
-    selected && selectedLut
-      ? previewRecipeKey(selected.id, ev, selectedLut.id)
-      : undefined;
-  const canStartExport = Boolean(
-    selected &&
-      selectedLut &&
-      hasUsablePreview(selected) &&
-      renderedRecipe === currentRecipe,
-  );
-  // Export all only needs the current EV+LUT recipe to have been reviewed
-  // on some file, not on whichever file happens to be selected right now —
-  // a broken or not-yet-decoded selection must never block the rest of the
-  // batch (see docs/ssot/web/design.md).
-  const canStartBatchExport = Boolean(
-    selectedLut &&
-      exportableItems.length > 0 &&
-      confirmedEvLutRecipe === evLutRecipeKey(ev, selectedLut.id),
-  );
-  const isPreviewProcessing = Boolean(
-    selected &&
-      selectedLut &&
-      !isDecodeFailure(selected) &&
-      (!hasUsablePreview(selected) || renderedRecipe !== currentRecipe),
-  );
-
-  useEffect(() => {
-    setPreviewView("fit");
-    previewFocus.current = { x: 0.5, y: 0.5 };
-    setMobilePreview("look");
-  }, [selectedId]);
-
-  const getPreviewFocus = useCallback(() => previewFocus.current, []);
-
-  const updatePreviewFocus = useCallback((next: PreviewFocus) => {
-    previewFocus.current = next;
-    for (const canvas of previewGrid.current?.querySelectorAll("canvas") ??
-      []) {
-      canvas.style.left = `calc(50% + ${(0.5 - next.x) * canvas.width}px)`;
-      canvas.style.top = `calc(50% + ${(0.5 - next.y) * canvas.height}px)`;
-    }
+  const setPanelW = useCallback((value: number) => {
+    const next = clamp(value, PANEL_MIN, PANEL_MAX);
+    panelWidthRef.current = next;
+    setPanelWidth(next);
+  }, []);
+  const setStripH = useCallback((value: number) => {
+    const next = clamp(value, STRIP_MIN, STRIP_MAX);
+    stripHeightRef.current = next;
+    setStripHeight(next);
   }, []);
 
-  useEffect(() => {
-    const changePreviewView = (event: KeyboardEvent) => {
-      if (!selected || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (
-        event.target instanceof HTMLInputElement ||
-        event.target instanceof HTMLButtonElement ||
-        event.target instanceof HTMLTextAreaElement ||
-        event.target instanceof HTMLSelectElement
-      ) {
-        return;
-      }
-      if (event.key.toLocaleLowerCase() === "f") {
-        setPreviewView("fit");
-      } else if (event.key === "1") {
-        setPreviewView("actual");
-      } else {
-        return;
-      }
-      event.preventDefault();
-    };
-    window.addEventListener("keydown", changePreviewView);
-    return () => window.removeEventListener("keydown", changePreviewView);
-  }, [selected]);
+  // Stable catalog order — the Looks grid must never reshuffle when a look is
+  // picked, so it stays in the manifest's fixed (camera-family) order.
+  const stripLooks = manifest?.luts ?? [];
 
   const updateItem = useCallback((id: string, patch: Partial<QueueItem>) => {
     setItems((current) =>
@@ -306,43 +299,140 @@ export default function App() {
     );
   }, []);
 
-  const setExposure = useCallback((value: number) => {
-    const next = Math.max(-4, Math.min(4, value));
-    pendingExposure.current = next;
-    exposureHasPendingRecipe.current = true;
-    setRenderedRecipe(undefined);
-    if (exposureCommitTimer.current !== undefined) {
-      window.clearTimeout(exposureCommitTimer.current);
-      exposureCommitTimer.current = undefined;
-    }
-    lastExposureCommitAt.current = performance.now();
-    setEv(next);
-  }, []);
+  const patchSelected = useCallback(
+    (patch: Partial<Pick<QueueItem, "ev" | "lutId">>) => {
+      setItems((current) =>
+        current.map((item) =>
+          selectedIds.has(item.id) ? { ...item, ...patch } : item,
+        ),
+      );
+    },
+    [selectedIds],
+  );
 
-  const scheduleExposurePreview = useCallback((input: HTMLInputElement) => {
-    const next = Number(input.value);
-    pendingExposure.current = next;
-    if (!exposureHasPendingRecipe.current) {
+  // ── Selection ────────────────────────────────────────────────────────────
+  const selectPhoto = useCallback(
+    (id: string, { additive, range }: PhotoSelect) => {
+      if (range && activeId) {
+        const from = items.findIndex((item) => item.id === activeId);
+        const to = items.findIndex((item) => item.id === id);
+        if (from >= 0 && to >= 0) {
+          const [lo, hi] = from < to ? [from, to] : [to, from];
+          setSelectedIds(new Set(items.slice(lo, hi + 1).map((i) => i.id)));
+          setActiveId(id);
+          return;
+        }
+      }
+      if (additive) {
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(id)) next.delete(id);
+          else next.add(id);
+          if (next.size === 0) next.add(id);
+          setActiveId(next.has(id) ? id : [...next][0]);
+          return next;
+        });
+        return;
+      }
+      setSelectedIds(new Set([id]));
+      setActiveId(id);
+    },
+    [activeId, items],
+  );
+
+  // Reset the exposure input + look thumbnails whenever the active photo
+  // changes; pending exposure follows the newly active photo.
+  useEffect(() => {
+    pendingExposure.current = active?.ev ?? 0;
+    exposureHasPendingRecipe.current = false;
+    setThumbs(new Map());
+    failedThumbs.current = new Set();
+    setThumbTick((tick) => tick + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
+
+  // Arrow-key photo navigation (single-select), when focus is outside a text
+  // field. Photo buttons are allowed so arrows keep working inside the strip.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement ||
+        event.target instanceof HTMLSelectElement
+      )
+        return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      if (items.length === 0) return;
+      const index = items.findIndex((item) => item.id === activeId);
+      const delta = event.key === "ArrowRight" ? 1 : -1;
+      const next = items[clamp(index + delta, 0, items.length - 1)];
+      if (next) {
+        event.preventDefault();
+        setSelectedIds(new Set([next.id]));
+        setActiveId(next.id);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [items, activeId]);
+
+  const setExposure = useCallback(
+    (value: number) => {
+      const next = clamp(value, -4, 4);
+      pendingExposure.current = next;
       exposureHasPendingRecipe.current = true;
       setRenderedRecipe(undefined);
-    }
-    input.style.setProperty("--range-progress", `${((next + 4) / 8) * 100}%`);
-    input.setAttribute("aria-valuetext", `${next} EV`);
-    if (exposureInput.current) exposureInput.current.value = String(next);
-    if (exposureCommitTimer.current !== undefined) return;
-
-    const elapsed = lastExposureCommitAt.current
-      ? performance.now() - lastExposureCommitAt.current
-      : 0;
-    exposureCommitTimer.current = window.setTimeout(
-      () => {
+      if (exposureCommitTimer.current !== undefined) {
+        window.clearTimeout(exposureCommitTimer.current);
         exposureCommitTimer.current = undefined;
-        lastExposureCommitAt.current = performance.now();
-        startTransition(() => setEv(pendingExposure.current));
-      },
-      Math.max(0, GPU_EXPOSURE_PREVIEW_INTERVAL_MS - elapsed),
-    );
-  }, []);
+      }
+      lastExposureCommitAt.current = performance.now();
+      patchSelected({ ev: next });
+    },
+    [patchSelected],
+  );
+
+  const scheduleExposurePreview = useCallback(
+    (input: HTMLInputElement) => {
+      const next = Number(input.value);
+      pendingExposure.current = next;
+      if (!exposureHasPendingRecipe.current) {
+        exposureHasPendingRecipe.current = true;
+        setRenderedRecipe(undefined);
+      }
+      input.style.setProperty("--range-progress", `${((next + 4) / 8) * 100}%`);
+      input.setAttribute("aria-valuetext", `${next} EV`);
+      if (exposureInput.current) exposureInput.current.value = String(next);
+      if (exposureCommitTimer.current !== undefined) return;
+      const elapsed = lastExposureCommitAt.current
+        ? performance.now() - lastExposureCommitAt.current
+        : 0;
+      exposureCommitTimer.current = window.setTimeout(
+        () => {
+          exposureCommitTimer.current = undefined;
+          lastExposureCommitAt.current = performance.now();
+          startTransition(() => patchSelected({ ev: pendingExposure.current }));
+        },
+        Math.max(0, GPU_EXPOSURE_PREVIEW_INTERVAL_MS - elapsed),
+      );
+    },
+    [patchSelected],
+  );
+
+  const chooseLut = useCallback(
+    (value: string) => {
+      patchSelected({ lutId: value });
+      const next = Array.from(new Set([value, ...recentLutIds])).slice(0, 6);
+      setRecentLutIds(next);
+      try {
+        localStorage.setItem("raw-alchemy-recent-luts", JSON.stringify(next));
+      } catch {
+        // Recent looks are a non-essential aid.
+      }
+    },
+    [patchSelected, recentLutIds],
+  );
 
   const releasePreview = useCallback(() => {
     decodedFileId.current = undefined;
@@ -365,19 +455,11 @@ export default function App() {
         if (!Array.isArray(value.luts) || value.luts.length === 0) {
           throw new Error("The built-in LUT manifest is empty.");
         }
-        if (active) {
-          setManifest(value);
-          setLutId((current) =>
-            value.luts.some((lut) => lut.id === current)
-              ? current
-              : value.luts[0].id,
-          );
-        }
+        if (active) setManifest(value);
       })
       .catch(() => {
-        if (active) {
+        if (active)
           setManifestError("The built-in LUT manifest could not be loaded.");
-        }
       });
     return () => {
       active = false;
@@ -386,21 +468,20 @@ export default function App() {
   }, [client]);
 
   useEffect(() => {
-    const unsubscribe = client.onThumbnail(({ fileId, jpeg }) => {
+    return client.onThumbnail(({ fileId, jpeg }) => {
       performance.mark("raw-alchemy:thumbnail");
       const url = URL.createObjectURL(new Blob([jpeg], { type: "image/jpeg" }));
       setCameraPreview({ fileId, url });
     });
-    return unsubscribe;
   }, [client]);
 
   useEffect(() => {
     return client.onPreviewFrame((result) => {
-      if (result.fileId !== selectedId) return;
+      if (result.fileId !== activeId) return;
       setPreview((current) => mergePreview(current, result));
       setCameraPreview(undefined);
     });
-  }, [client, selectedId]);
+  }, [client, activeId]);
 
   useEffect(
     () => () => {
@@ -409,11 +490,11 @@ export default function App() {
     [cameraPreview],
   );
 
+  // Decode the active photo when it changes (using its own recipe).
   useEffect(() => {
-    if (!selected || !selectedLut) return;
-    let active = true;
-    const decodeRecipe = previewRecipeKey(selected.id, ev, selectedLut.id);
-    const evLutRecipe = evLutRecipeKey(ev, selectedLut.id);
+    if (!active || !activeLut) return;
+    let running = true;
+    const decodeRecipe = previewRecipeKey(active.id, ev, activeLut.id);
     decodedFileId.current = undefined;
     settledBaseRecipe.current = undefined;
     desiredPreview.current = undefined;
@@ -421,13 +502,10 @@ export default function App() {
     setPreview(undefined);
     setCameraPreview(undefined);
     setGlobalError(undefined);
-    updateItem(selected.id, {
-      status: "decoding",
-      error: undefined,
-    });
+    updateItem(active.id, { status: "decoding", error: undefined });
 
     const fileReadStartedAt = performance.now();
-    selected.file
+    active.file
       .arrayBuffer()
       .then((buffer) => {
         performance.mark("raw-alchemy:file-read", {
@@ -435,104 +513,159 @@ export default function App() {
         });
         return buffer;
       })
-      .then((buffer) => client.decode(selected.id, buffer, ev, selectedLut))
+      .then((buffer) => client.decode(active.id, buffer, ev, activeLut))
       .then((result) => {
-        if (!active) return;
-        decodedFileId.current = selected.id;
-        settledBaseRecipe.current = basePreviewRecipeKey(selected.id, ev);
-        if (pendingExposure.current === ev) {
+        if (!running) return;
+        decodedFileId.current = active.id;
+        settledBaseRecipe.current = basePreviewRecipeKey(active.id, ev);
+        if (pendingExposure.current === ev)
           exposureHasPendingRecipe.current = false;
-        }
         setRenderedRecipe(decodeRecipe);
-        setConfirmedEvLutRecipe(evLutRecipe);
         setPreview(mergePreview(undefined, result));
         setCameraPreview(undefined);
-        updateItem(selected.id, {
+        updateItem(active.id, {
           status: "ready",
           camera: result.metadata.camera || "Unknown camera",
           dimensions: `${result.metadata.width} × ${result.metadata.height}`,
         });
       })
       .catch((error: Error) => {
-        if (!active) return;
-        updateItem(selected.id, {
-          status: "decode-error",
-          error: error.message,
-        });
+        if (!running) return;
+        updateItem(active.id, { status: "decode-error", error: error.message });
         setGlobalError(error.message);
       });
-
     return () => {
-      active = false;
+      running = false;
     };
-  }, [client, selected?.id, Boolean(selectedLut), updateItem]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, active?.id, Boolean(activeLut), updateItem]);
 
+  // Re-render the settled comparison when EV or look changes (no re-decode).
   useEffect(() => {
     if (
-      !selected ||
-      !selectedLut ||
-      !hasUsablePreview(selected) ||
-      decodedFileId.current !== selected.id ||
+      !active ||
+      !activeLut ||
+      !hasUsablePreview(active) ||
+      decodedFileId.current !== active.id ||
       (exposureHasPendingRecipe.current && pendingExposure.current !== ev)
     )
       return;
-    const recipe = previewRecipeKey(selected.id, ev, selectedLut.id);
+    const recipe = previewRecipeKey(active.id, ev, activeLut.id);
     if (renderedRecipe === recipe) return;
     const generation = ++nextPreviewGeneration.current;
     desiredPreview.current = {
       generation,
-      fileId: selected.id,
-      lutId: selectedLut.id,
+      fileId: active.id,
+      lutId: activeLut.id,
     };
-    const baseRecipe = basePreviewRecipeKey(selected.id, ev);
+    const baseRecipe = basePreviewRecipeKey(active.id, ev);
     const includeBase = settledBaseRecipe.current !== baseRecipe;
-    let active = true;
+    let running = true;
     const render = async () => {
       try {
-        const interactive = await client.render(selected.id, ev, selectedLut, {
+        const frame = await client.render(active.id, ev, activeLut, {
           maxEdge: SETTLED_PREVIEW_MAX_EDGE,
           includeBase,
         });
         const desired = desiredPreview.current;
         if (
-          desired?.fileId === selected.id &&
-          desired.lutId === selectedLut.id &&
+          desired?.fileId === active.id &&
+          desired.lutId === activeLut.id &&
           generation > lastPaintedGeneration.current
         ) {
           lastPaintedGeneration.current = generation;
-          setPreview((current) => mergePreview(current, interactive));
+          setPreview((current) => mergePreview(current, frame));
         }
-        if (!active) return;
-
+        if (!running) return;
         if (pendingExposure.current !== ev) return;
         settledBaseRecipe.current = baseRecipe;
         exposureHasPendingRecipe.current = false;
         setRenderedRecipe(recipe);
-        setConfirmedEvLutRecipe(evLutRecipeKey(ev, selectedLut.id));
       } catch (error) {
-        if (active) {
+        if (running)
           setGlobalError(
             error instanceof Error ? error.message : String(error),
           );
-        }
       }
     };
     void render();
     return () => {
-      active = false;
-      if (desiredPreview.current?.generation === generation) {
+      running = false;
+      if (desiredPreview.current?.generation === generation)
         desiredPreview.current = undefined;
-      }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, ev, renderedRecipe, active?.id, active?.status, activeLut?.id]);
+
+  // Progressive look thumbnails for the active photo's Looks panel.
+  useEffect(() => {
+    if (
+      !active ||
+      !activeLut ||
+      !manifest ||
+      exporting ||
+      isPreviewProcessing ||
+      thumbBusy.current ||
+      decodedFileId.current !== active.id ||
+      !hasUsablePreview(active)
+    )
+      return;
+    const next = manifest.luts.find(
+      (lut) => !thumbs.has(lut.id) && !failedThumbs.current.has(lut.id),
+    );
+    if (!next) return;
+    const fileId = active.id;
+    thumbBusy.current = true;
+    let running = true;
+    client
+      .render(fileId, active.ev, next, {
+        maxEdge: THUMB_MAX_EDGE,
+        includeBase: false,
+      })
+      .then((result) => {
+        if (!running || decodedFileId.current !== fileId) return;
+        setThumbs((current) => {
+          const map = new Map(current);
+          map.set(next.id, {
+            pixels: result.lut,
+            width: result.width,
+            height: result.height,
+          });
+          return map;
+        });
+      })
+      .catch(() => {
+        failedThumbs.current.add(next.id);
+        if (running) setThumbTick((tick) => tick + 1);
+      })
+      .finally(() => {
+        thumbBusy.current = false;
+      });
+    return () => {
+      running = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     client,
-    ev,
-    renderedRecipe,
-    selected?.id,
-    selected?.status,
-    selectedLut?.id,
+    manifest,
+    active,
+    activeLut,
+    exporting,
+    isPreviewProcessing,
+    thumbs,
+    thumbTick,
   ]);
 
+  // Build a filmstrip thumbnail once the active photo's base preview lands.
+  useEffect(() => {
+    if (!active || active.thumbUrl || !preview?.base) return;
+    if (preview.fileId !== active.id) return;
+    const url = makeThumbUrl(preview.base);
+    if (url) updateItem(active.id, { thumbUrl: url });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview, active?.id, active?.thumbUrl, updateItem]);
+
+  // Keep the exposure controls in sync with the active photo's EV.
   useEffect(() => {
     if (
       exposureInput.current &&
@@ -552,13 +685,13 @@ export default function App() {
 
   useEffect(
     () => () => {
-      if (exposureCommitTimer.current !== undefined) {
+      if (exposureCommitTimer.current !== undefined)
         window.clearTimeout(exposureCommitTimer.current);
-      }
     },
     [],
   );
 
+  // ── File intake ──────────────────────────────────────────────────────────
   const addFiles = useCallback((files: File[]) => {
     if (files.length === 0) return;
     performance.mark("raw-alchemy:file-selected");
@@ -566,9 +699,10 @@ export default function App() {
     setQueueUndo(undefined);
     setExportSummary(undefined);
     const first = files[0];
-    setSelectedId(
-      (current) =>
-        current ?? `${first.name}:${first.size}:${first.lastModified}`,
+    const firstId = `${first.name}:${first.size}:${first.lastModified}`;
+    setActiveId((current) => current ?? firstId);
+    setSelectedIds((current) =>
+      current.size > 0 ? current : new Set([firstId]),
     );
     setItems((current) => {
       const existing = new Set(current.map((item) => item.id));
@@ -577,7 +711,13 @@ export default function App() {
         const id = `${file.name}:${file.size}:${file.lastModified}`;
         if (existing.has(id)) continue;
         existing.add(id);
-        additions.push({ id, file, status: "queued" });
+        additions.push({
+          id,
+          file,
+          status: "queued",
+          ev: 0,
+          lutId: DEFAULT_LUT_ID,
+        });
       }
       return [...current, ...additions];
     });
@@ -587,11 +727,15 @@ export default function App() {
     addFiles(Array.from(event.target.files ?? []));
     event.target.value = "";
   };
-
   const onDrop = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
+    setDragOver(false);
     if (exporting) return;
     addFiles(Array.from(event.dataTransfer.files));
+  };
+  const onDragOver = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    if (!exporting) setDragOver(true);
   };
 
   const removeItem = (id: string) => {
@@ -599,13 +743,20 @@ export default function App() {
     if (!item) return;
     setQueueUndo({
       items: [item],
-      selectedId: selectedId === id ? id : undefined,
+      activeId: activeId === id ? id : undefined,
       message: `Removed ${item.file.name}`,
     });
-    setItems((current) => current.filter((item) => item.id !== id));
-    if (selectedId === id) {
-      const next = items.find((item) => item.id !== id);
-      setSelectedId(next?.id);
+    const remaining = items.filter((candidate) => candidate.id !== id);
+    setItems(remaining);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      if (next.size === 0 && remaining[0]) next.add(remaining[0].id);
+      return next;
+    });
+    if (activeId === id) {
+      const next = remaining[0];
+      setActiveId(next?.id);
       releasePreview();
     }
   };
@@ -613,11 +764,12 @@ export default function App() {
   const clearQueue = () => {
     setQueueUndo({
       items,
-      selectedId,
-      message: `Cleared ${items.length} file${items.length === 1 ? "" : "s"}`,
+      activeId,
+      message: `Cleared ${items.length} photo${items.length === 1 ? "" : "s"}`,
     });
     setItems([]);
-    setSelectedId(undefined);
+    setActiveId(undefined);
+    setSelectedIds(new Set());
     setExportSummary(undefined);
     releasePreview();
   };
@@ -631,22 +783,23 @@ export default function App() {
         ...current,
       ];
     });
-    if (queueUndo.selectedId) setSelectedId(queueUndo.selectedId);
+    if (queueUndo.activeId) {
+      setActiveId(queueUndo.activeId);
+      setSelectedIds(new Set([queueUndo.activeId]));
+    }
     setQueueUndo(undefined);
   };
 
-  const exportItems = async (targets: QueueItem[]) => {
-    const eligibleTargets = targets.filter((item) => !isDecodeFailure(item));
+  // ── Export ───────────────────────────────────────────────────────────────
+  const exportSelected = async () => {
+    const targets = eligibleSelected;
+    if (!manifest || exporting || targets.length === 0) return;
     const single = targets.length === 1;
-    const ready = single ? canStartExport : canStartBatchExport;
-    if (!selectedLut || !ready || eligibleTargets.length === 0) return;
     setExporting(true);
     setGlobalError(undefined);
     setExportSummary(undefined);
     stopAfterCurrent.current = false;
     const outputNames = new Set<string>();
-    // Keep batch export on the same fast, uncompressed path as single export.
-    // Pass-through ZIP entries also avoid a second contiguous archive buffer.
     const archiveChunks: Uint8Array<ArrayBuffer>[] = [];
     let archiveError: Error | undefined;
     const archive = single
@@ -674,37 +827,41 @@ export default function App() {
       | undefined;
     const failed: string[] = [];
     let stopped = false;
+    let lutId = DEFAULT_LUT_ID;
 
     try {
-      for (const [index, item] of eligibleTargets.entries()) {
+      for (const [index, item] of targets.entries()) {
+        const lut = manifest.luts.find(
+          (candidate) => candidate.id === item.lutId,
+        );
+        if (!lut) {
+          failed.push(item.file.name);
+          continue;
+        }
+        lutId = lut.id;
         setExportProgress({
           current: index + 1,
-          total: eligibleTargets.length,
+          total: targets.length,
           fileName: item.file.name,
         });
-        updateItem(item.id, {
-          status: "exporting",
-          error: undefined,
-        });
+        updateItem(item.id, { status: "exporting", error: undefined });
         let tiff: Uint8Array | undefined;
         try {
           const exported = await client.export(
             item.id,
             await item.file.arrayBuffer(),
-            ev,
-            selectedLut,
+            item.ev,
+            lut,
           );
           tiff = exported.tiff;
           performance.mark("raw-alchemy:export-worker", {
             detail: exported.timings,
           });
         } catch (error) {
-          const message =
-            error instanceof Error ? error.message : String(error);
           failed.push(item.file.name);
           updateItem(item.id, {
             status: "export-error",
-            error: message,
+            error: error instanceof Error ? error.message : String(error),
           });
         }
 
@@ -720,7 +877,7 @@ export default function App() {
             tiff.byteLength,
           );
           const base = item.file.name.replace(/\.[^.]+$/, "") || "image";
-          const stem = `${base}-${selectedLut.id}`;
+          const stem = `${base}-${lut.id}`;
           let outputName = `${stem}.tif`;
           let suffix = 2;
           while (outputNames.has(outputName)) {
@@ -739,7 +896,7 @@ export default function App() {
           updateItem(item.id, { status: "done" });
         }
 
-        if (stopAfterCurrent.current && index + 1 < eligibleTargets.length) {
+        if (stopAfterCurrent.current && index + 1 < targets.length) {
           stopped = true;
           break;
         }
@@ -748,36 +905,25 @@ export default function App() {
       archive?.end();
       if (archiveError) throw archiveError;
       if (outputNames.size > 0) {
-        const blobStartedAt = performance.now();
         const blob = new Blob(
           singleOutput ? [singleOutput.bytes] : archiveChunks,
-          {
-            type: single ? "image/tiff" : "application/zip",
-          },
+          { type: single ? "image/tiff" : "application/zip" },
         );
-        performance.mark("raw-alchemy:blob", {
-          detail: {
-            durationMs: performance.now() - blobStartedAt,
-            byteLength: blob.size,
-          },
-        });
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement("a");
         anchor.href = url;
         anchor.download = single
           ? singleOutput!.name
-          : `raw-alchemy-${selectedLut.id}.zip`;
+          : `raw-alchemy-${lutId}.zip`;
         anchor.click();
         window.setTimeout(() => URL.revokeObjectURL(url), 0);
       }
 
-      const skippedBeforeStart = targets.length - eligibleTargets.length;
-      const skipped = failed.length + skippedBeforeStart;
       const detail = failed.length > 0 ? ` Failed: ${failed.join(", ")}.` : "";
       setExportSummary(
         stopped
-          ? `Stopped after ${outputNames.size} of ${eligibleTargets.length} exports.${detail}`
-          : `Exported ${outputNames.size} of ${eligibleTargets.length}.${skipped > 0 ? ` Skipped ${skipped}.` : ""}${detail}`,
+          ? `Stopped after ${outputNames.size} of ${targets.length} exports.${detail}`
+          : `Exported ${outputNames.size} of ${targets.length}.${detail}`,
       );
     } catch (error) {
       setGlobalError(error instanceof Error ? error.message : String(error));
@@ -787,72 +933,133 @@ export default function App() {
     }
   };
 
-  const selectOptions = useMemo(() => {
-    const luts = manifest?.luts ?? [];
-    const query = lookQuery.trim().toLocaleLowerCase();
-    const matches = luts.filter(
-      (lut) =>
-        lut.id === lutId ||
-        query.length === 0 ||
-        `${lut.group} ${lut.name}`.toLocaleLowerCase().includes(query),
-    );
-    const recent = query
-      ? []
-      : recentLutIds
-          .map((id) => matches.find((lut) => lut.id === id))
-          .filter((lut) => lut !== undefined);
-    const recentIds = new Set(recent.map((lut) => lut.id));
-    return [
-      ...recent.map((lut) => ({
-        value: lut.id,
-        label: lut.name,
-        group: "Recent",
-      })),
-      ...matches
-        .filter((lut) => !recentIds.has(lut.id))
-        .map((lut) => ({
-          value: lut.id,
-          label: lut.name,
-          group: lut.group,
-        })),
-    ];
-  }, [lookQuery, lutId, manifest, recentLutIds]);
-
-  const workingLuts = useMemo(() => {
-    const ids = Array.from(new Set([lutId, ...recentLutIds])).slice(0, 4);
-    return ids
-      .map((id) => manifest?.luts.find((lut) => lut.id === id))
-      .filter((lut) => lut !== undefined);
-  }, [lutId, manifest, recentLutIds]);
-
-  const chooseLut = (value: string) => {
-    setLutId(value);
-    setLookQuery("");
-    const next = Array.from(new Set([value, lutId, ...recentLutIds])).slice(
-      0,
-      4,
-    );
-    setRecentLutIds(next);
-    try {
-      localStorage.setItem("raw-alchemy-recent-luts", JSON.stringify(next));
-    } catch {
-      // Browsers may disable storage; recent looks are a non-essential aid.
-    }
+  // ── Resizers ─────────────────────────────────────────────────────────────
+  const startPanelResize = (event: ReactPointerEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const startX = event.clientX;
+    const startWidth = panelWidthRef.current;
+    const move = (moveEvent: PointerEvent) =>
+      setPanelW(startWidth - (moveEvent.clientX - startX));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      try {
+        localStorage.setItem(
+          "raw-alchemy-panel-w",
+          String(panelWidthRef.current),
+        );
+      } catch {
+        // Persisted layout is a convenience only.
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const startStripResize = (event: ReactPointerEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const startY = event.clientY;
+    const startHeight = stripHeightRef.current;
+    const move = (moveEvent: PointerEvent) =>
+      setStripH(startHeight - (moveEvent.clientY - startY));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      try {
+        localStorage.setItem(
+          "raw-alchemy-strip-h",
+          String(stripHeightRef.current),
+        );
+      } catch {
+        // Persisted layout is a convenience only.
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const onPanelResizeKey = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === "ArrowLeft") setPanelW(panelWidthRef.current + 24);
+    else if (event.key === "ArrowRight") setPanelW(panelWidthRef.current - 24);
+    else return;
+    event.preventDefault();
+  };
+  const onStripResizeKey = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === "ArrowUp") setStripH(stripHeightRef.current + 24);
+    else if (event.key === "ArrowDown") setStripH(stripHeightRef.current - 24);
+    else return;
+    event.preventDefault();
   };
 
+  const hasPhotos = items.length > 0;
+  const showCompare = Boolean(active && activeLut && !isDecodeFailure(active));
+  const showCamera = Boolean(
+    !preview && cameraPreview && active && cameraPreview.fileId === active.id,
+  );
+
   return (
-    <div className="shell">
-      <header className="titlebar">
+    <div
+      className="app"
+      style={
+        {
+          "--panel-w": `${panelWidth}px`,
+          "--strip-h": `${stripHeight}px`,
+        } as CSSProperties
+      }
+      onDragOver={onDragOver}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+    >
+      <header className="header">
         <div className="brand">
-          <div className="brand-mark" aria-hidden="true" />
-          <h1 className="brand-name">RAW Alchemy</h1>
+          <svg
+            className="brand__mark"
+            viewBox="0 0 22 22"
+            aria-hidden="true"
+            fill="none"
+          >
+            <circle
+              cx="11"
+              cy="11"
+              r="9.25"
+              stroke="var(--accent)"
+              opacity="0.5"
+            />
+            <path
+              d="M11 1.75 A9.25 9.25 0 0 1 11 20.25 Z"
+              fill="var(--accent)"
+            />
+          </svg>
+          <h1 className="brand__name">RAW Alchemy</h1>
         </div>
-        <div className="titlebar-spacer" />
-        <div className="titlebar-end">
-          <div className="privacy-badge">
-            <LockKeyhole size={12} aria-hidden="true" />
+        <div
+          className="header__doc"
+          aria-label="Current document"
+          aria-live="polite"
+        >
+          {active ? (
+            <>
+              <span className="header__name">{active.file.name}</span>
+              {active.dimensions && (
+                <span className="header__dims">{active.dimensions}</span>
+              )}
+              {selectedIds.size > 1 && (
+                <span className="header__count">
+                  {selectedIds.size} selected
+                </span>
+              )}
+            </>
+          ) : hasPhotos ? (
+            <span className="header__dims">Select a photo</span>
+          ) : (
+            <span className="header__dims">Local RAW processing</span>
+          )}
+        </div>
+        <div className="header__actions">
+          <span className="shield">
+            <LockKeyhole size={13} aria-hidden="true" />
             <span>Files stay on this device</span>
-          </div>
+          </span>
           <Button
             size="icon"
             variant="quiet"
@@ -860,9 +1067,9 @@ export default function App() {
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
           >
             {theme === "dark" ? (
-              <Sun size={15} aria-hidden="true" />
+              <Sun size={16} aria-hidden="true" />
             ) : (
-              <Moon size={15} aria-hidden="true" />
+              <Moon size={16} aria-hidden="true" />
             )}
           </Button>
           <Button
@@ -872,617 +1079,407 @@ export default function App() {
             onClick={() => fileInput.current?.click()}
           >
             <Plus size={15} aria-hidden="true" />
-            <span className="add-raw-label">Add RAWs</span>
+            <span className="hide-narrow">Add RAWs</span>
           </Button>
-          {items.length > 1 && (
-            <Button
-              onClick={() => void exportItems(items)}
-              disabled={exporting || !canStartBatchExport}
-            >
-              <ImageDown size={15} aria-hidden="true" />
-              {exporting ? "Exporting…" : "Export all"}
-            </Button>
-          )}
         </div>
       </header>
 
-      <div className="workbench">
-        <aside
-          className="rail"
-          aria-label="RAW queue"
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={onDrop}
+      <div className="workspace">
+        <section
+          className="viewer"
+          aria-label="Base and LUT comparison"
+          aria-busy={active ? isPreviewProcessing : undefined}
+          data-decode-count={preview?.decodeCount}
         >
-          {items.length === 0 ? (
-            <>
-              <span className="visually-hidden" aria-live="polite">
-                No files
+          {showCompare && (
+            <div className="viewer__tools">
+              <div className="seg" aria-label="Comparison mode">
+                <button
+                  type="button"
+                  aria-pressed={compareMode === "wipe"}
+                  onClick={() => setCompareMode("wipe")}
+                >
+                  <Columns2 size={14} aria-hidden="true" /> Wipe
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={compareMode === "split"}
+                  onClick={() => setCompareMode("split")}
+                >
+                  <SplitSquareHorizontal size={14} aria-hidden="true" /> Split
+                </button>
+              </div>
+              {!isPreviewProcessing && (
+                <span className="viewer__status">Ready</span>
+              )}
+            </div>
+          )}
+          {!hasPhotos ? (
+            <div className={`empty ${dragOver ? "is-drag" : ""}`}>
+              <div className="empty__icon">
+                <FolderOpen size={26} aria-hidden="true" />
+              </div>
+              <h2 className="empty__title">Start with a camera RAW</h2>
+              <p className="empty__copy">
+                Drop photos anywhere to compare a neutral rendering against a
+                curated look, then export a{" "}
+                <span style={{ whiteSpace: "nowrap" }}>16-bit TIFF</span>.
+              </p>
+              <Button onClick={() => fileInput.current?.click()}>
+                <FolderOpen size={17} aria-hidden="true" /> Choose RAW files
+              </Button>
+              <span className="empty__detail">
+                <LockKeyhole size={13} aria-hidden="true" />
+                Files stay on this device
               </span>
-              <button
-                type="button"
-                className="rail-empty"
-                onClick={() => fileInput.current?.click()}
-              >
-                <FolderOpen size={20} aria-hidden="true" />
-                <strong>Add RAWs</strong>
-                <span>Drop files or choose from device</span>
-              </button>
-            </>
+            </div>
+          ) : !active ? (
+            <div className="empty">
+              <p className="empty__copy">Select a photo to begin.</p>
+            </div>
+          ) : !activeLut ? (
+            <div className="overlay-note" role="status">
+              {manifestError
+                ? "Built-in looks unavailable. Reload to retry."
+                : "Loading looks…"}
+            </div>
+          ) : isDecodeFailure(active) ? (
+            <div className="overlay-note" role="status">
+              <TriangleAlert size={16} aria-hidden="true" />
+              Preview unavailable — remove this file or choose another RAW.
+            </div>
+          ) : showCamera ? (
+            <figure className="camera">
+              <img src={cameraPreview!.url} alt="Embedded camera preview" />
+            </figure>
           ) : (
             <>
-              <div className="rail-header">
-                <span>
-                  {items.length === 1
-                    ? "1 local file"
-                    : `${items.length} local files`}
-                </span>
-                <Button
-                  size="icon"
-                  variant="quiet"
-                  aria-label="Clear queue"
-                  disabled={exporting}
-                  onClick={clearQueue}
-                >
-                  <Trash2 size={13} />
-                </Button>
-              </div>
-              <div className="rail-list">
-                {items.map((item) => (
-                  <div
-                    key={item.id}
-                    className={`rail-item status-${item.status} ${item.id === selectedId ? "is-selected" : ""}`}
-                  >
-                    <button
-                      className="rail-item-select"
-                      aria-current={item.id === selectedId ? "true" : undefined}
-                      disabled={exporting}
-                      onClick={() => setSelectedId(item.id)}
-                    >
-                      <span className="rail-item-status" aria-hidden="true">
-                        <StatusIcon status={item.status} />
-                      </span>
-                      <span className="rail-item-copy">
-                        <span className="rail-item-name">{item.file.name}</span>
-                        <span className="rail-item-meta">
-                          {item.status === "decode-error"
-                            ? "Could not decode"
-                            : item.status === "export-error"
-                              ? "Export failed · retry available"
-                              : item.camera ||
-                                `${(item.file.size / 1_048_576).toFixed(1)} MB`}
-                        </span>
-                      </span>
-                      <span className="visually-hidden">
-                        {STATUS_LABELS[item.status]}
-                      </span>
-                    </button>
-                    <button
-                      className="rail-item-remove"
-                      aria-label={`Remove ${item.file.name}`}
-                      disabled={exporting}
-                      onClick={() => removeItem(item.id)}
-                    >
-                      <X size={13} />
-                    </button>
-                  </div>
-                ))}
-              </div>
+              <CompareStage
+                base={preview?.base}
+                look={preview?.lut}
+                lookLabel={activeLut.name}
+                mode={compareMode}
+                resetKey={active.id}
+                isLoading={active.status === "decoding"}
+              />
+              {active.status === "decoding" && preview && (
+                <div className="overlay-note" role="status">
+                  <LoaderCircle
+                    size={16}
+                    className="spin"
+                    aria-hidden="true"
+                  />
+                  Decoding preview…
+                </div>
+              )}
             </>
           )}
-          <input
-            ref={fileInput}
-            className="visually-hidden"
-            tabIndex={-1}
-            type="file"
-            accept={RAW_ACCEPT}
-            multiple
-            disabled={exporting}
-            onChange={onFileInput}
-          />
-        </aside>
+        </section>
 
-        <main className="stage">
-          <div className={`editor ${selected ? "" : "is-empty"}`}>
-            {selected && selectedLut && (
-              <section className="inspector" aria-label="Processing controls">
-                <div className="inspector-section">
-                  <div className="section-heading">
-                    <span className="section-title">Adjustments</span>
-                    <div className="section-actions">
-                      {isPreviewProcessing && (
-                        <span
-                          className="badge-processing"
-                          role="status"
-                          aria-label="Preview processing"
-                        >
-                          <LoaderCircle size={13} aria-hidden="true" />
-                          Processing
-                        </span>
-                      )}
-                      <Button
-                        size="icon"
-                        variant="quiet"
-                        aria-label="Reset exposure"
-                        onClick={() => setExposure(0)}
-                        disabled={exporting || ev === 0}
+        {hasPhotos && (
+          <>
+            <div
+              className="splitter splitter--v"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize panels"
+              aria-valuenow={Math.round(panelWidth)}
+              aria-valuemin={PANEL_MIN}
+              aria-valuemax={PANEL_MAX}
+              tabIndex={0}
+              onPointerDown={startPanelResize}
+              onKeyDown={onPanelResizeKey}
+            />
+
+            <aside className="panels" aria-label="Adjustments">
+              <div className="panel">
+                <div className="panel__head">
+                  <span className="panel__title">Exposure</span>
+                  <div className="panel__tools">
+                    {isPreviewProcessing && (
+                      <span
+                        className="processing"
+                        role="status"
+                        aria-label="Preview processing"
                       >
-                        <RotateCcw size={15} aria-hidden="true" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="field">
-                    <span className="field-label">Look</span>
-                    <div className="look">
-                      <div className="look-current">
-                        <span className="look-current-name">
-                          {selectedLut.name}
-                        </span>
-                        <span className="look-current-meta">
-                          {selectedLut.group} · built-in transform
-                        </span>
-                      </div>
-                      {workingLuts.length > 1 && (
-                        <div className="look-recents" aria-label="Recent looks">
-                          {workingLuts.map((lut) => (
-                            <button
-                              key={lut.id}
-                              type="button"
-                              className={lut.id === lutId ? "is-active" : ""}
-                              aria-pressed={lut.id === lutId}
-                              disabled={exporting}
-                              onClick={() => chooseLut(lut.id)}
-                            >
-                              {lut.name}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      <Button
-                        size="compact"
-                        variant="secondary"
-                        aria-expanded={lookBrowserOpen}
-                        onClick={() => setLookBrowserOpen((open) => !open)}
-                        disabled={exporting}
-                      >
-                        <Search size={14} aria-hidden="true" />
-                        {lookBrowserOpen
-                          ? "Close look browser"
-                          : `Browse all ${manifest?.luts.length ?? 27} looks`}
-                      </Button>
-                      {lookBrowserOpen && (
-                        <div className="look-panel">
-                          <div className="search">
-                            <Search size={14} aria-hidden="true" />
-                            <input
-                              id="look-search"
-                              type="search"
-                              aria-label="Look"
-                              value={lookQuery}
-                              disabled={exporting}
-                              placeholder="Search by name or camera family"
-                              onChange={(event) =>
-                                setLookQuery(event.target.value)
-                              }
-                            />
-                          </div>
-                          <Select
-                            label="Built-in V-Log look"
-                            value={lutId}
-                            onValueChange={chooseLut}
-                            options={selectOptions}
-                            disabled={exporting}
-                          />
-                        </div>
-                      )}
-                      <details className="help">
-                        <summary>How built-in looks work</summary>
-                        <p>
-                          RAW Alchemy converts camera color to V-Gamut and
-                          V-Log, then applies the selected display transform.
-                          Compare the result before export because each look
-                          responds differently to exposure and color.
-                        </p>
-                      </details>
-                    </div>
-                  </div>
-
-                  <div className="field exposure">
-                    <div className="field-row">
-                      <label htmlFor="exposure">Exposure</label>
-                      <label className="exposure-value">
-                        <input
-                          ref={exposureInput}
-                          aria-label="Exposure value"
-                          type="number"
-                          min="-4"
-                          max="4"
-                          step="0.1"
-                          defaultValue={ev}
-                          disabled={exporting}
-                          onChange={(event) => {
-                            const value = event.currentTarget.valueAsNumber;
-                            if (Number.isFinite(value)) {
-                              setExposure(value);
-                            }
-                          }}
-                          onBlur={(event) => {
-                            event.currentTarget.value = String(ev);
-                          }}
-                        />
-                        <span>EV</span>
-                      </label>
-                    </div>
-                    <input
-                      ref={exposureRange}
-                      id="exposure"
-                      type="range"
-                      min="-4"
-                      max="4"
-                      step="0.1"
-                      defaultValue={ev}
-                      aria-valuetext={`${ev} EV`}
-                      disabled={exporting}
-                      style={
-                        {
-                          "--range-progress": `${((ev + 4) / 8) * 100}%`,
-                        } as CSSProperties
-                      }
-                      onInput={(event) =>
-                        scheduleExposurePreview(event.currentTarget)
-                      }
-                      onChange={(event) =>
-                        scheduleExposurePreview(event.currentTarget)
-                      }
-                    />
-                    <div className="exposure-ticks" aria-hidden="true">
-                      {Array.from({ length: 9 }, (_, index) => (
-                        <span key={index} />
-                      ))}
-                    </div>
-                    <div className="exposure-scale" aria-hidden="true">
-                      <span>−4</span>
-                      <span>0</span>
-                      <span>+4</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="inspector-section" aria-label="Export controls">
-                  <div className="section-heading">
-                    <div>
-                      <span className="section-title">Output</span>
-                      <p className="section-subtitle">
-                        16-bit uncompressed TIFF
-                      </p>
-                    </div>
-                  </div>
-                  <dl className="details">
-                    <div>
-                      <dt>Camera</dt>
-                      <dd>{selected.camera || "—"}</dd>
-                    </div>
-                    <div>
-                      <dt>Size</dt>
-                      <dd>{selected.dimensions || "—"}</dd>
-                    </div>
-                    <div>
-                      <dt>Look</dt>
-                      <dd>{selectedLut.name}</dd>
-                    </div>
-                  </dl>
-                  <details className="assumption">
-                    <summary>
-                      Verify color space in your destination editor
-                    </summary>
-                    <p>
-                      This look does not declare an output color space, so
-                      another editor may interpret the TIFF differently. Check
-                      the result in your destination editor before production
-                      use.
-                    </p>
-                    <p>
-                      <strong>Why?</strong> The browser preview displays the LUT
-                      values as sRGB. The exported TIFF intentionally has no
-                      embedded profile rather than claiming one the source LUT
-                      does not provide.
-                    </p>
-                  </details>
-                  <div className="export-status" aria-live="polite">
-                    {selected.status === "export-error" ? (
-                      <span className="export-error-text" role="alert">
-                        {selected.error}
+                        <LoaderCircle size={12} aria-hidden="true" />
+                        Processing
                       </span>
-                    ) : exportProgress ? (
-                      <strong>
-                        Exporting {exportProgress.current} of{" "}
-                        {exportProgress.total}
-                        <span> · {exportProgress.fileName}</span>
-                      </strong>
-                    ) : exportSummary ? (
-                      <span>{exportSummary}</span>
-                    ) : (
-                      <span>Full-resolution processing starts on export.</span>
                     )}
-                  </div>
-                  {exporting && exportProgress && exportProgress.total > 1 ? (
                     <Button
+                      size="icon"
                       variant="quiet"
-                      disabled={exportProgress.stopRequested}
-                      onClick={() => {
-                        stopAfterCurrent.current = true;
-                        setExportProgress((current) =>
-                          current
-                            ? { ...current, stopRequested: true }
-                            : current,
-                        );
-                      }}
+                      aria-label="Reset exposure"
+                      onClick={() => setExposure(0)}
+                      disabled={exporting || ev === 0 || !active}
                     >
-                      <CircleStop size={16} aria-hidden="true" />
-                      {exportProgress.stopRequested
-                        ? "Stopping after current…"
-                        : "Stop after current"}
+                      <RotateCcw size={15} aria-hidden="true" />
                     </Button>
-                  ) : (
-                    <Button
-                      variant={items.length > 1 ? "secondary" : "primary"}
-                      onClick={() => void exportItems([selected])}
-                      disabled={
-                        isDecodeFailure(selected) ||
-                        exporting ||
-                        !canStartExport
-                      }
-                    >
-                      <ImageDown size={16} aria-hidden="true" /> Export selected
-                    </Button>
-                  )}
+                  </div>
                 </div>
-              </section>
-            )}
-
-            <section
-              className="canvas"
-              aria-label="Base and LUT comparison"
-              aria-busy={selected ? isPreviewProcessing : undefined}
-              data-decode-count={preview?.decodeCount}
-            >
-              <div className="canvas-bar">
-                <div
-                  className="canvas-meta"
-                  aria-label="Current document"
-                  aria-live="polite"
-                >
-                  {selected ? (
-                    <>
-                      <span className="canvas-name">{selected.file.name}</span>
-                      {selected.dimensions && (
-                        <span className="canvas-dims">
-                          {selected.dimensions}
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    <span className="canvas-label">Local RAW processing</span>
-                  )}
-                </div>
-                <div className="canvas-controls">
-                  {selected && (
-                    <>
-                      <div
-                        className="canvas-switch mobile-only"
-                        aria-label="Mobile comparison view"
-                      >
-                        <button
-                          type="button"
-                          aria-pressed={mobilePreview === "base"}
-                          onClick={() => setMobilePreview("base")}
-                        >
-                          Base
-                        </button>
-                        <button
-                          type="button"
-                          aria-pressed={mobilePreview === "look"}
-                          onClick={() => setMobilePreview("look")}
-                        >
-                          Look
-                        </button>
-                      </div>
-                      <div className="canvas-switch" aria-label="Preview zoom">
-                        <button
-                          type="button"
-                          aria-pressed={previewView === "fit"}
-                          title="Fit preview (F)"
-                          onClick={() => setPreviewView("fit")}
-                        >
-                          Fit
-                        </button>
-                        <button
-                          type="button"
-                          aria-label="Preview 1:1"
-                          aria-pressed={previewView === "actual"}
-                          title="1:1 pixels (1)"
-                          onClick={() => setPreviewView("actual")}
-                        >
-                          1:1
-                        </button>
-                      </div>
-                      <span className="canvas-status">
-                        {isPreviewProcessing
-                          ? "Processing"
-                          : STATUS_LABELS[selected.status]}
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div className="notices">
-                {manifestError && (
-                  <div className="notice notice-error" role="alert">
-                    <span>{manifestError}</span>
-                    <Button
-                      variant="secondary"
-                      onClick={() => location.reload()}
-                    >
-                      Reload
-                    </Button>
-                  </div>
-                )}
-                {globalError && (
-                  <div className="notice notice-error" role="alert">
-                    <span>{globalError}</span>
-                    <div className="notice-actions">
-                      {selected && isDecodeFailure(selected) && (
-                        <>
-                          <Button
-                            variant="secondary"
-                            onClick={() => removeItem(selected.id)}
-                          >
-                            Remove file
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            onClick={() => fileInput.current?.click()}
-                          >
-                            Choose another RAW
-                          </Button>
-                        </>
-                      )}
-                      <Button
-                        size="icon"
-                        variant="quiet"
-                        aria-label="Dismiss error"
-                        onClick={() => setGlobalError(undefined)}
-                      >
-                        <X size={17} />
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                {queueUndo && (
-                  <div className="notice notice-undo" role="status">
-                    <span>{queueUndo.message}</span>
-                    <div className="notice-actions">
-                      <Button variant="secondary" onClick={restoreQueue}>
-                        Undo
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="quiet"
-                        aria-label="Dismiss undo"
-                        onClick={() => setQueueUndo(undefined)}
-                      >
-                        <X size={17} />
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="canvas-viewport">
-                {!selected ? (
-                  <div className="state">
-                    <div className="state-icon">
-                      <FileImage size={28} />
-                    </div>
-                    <h2 className="state-title">Start with a camera RAW</h2>
-                    <p className="state-copy">
-                      Compare a neutral rendering with a curated look, then
-                      export a 16-bit TIFF. Everything stays in this browser.
-                    </p>
-                    <Button onClick={() => fileInput.current?.click()}>
-                      <FolderOpen size={17} aria-hidden="true" /> Choose RAW
-                      files
-                    </Button>
-                    <span className="state-detail">
-                      Multiple files supported · sequential local export
-                    </span>
-                  </div>
-                ) : !selectedLut ? (
-                  <div className="state" role="status">
-                    <div className="state-icon">
-                      <FileImage size={28} aria-hidden="true" />
-                    </div>
-                    <h2 className="state-title">
-                      {manifestError
-                        ? "Built-in looks unavailable"
-                        : "Loading looks…"}
-                    </h2>
-                    <p className="state-copy">
-                      {manifestError
-                        ? "Reload after the application assets are available. This RAW has not been decoded."
-                        : "The selected RAW will be decoded when its processing assets are ready."}
-                    </p>
-                  </div>
-                ) : isDecodeFailure(selected) ? (
-                  <div className="state">
-                    <div className="state-icon">
-                      <FileImage size={28} aria-hidden="true" />
-                    </div>
-                    <h2 className="state-title">Preview unavailable</h2>
-                    <p className="state-copy">
-                      Remove this file or choose another RAW to continue. Other
-                      ready files can still be exported.
-                    </p>
-                  </div>
-                ) : !preview && cameraPreview?.fileId === selected.id ? (
-                  <figure className="camera-frame">
-                    <figcaption>
-                      <strong>Camera preview</strong>
-                      <span>Embedded JPEG · color not processed</span>
-                    </figcaption>
-                    <div className="camera-frame-image">
-                      <img
-                        src={cameraPreview.url}
-                        alt="Embedded camera preview"
+                <div className="expo">
+                  <div className="expo__row">
+                    <label className="expo__label" htmlFor="exposure">
+                      {selectedIds.size > 1
+                        ? `EV · ${selectedIds.size} photos${mixedEv ? " · mixed" : ""}`
+                        : "EV"}
+                    </label>
+                    <label className="expo__value">
+                      <input
+                        ref={exposureInput}
+                        aria-label="Exposure value"
+                        type="number"
+                        min="-4"
+                        max="4"
+                        step="0.1"
+                        defaultValue={ev}
+                        disabled={exporting || !active}
+                        onChange={(event) => {
+                          const value = event.currentTarget.valueAsNumber;
+                          if (Number.isFinite(value)) setExposure(value);
+                        }}
+                        onBlur={(event) => {
+                          event.currentTarget.value = String(ev);
+                        }}
                       />
-                    </div>
-                  </figure>
-                ) : (
-                  <div
-                    ref={previewGrid}
-                    className={`panes mobile-show-${mobilePreview} ${selected.status === "decoding" ? "is-loading" : ""} ${
-                      preview?.base?.width &&
-                      preview?.base?.height &&
-                      preview.base.width > preview.base.height
-                        ? "panes-stacked"
-                        : ""
-                    }`}
-                  >
-                    <PreviewCanvas
-                      label="Base"
-                      detail="Neutral tone map · sRGB"
-                      pixels={preview?.base?.pixels}
-                      width={preview?.base?.width}
-                      height={preview?.base?.height}
-                      viewMode={previewView}
-                      focus={previewFocus.current}
-                      getFocus={getPreviewFocus}
-                      onFocusChange={updatePreviewFocus}
-                    />
-                    <PreviewCanvas
-                      label={selectedLut?.name || "LUT"}
-                      detail="V-Gamut · V-Log · LUT"
-                      pixels={preview?.lut?.pixels}
-                      width={preview?.lut?.width}
-                      height={preview?.lut?.height}
-                      viewMode={previewView}
-                      focus={previewFocus.current}
-                      getFocus={getPreviewFocus}
-                      onFocusChange={updatePreviewFocus}
-                    />
-                    {selected.status === "decoding" && (
-                      <div className="pane-loading" role="status">
-                        Decoding preview…
-                      </div>
-                    )}
+                      <span>EV</span>
+                    </label>
                   </div>
+                  <input
+                    ref={exposureRange}
+                    id="exposure"
+                    type="range"
+                    aria-label="Exposure"
+                    min="-4"
+                    max="4"
+                    step="0.1"
+                    defaultValue={ev}
+                    aria-valuetext={`${ev} EV`}
+                    disabled={exporting || !active}
+                    style={
+                      {
+                        "--range-progress": `${((ev + 4) / 8) * 100}%`,
+                      } as CSSProperties
+                    }
+                    onInput={(event) =>
+                      scheduleExposurePreview(event.currentTarget)
+                    }
+                    onChange={(event) =>
+                      scheduleExposurePreview(event.currentTarget)
+                    }
+                  />
+                  <div className="expo__ticks" aria-hidden="true">
+                    {Array.from({ length: 9 }, (_, index) => (
+                      <span key={index} />
+                    ))}
+                  </div>
+                  <div className="expo__scale" aria-hidden="true">
+                    <span>−4</span>
+                    <span>0</span>
+                    <span>+4</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="panel panel--looks">
+                <div className="panel__head">
+                  <span className="panel__title">
+                    Looks{manifest ? ` · ${manifest.luts.length}` : ""}
+                  </span>
+                </div>
+                {manifest ? (
+                  <LookPanel
+                    looks={stripLooks}
+                    activeId={lutId}
+                    onChoose={chooseLut}
+                    thumbs={thumbs}
+                    query={lookQuery}
+                    onQuery={setLookQuery}
+                    disabled={exporting || !active}
+                  />
+                ) : (
+                  <p className="export-note">
+                    {manifestError ?? "Loading built-in looks…"}
+                  </p>
                 )}
               </div>
-            </section>
-          </div>
-        </main>
+
+              <div className="panel" aria-label="Output">
+                <div className="panel__head">
+                  <span className="panel__title">Output</span>
+                </div>
+                <dl className="spec">
+                  <div>
+                    <dt>Camera</dt>
+                    <dd>{active?.camera || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Size</dt>
+                    <dd>{active?.dimensions || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Format</dt>
+                    <dd>16-bit TIFF</dd>
+                  </div>
+                </dl>
+                <details className="disclose">
+                  <summary>
+                    <TriangleAlert size={14} aria-hidden="true" />
+                    Unverified color
+                  </summary>
+                  <div className="disclose__body">
+                    <p>
+                      Built-in looks do not declare an output color space, so
+                      another editor may interpret the TIFF differently. Check
+                      the result before production use.
+                    </p>
+                    <p>
+                      The preview shows the LUT values as sRGB. The exported
+                      TIFF intentionally carries no embedded profile rather than
+                      claiming one the source LUT does not provide.
+                    </p>
+                  </div>
+                </details>
+                <div className="export-note" aria-live="polite">
+                  {exportProgress ? (
+                    <>
+                      <strong>
+                        {exportProgress.current} / {exportProgress.total}
+                      </strong>{" "}
+                      {exportProgress.fileName}
+                    </>
+                  ) : exportSummary ? (
+                    exportSummary
+                  ) : active?.status === "export-error" ? (
+                    <span className="export-note--error">{active.error}</span>
+                  ) : (
+                    "Full-resolution processing starts on export."
+                  )}
+                </div>
+                {exporting && exportProgress && exportProgress.total > 1 ? (
+                  <Button
+                    size="block"
+                    variant="secondary"
+                    disabled={exportProgress.stopRequested}
+                    onClick={() => {
+                      stopAfterCurrent.current = true;
+                      setExportProgress((current) =>
+                        current ? { ...current, stopRequested: true } : current,
+                      );
+                    }}
+                  >
+                    {exportProgress.stopRequested
+                      ? "Stopping…"
+                      : "Stop after current"}
+                  </Button>
+                ) : (
+                  <Button
+                    size="block"
+                    variant="primary"
+                    onClick={() => void exportSelected()}
+                    disabled={!canExport}
+                  >
+                    <ImageDown size={16} aria-hidden="true" />
+                    {eligibleSelected.length > 1
+                      ? `Export ${eligibleSelected.length} photos`
+                      : "Export photo"}
+                  </Button>
+                )}
+              </div>
+            </aside>
+          </>
+        )}
       </div>
+
+      <div
+        className="splitter splitter--h"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize filmstrip"
+        aria-valuenow={Math.round(stripHeight)}
+        aria-valuemin={STRIP_MIN}
+        aria-valuemax={STRIP_MAX}
+        tabIndex={0}
+        onPointerDown={startStripResize}
+        onKeyDown={onStripResizeKey}
+      />
+
+      <div className="filmstrip-wrap">
+        <Filmstrip
+          items={items}
+          activeId={activeId}
+          selectedIds={selectedIds}
+          exporting={exporting}
+          onSelect={selectPhoto}
+          onRemove={removeItem}
+          onAdd={() => fileInput.current?.click()}
+        />
+      </div>
+
+      <div className="toasts">
+        {manifestError && (
+          <div className="toast toast--error" role="alert">
+            <span className="toast__body">{manifestError}</span>
+            <div className="toast__actions">
+              <Button variant="secondary" onClick={() => location.reload()}>
+                Reload
+              </Button>
+            </div>
+          </div>
+        )}
+        {globalError && (
+          <div className="toast toast--error" role="alert">
+            <span className="toast__body">{globalError}</span>
+            <div className="toast__actions">
+              {active && isDecodeFailure(active) && (
+                <Button
+                  variant="secondary"
+                  onClick={() => removeItem(active.id)}
+                >
+                  Remove file
+                </Button>
+              )}
+              <Button
+                size="icon"
+                variant="quiet"
+                aria-label="Dismiss error"
+                onClick={() => setGlobalError(undefined)}
+              >
+                <X size={17} />
+              </Button>
+            </div>
+          </div>
+        )}
+        {queueUndo && (
+          <div className="toast" role="status">
+            <span className="toast__body">{queueUndo.message}</span>
+            <div className="toast__actions">
+              <Button variant="secondary" onClick={restoreQueue}>
+                Undo
+              </Button>
+              <Button
+                size="icon"
+                variant="quiet"
+                aria-label="Dismiss undo"
+                onClick={() => setQueueUndo(undefined)}
+              >
+                <X size={17} />
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <input
+        ref={fileInput}
+        className="sr-only"
+        tabIndex={-1}
+        type="file"
+        accept={RAW_ACCEPT}
+        multiple
+        disabled={exporting}
+        onChange={onFileInput}
+      />
     </div>
   );
 }

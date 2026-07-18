@@ -9,6 +9,20 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import App from "../src/App";
 
+const MANIFEST = {
+  version: 1,
+  contract: { outputStatus: "unverified" },
+  luts: [
+    {
+      id: "fuji-classic-negative",
+      group: "Fujifilm",
+      name: "Classic Negative",
+      file: "look.cube",
+      sha256: "00",
+    },
+  ],
+};
+
 afterEach(() => {
   cleanup();
   localStorage.clear();
@@ -18,33 +32,21 @@ afterEach(() => {
 
 test("teaches the private local workflow before files are selected", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(
-      JSON.stringify({
-        version: 1,
-        contract: { outputStatus: "unverified" },
-        luts: [
-          {
-            id: "fuji-classic-negative",
-            group: "Fujifilm",
-            name: "Classic Negative",
-            file: "look.cube",
-            sha256: "00",
-          },
-        ],
-      }),
-      { status: 200 },
-    ),
+    new Response(JSON.stringify(MANIFEST), { status: 200 }),
   );
 
   render(<App />);
   expect(
     screen.getByRole("heading", { name: "Start with a camera RAW" }),
   ).toBeVisible();
-  expect(screen.getByText("Files stay on this device")).toBeVisible();
-  expect(screen.getByRole("button", { name: "Add RAW files" })).toBeEnabled();
   expect(
-    screen.queryByRole("region", { name: "Processing controls" }),
-  ).not.toBeInTheDocument();
+    screen.getAllByText("Files stay on this device").length,
+  ).toBeGreaterThan(0);
+  expect(screen.getByRole("button", { name: "Add RAW files" })).toBeEnabled();
+  // The adjustment rail stays hidden until a photo is selected — no controls
+  // hovering over an empty canvas.
+  expect(screen.queryByRole("slider", { name: "Exposure" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Export photo" })).toBeNull();
 });
 
 test("switches and persists the workspace theme", () => {
@@ -64,22 +66,7 @@ test("switches and persists the workspace theme", () => {
 test("ignores malformed recent-look preferences", async () => {
   localStorage.setItem("raw-alchemy-recent-luts", JSON.stringify({}));
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(
-      JSON.stringify({
-        version: 1,
-        contract: { outputStatus: "unverified" },
-        luts: [
-          {
-            id: "fuji-classic-negative",
-            group: "Fujifilm",
-            name: "Classic Negative",
-            file: "look.cube",
-            sha256: "00",
-          },
-        ],
-      }),
-      { status: 200 },
-    ),
+    new Response(JSON.stringify(MANIFEST), { status: 200 }),
   );
 
   render(<App />);
@@ -95,19 +82,20 @@ test("deduplicates one input batch and accepts drops after the queue is populate
 
   const { container } = render(<App />);
   const input = container.querySelector('input[type="file"]');
+  const app = container.querySelector(".app");
   expect(input).not.toBeNull();
+  expect(app).not.toBeNull();
+
   const first = new File(["first"], "first.dng", { lastModified: 1 });
   fireEvent.change(input!, { target: { files: [first, first] } });
-  expect(screen.getByText("1 local file")).toBeVisible();
+  expect(screen.getByText("1 photo")).toBeInTheDocument();
 
   const second = new File(["second"], "second.dng", { lastModified: 2 });
-  fireEvent.drop(screen.getByLabelText("RAW queue"), {
-    dataTransfer: { files: [second] },
-  });
-  expect(screen.getByText("2 local files")).toBeVisible();
+  fireEvent.drop(app!, { dataTransfer: { files: [second] } });
+  expect(screen.getByText("2 photos")).toBeInTheDocument();
 });
 
-test("renders only after the exposure recipe changes", async () => {
+test("renders the main preview only after the exposure recipe changes", async () => {
   type Command = {
     requestId: number;
     type: "clear" | "decode" | "render" | "export";
@@ -131,7 +119,6 @@ test("renders only after the exposure recipe changes", async () => {
       this.commands.push(command);
       if (command.type !== "decode" && command.type !== "render") return;
       if (command.type === "decode") return;
-
       this.replyPreview(command);
     }
 
@@ -184,12 +171,13 @@ test("renders only after the exposure recipe changes", async () => {
     putImageData: (image: { data: Uint8ClampedArray }) => {
       paintedRedValues.push(image.data[0]);
     },
+    drawImage: () => {},
   } as unknown as GPUCanvasContext);
+  vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:,");
   vi.stubGlobal(
     "ImageData",
     class {
       readonly data: Uint8ClampedArray;
-
       constructor(data: Uint8ClampedArray) {
         this.data = data;
       }
@@ -197,23 +185,15 @@ test("renders only after the exposure recipe changes", async () => {
   );
   vi.stubGlobal("Worker", RecipeWorker);
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(
-      JSON.stringify({
-        version: 1,
-        contract: { outputStatus: "unverified" },
-        luts: [
-          {
-            id: "fuji-classic-negative",
-            group: "Fujifilm",
-            name: "Classic Negative",
-            file: "look.cube",
-            sha256: "00",
-          },
-        ],
-      }),
-      { status: 200 },
-    ),
+    new Response(JSON.stringify(MANIFEST), { status: 200 }),
   );
+
+  // Only the settled full-detail comparison uses maxEdge 1024; the look
+  // filmstrip renders separate small thumbnails, which we exclude here.
+  const mainRenders = () =>
+    RecipeWorker.instance.commands.filter(
+      ({ type, maxEdge }) => type === "render" && maxEdge === 1024,
+    );
 
   const { container } = render(<App />);
   const raw = new File(["raw"], "photo.dng");
@@ -224,9 +204,14 @@ test("renders only after the exposure recipe changes", async () => {
     target: { files: [raw] },
   });
   const exportButton = await screen.findByRole("button", {
-    name: "Export selected",
+    name: "Export photo",
   });
   expect(exportButton).toBeDisabled();
+  await waitFor(() =>
+    expect(
+      RecipeWorker.instance.commands.some(({ type }) => type === "decode"),
+    ).toBe(true),
+  );
   RecipeWorker.instance.replyToDecode();
   await waitFor(() =>
     expect(screen.getByLabelText("Base preview")).toBeVisible(),
@@ -234,18 +219,14 @@ test("renders only after the exposure recipe changes", async () => {
   expect(exportButton).toBeEnabled();
 
   await new Promise((resolve) => window.setTimeout(resolve, 260));
-  expect(
-    RecipeWorker.instance.commands.filter(({ type }) => type === "render"),
-  ).toEqual([]);
+  expect(mainRenders()).toEqual([]);
 
   fireEvent.change(screen.getByRole("slider", { name: "Exposure" }), {
     target: { value: "1" },
   });
   expect(exportButton).toBeDisabled();
   await waitFor(() =>
-    expect(
-      RecipeWorker.instance.commands.filter(({ type }) => type === "render"),
-    ).toEqual([
+    expect(mainRenders()).toEqual([
       expect.objectContaining({
         type: "render",
         ev: 1,

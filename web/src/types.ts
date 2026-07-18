@@ -11,9 +11,15 @@ export interface QueueItem {
   id: string;
   file: File;
   status: QueueStatus;
+  /** Exposure compensation applied to this photo, in EV. */
+  ev: number;
+  /** Selected built-in look for this photo. */
+  lutId: string;
   camera?: string;
   dimensions?: string;
   error?: string;
+  /** Filmstrip thumbnail (a small JPEG data URL) built from the base preview. */
+  thumbUrl?: string;
 }
 
 export interface LutDefinition {

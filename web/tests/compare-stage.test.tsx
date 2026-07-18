@@ -1,14 +1,14 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { PreviewCanvas } from "../src/components/preview-canvas";
+import { CompareStage } from "../src/components/compare-stage";
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
-test("renders the transferred RGBA buffer without another complete copy", async () => {
+test("paints the transferred base buffer without another complete copy", async () => {
   const pixels = new Uint8Array(new ArrayBuffer(4));
   let imagePixels: Uint8ClampedArray<ArrayBuffer> | undefined;
   const putImageData = vi.fn();
@@ -28,12 +28,10 @@ test("renders the transferred RGBA buffer without another complete copy", async 
   );
 
   render(
-    <PreviewCanvas
-      label="Base"
-      detail="Neutral"
-      pixels={pixels}
-      width={1}
-      height={1}
+    <CompareStage
+      base={{ pixels, width: 1, height: 1 }}
+      lookLabel="Classic Negative"
+      mode="wipe"
     />,
   );
 
@@ -42,7 +40,7 @@ test("renders the transferred RGBA buffer without another complete copy", async 
   expect(imagePixels?.buffer).toBe(pixels.buffer);
 });
 
-test("positions preview pixels around a shared normalized inspection focus", async () => {
+test("labels and sizes the look layer in split mode", async () => {
   vi.spyOn(
     HTMLCanvasElement.prototype as unknown as {
       getContext(contextId: "2d"): CanvasRenderingContext2D | null;
@@ -54,22 +52,14 @@ test("positions preview pixels around a shared normalized inspection focus", asy
   vi.stubGlobal("ImageData", class {});
 
   render(
-    <PreviewCanvas
-      label="Look"
-      detail="Selected look"
-      pixels={new Uint8Array(4)}
-      width={1_024}
-      height={683}
-      viewMode="actual"
-      focus={{ x: 0.25, y: 0.75 }}
+    <CompareStage
+      look={{ pixels: new Uint8Array(4), width: 1_024, height: 683 }}
+      lookLabel="PROVIA"
+      mode="split"
     />,
   );
 
-  const canvas = await screen.findByRole("img", { name: "Look preview" });
-  expect(canvas).toHaveStyle({
-    width: "1024px",
-    height: "683px",
-    left: "calc(50% + 256px)",
-    top: "calc(50% + -170.75px)",
-  });
+  const canvas = await screen.findByRole("img", { name: "PROVIA preview" });
+  expect(canvas).toHaveAttribute("width", "1024");
+  expect(canvas).toHaveAttribute("height", "683");
 });
