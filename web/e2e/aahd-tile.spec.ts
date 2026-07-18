@@ -5,7 +5,7 @@ test("tiled AAHD matches full-frame math across seams and CFA phases", async ({
 }) => {
   test.skip(
     process.env.AAHD_TILE_E2E !== "1",
-    "Set AAHD_TILE_E2E=1 on a hardware WebGPU runner.",
+    "Set AAHD_TILE_E2E=1 to run the WebGPU correctness suite.",
   );
   test.setTimeout(2 * 60_000);
   await page.goto("/?aahdTileBenchmark=1");

@@ -8,4 +8,4 @@
 - A Leica DNG without camera white balance matches LibRaw auto white balance.
 - The pinned X-Trans Fujifilm RAW uses LibRaw demosaic plus WebGPU color and matches native output.
 - The production bundle contains no benchmark entry, ONNX Runtime, ONNX model, or native RCD asset.
-- Pages deployment waits for the real T4 hardware job, and the instance is stopped after success or failure.
+- Pages deployment waits for production browser tests and exact tiled AAHD correctness checks on SwiftShader WebGPU.

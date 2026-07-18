@@ -18,11 +18,14 @@ and the abandoned native RCD backend are absent.
 ## Verification
 
 Software WebGPU covers portable browser behavior. Main-branch publication is
-gated by an NVIDIA T4 job started through GitHub OIDC and AWS Systems Manager.
-The job runs Preview, repeated Export, camera-matrix, white-balance, and native
-CLI alignment tests, then stops the instance in an unconditional cleanup step.
+gated by the production browser suite and the tiled AAHD correctness suite on
+Chromium's SwiftShader WebGPU implementation. The latter compares tiled and
+full-frame output exactly across CFA phases, tile seams, edge shapes, and
+unequal black levels. CI has no cloud-provider credentials or external runner
+trust relationship.
 
-The T4 is the current automated hardware baseline. Cross-vendor Intel, AMD, and
-Apple hardware remains required before claiming those devices as verified; the
-suite is portable and can be attached to additional runners without changing
-product code.
+Software WebGPU is a deterministic correctness gate, not evidence of hardware
+performance or driver compatibility. Hardware performance measurements and
+camera-matrix validation remain explicit, manually invoked checks. Intel, AMD,
+NVIDIA, and Apple hardware must be measured independently before making claims
+about those devices.
