@@ -21,7 +21,7 @@ test("tiled AAHD streams repeated aligned RGB16 exports", async ({
     process.env.AAHD_EXPORT_E2E !== "1",
     "Set AAHD_EXPORT_E2E=1 on a hardware WebGPU runner.",
   );
-  test.setTimeout(5 * 60_000);
+  test.setTimeout((process.env.WEBGPU_SOFTWARE === "1" ? 12 : 5) * 60_000);
   const nativeOutput = testInfo.outputPath("sony-native.tif");
   await nativeExport(fixture, nativeOutput);
   await page.goto("/");
