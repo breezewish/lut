@@ -10,6 +10,7 @@ interface TiffComparison {
   maxCodeDifference: number;
   differingSamples: number;
   samplesOverTwoCodes: number;
+  samplesOverSixCodes: number;
   maximumDifferenceSample: number;
   actualAtMaximum: number;
   expectedAtMaximum: number;
@@ -64,6 +65,7 @@ export function compareRgb16Tiffs(
   let maxCodeDifference = 0;
   let differingSamples = 0;
   let samplesOverTwoCodes = 0;
+  let samplesOverSixCodes = 0;
   let maximumDifferenceSample = 0;
   let actualAtMaximum = 0;
   let expectedAtMaximum = 0;
@@ -82,6 +84,7 @@ export function compareRgb16Tiffs(
       absoluteDifference += difference;
       if (difference !== 0) differingSamples += 1;
       if (difference > 2) samplesOverTwoCodes += 1;
+      if (difference > 6) samplesOverSixCodes += 1;
       if (difference > maxCodeDifference) {
         maxCodeDifference = difference;
         maximumDifferenceSample = (comparedBytes + offset) / 2;
@@ -100,6 +103,7 @@ export function compareRgb16Tiffs(
     maxCodeDifference,
     differingSamples,
     samplesOverTwoCodes,
+    samplesOverSixCodes,
     maximumDifferenceSample,
     actualAtMaximum,
     expectedAtMaximum,

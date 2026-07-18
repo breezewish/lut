@@ -45,22 +45,41 @@ export class RenderedTiffStream {
 
   write(pixels: Uint16Array): void {
     if (this.consumed) throw new Error("TIFF stream is already finished.");
-    const available = new Uint16Array(this.pending.length + pixels.length);
-    available.set(this.pending);
-    available.set(pixels, this.pending.length);
     let offset = 0;
     for (;;) {
       const requested = this.encoder.next_strip_samples();
-      if (requested === 0 || requested > available.length - offset) break;
+      if (requested === 0) break;
+      let strip: Uint16Array;
+      if (this.pending.length > 0) {
+        const needed = requested - this.pending.length;
+        if (needed > pixels.length - offset) {
+          const pending = new Uint16Array(
+            this.pending.length + pixels.length - offset,
+          );
+          pending.set(this.pending);
+          pending.set(pixels.subarray(offset), this.pending.length);
+          this.pending = pending;
+          return;
+        }
+        strip = new Uint16Array(requested);
+        strip.set(this.pending);
+        strip.set(
+          pixels.subarray(offset, offset + needed),
+          this.pending.length,
+        );
+        this.pending = new Uint16Array(0);
+        offset += needed;
+      } else {
+        if (requested > pixels.length - offset) break;
+        strip = pixels.subarray(offset, offset + requested);
+        offset += requested;
+      }
       const startedAt = performance.now();
-      this.encoder.write_rendered_strip(
-        available.subarray(offset, offset + requested),
-      );
+      this.encoder.write_rendered_strip(strip);
       this.tiffEncodingMs += performance.now() - startedAt;
-      offset += requested;
       this.sampleCount += requested;
     }
-    this.pending = available.slice(offset);
+    this.pending = pixels.slice(offset);
   }
 
   finish(expectedSamples: number): RenderedTiff {

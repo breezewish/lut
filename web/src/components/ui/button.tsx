@@ -1,7 +1,5 @@
 import type { ButtonHTMLAttributes } from "react";
 
-import { cn } from "../../lib/cn";
-
 type Variant = "primary" | "secondary" | "quiet";
 type Size = "default" | "compact" | "icon";
 
@@ -22,7 +20,7 @@ export function Button({
       type={type}
       data-variant={variant}
       data-size={size}
-      className={cn("btn", className)}
+      className={className ? `btn ${className}` : "btn"}
       {...props}
     />
   );

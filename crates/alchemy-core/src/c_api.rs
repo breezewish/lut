@@ -1,6 +1,6 @@
 use std::ffi::{c_char, c_int};
 
-use crate::{AlchemyError, ColorPipeline, Lut3d, ProcessingMode};
+use crate::{AlchemyError, ColorPipeline, Lut3d};
 
 /// Stable status values returned by the C ABI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,7 +72,7 @@ pub unsafe extern "C" fn alchemy_render_tiff_v2(
         Ok(lut) => lut,
         Err(error) => return failed(status_for(&error)),
     };
-    let pipeline = match ColorPipeline::new(ev, ProcessingMode::CorrectedV2, lut) {
+    let pipeline = match ColorPipeline::new(ev, lut) {
         Ok(pipeline) => pipeline,
         Err(error) => return failed(status_for(&error)),
     };

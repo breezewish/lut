@@ -25,26 +25,3 @@ test("creative LUT manifest is complete, unique, and tied to source bytes", asyn
     expect(createHash("sha256").update(bytes).digest("hex")).toBe(lut.sha256);
   }
 });
-
-test("legacy fixture bytes match the frozen source manifest", async () => {
-  const root = resolve(import.meta.dirname, "../..");
-  const baselineRoot = join(root, "baselines/legacy-python-v1");
-  const manifest = JSON.parse(
-    await readFile(join(baselineRoot, "manifest.json"), "utf8"),
-  );
-  const fixture = await readFile(join(baselineRoot, manifest.fixture.path));
-  const raw = await readFile(join(root, manifest.sources.raw.path));
-
-  expect(manifest.sources.rawAlchemyCommit).toBe(
-    "10d4f5bded68d75d4db87cfeeddec1e5fea297d5",
-  );
-  expect(createHash("sha256").update(raw).digest("hex")).toBe(
-    manifest.sources.raw.sha256,
-  );
-  expect(createHash("sha256").update(fixture).digest("hex")).toBe(
-    manifest.fixture.sha256,
-  );
-  expect(manifest.fixture.sha256).toBe(
-    "b203ef0103c8f4b5d5f799f8fe89b5cecfb07bbce58e228dd48932ef28b2dce4",
-  );
-});

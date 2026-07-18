@@ -217,74 +217,6 @@ impl Lut3d {
         }
     }
 
-    // The Python migration baseline performs coordinate and weight arithmetic
-    // in f64 because colour-science exposes the CUBE domain as float64. Keep
-    // this separate from the canonical f32 path so corrected-v2 stays lean.
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_precision_loss,
-        clippy::cast_sign_loss
-    )]
-    pub(crate) fn sample_legacy(&self, rgb: [f32; 3]) -> [f32; 3] {
-        let scale = (self.size - 1) as f64;
-        let position: [f64; 3] = core::array::from_fn(|axis| {
-            let normalized = (f64::from(rgb[axis]) - f64::from(self.domain_min[axis]))
-                / f64::from(self.domain_max[axis] - self.domain_min[axis]);
-            normalized.clamp(0.0, 1.0) * scale
-        });
-        let low = position.map(|value| value as usize);
-        let high = low.map(|value| (value + 1).min(self.size - 1));
-        let [r, g, b] = core::array::from_fn(|axis| position[axis] - low[axis] as f64);
-        let c000 = self.at(low[0], low[1], low[2]);
-        let c111 = self.at(high[0], high[1], high[2]);
-
-        if r >= g {
-            if g >= b {
-                weighted_sum([
-                    (c000, 1.0 - r),
-                    (self.at(high[0], low[1], low[2]), r - g),
-                    (self.at(high[0], high[1], low[2]), g - b),
-                    (c111, b),
-                ])
-            } else if r >= b {
-                weighted_sum([
-                    (c000, 1.0 - r),
-                    (self.at(high[0], low[1], low[2]), r - b),
-                    (self.at(high[0], low[1], high[2]), b - g),
-                    (c111, g),
-                ])
-            } else {
-                weighted_sum([
-                    (c000, 1.0 - b),
-                    (self.at(low[0], low[1], high[2]), b - r),
-                    (self.at(high[0], low[1], high[2]), r - g),
-                    (c111, g),
-                ])
-            }
-        } else if b >= g {
-            weighted_sum([
-                (c000, 1.0 - b),
-                (self.at(low[0], low[1], high[2]), b - g),
-                (self.at(low[0], high[1], high[2]), g - r),
-                (c111, r),
-            ])
-        } else if b >= r {
-            weighted_sum([
-                (c000, 1.0 - g),
-                (self.at(low[0], high[1], low[2]), g - b),
-                (self.at(low[0], high[1], high[2]), b - r),
-                (c111, r),
-            ])
-        } else {
-            weighted_sum([
-                (c000, 1.0 - g),
-                (self.at(low[0], high[1], low[2]), g - r),
-                (self.at(high[0], high[1], low[2]), r - b),
-                (c111, b),
-            ])
-        }
-    }
-
     fn at(&self, red: usize, green: usize, blue: usize) -> [f32; 3] {
         self.samples[blue * self.size * self.size + green * self.size + red]
     }
@@ -296,16 +228,6 @@ fn read_f32(bytes: &[u8], offset: usize) -> f32 {
 
 fn read_u32(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
-}
-
-#[allow(clippy::cast_possible_truncation)]
-fn weighted_sum(vertices: [([f32; 3], f64); 4]) -> [f32; 3] {
-    core::array::from_fn(|channel| {
-        (f64::from(vertices[0].0[channel]) * vertices[0].1
-            + f64::from(vertices[1].0[channel]) * vertices[1].1
-            + f64::from(vertices[2].0[channel]) * vertices[2].1
-            + f64::from(vertices[3].0[channel]) * vertices[3].1) as f32
-    })
 }
 
 fn combine(origin: [f32; 3], vertices: [([f32; 3], f32); 3]) -> [f32; 3] {

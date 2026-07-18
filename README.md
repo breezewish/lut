@@ -5,7 +5,7 @@ RAW Alchemy is a private, static browser color lab. It decodes camera RAW files 
 ## Product behavior
 
 - Select or drop one or many RAW files.
-- See the embedded camera JPEG first, then a color-consistent half-size preview.
+- See the embedded camera JPEG first, then a display-sized WebGPU preview.
 - Compare `Base` and `LUT` views on the same screen.
 - Choose one of 27 pinned V-Log Alchemy creative looks and adjust exposure from -4 to +4 EV.
 - Export one TIFF or a sequential batch as a ZIP.
@@ -71,13 +71,6 @@ target/c-api-smoke
 npm test
 npm run build
 npm run test:e2e
-```
-
-The frozen Python baseline is regenerated only when intentionally changing legacy migration evidence:
-
-```sh
-uv run --project baselines/legacy-python-v1 \
-  baselines/legacy-python-v1/generate.py
 ```
 
 See [docs/README.md](docs/README.md) for the product, technical, and test source of truth.

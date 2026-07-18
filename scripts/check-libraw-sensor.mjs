@@ -87,7 +87,10 @@ const module = await createLibRaw({ wasmBinary: wasmBytes });
 for (const fixture of fixtures) {
   const raw = new module.LibRaw();
   try {
-    raw.open(new Uint8Array(await readFile(fixture.path)), false);
+    raw.open(
+      new Uint8Array(await readFile(resolve(root, fixture.path))),
+      false,
+    );
     assertEqual(
       raw.supportsWebGpuAahd(),
       fixture.webGpuAahd,
@@ -198,7 +201,7 @@ for (const fixture of fixtures) {
 const linearRaw = new module.LibRaw();
 try {
   linearRaw.open(
-    new Uint8Array(await readFile("tests/fixtures/linear.dng")),
+    new Uint8Array(await readFile(resolve(root, "tests/fixtures/linear.dng"))),
     false,
   );
   assertEqual(
@@ -211,7 +214,7 @@ try {
 }
 
 const rotatedBytes = new Uint8Array(
-  await readFile("tests/fixtures/leica-m8.dng"),
+  await readFile(resolve(root, "tests/fixtures/leica-m8.dng")),
 );
 setDngOrientation(rotatedBytes, 6);
 const rotatedRaw = new module.LibRaw();
@@ -224,41 +227,6 @@ try {
   );
 } finally {
   rotatedRaw.delete();
-}
-
-const missingWhiteBalance = new Uint8Array(
-  await readFile("tests/fixtures/leica-m8.dng"),
-);
-removeDngAsShotNeutral(missingWhiteBalance);
-const missingWhiteBalanceRaw = new module.LibRaw();
-try {
-  missingWhiteBalanceRaw.openWithQuality(missingWhiteBalance, false, 12);
-  const sensor = missingWhiteBalanceRaw.sensorInfo();
-  const reference = missingWhiteBalanceRaw.aahdReferenceInfo();
-  assertArray(
-    sensor.aahdPreMultipliers,
-    reference.preMultipliers,
-    "Missing camera WB auto-balance",
-    0,
-  );
-  console.log("Missing camera WB auto-balance matches LibRaw AAHD exactly");
-} finally {
-  missingWhiteBalanceRaw.delete();
-}
-
-function removeDngAsShotNeutral(bytes) {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const littleEndian = String.fromCharCode(bytes[0], bytes[1]) === "II";
-  const ifdOffset = view.getUint32(4, littleEndian);
-  const entryCount = view.getUint16(ifdOffset, littleEndian);
-  for (let index = 0; index < entryCount; index += 1) {
-    const entryOffset = ifdOffset + 2 + index * 12;
-    if (view.getUint16(entryOffset, littleEndian) === 50_728) {
-      view.setUint16(entryOffset, 65_000, littleEndian);
-      return;
-    }
-  }
-  throw new Error("Leica fixture has no AsShotNeutral tag");
 }
 
 function setDngOrientation(bytes, orientation) {

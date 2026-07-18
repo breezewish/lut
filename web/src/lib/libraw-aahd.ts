@@ -238,10 +238,29 @@ const PARITY_INTERPOLATION_PASSES: readonly PassCommand[] = [
   { entryPoint: "convert_candidates_to_yuv_parity", padded: true },
 ];
 
+const TILED_ENTRY_POINTS: readonly EntryPoint[] = [
+  "preprocess_scale_pairs",
+  "preprocess_classify_defects",
+  "clear_tile",
+  "initialize_parity",
+  ...PARITY_INTERPOLATION_PASSES.map(({ entryPoint }) => entryPoint),
+  "evaluate_homogeneity",
+  "choose_direction",
+  "refine_checker_even",
+  "refine_checker_odd",
+  "write_direction_plane",
+  "load_tiled_direction_plane",
+  "combine",
+  "collect_highlights",
+  "apply_highlights",
+  "write_final",
+];
+
 interface Runtime {
   adapter: GPUAdapter;
   device: GPUDevice;
-  pipelines: Record<EntryPoint, GPUComputePipeline>;
+  module: GPUShaderModule;
+  pipelines: Partial<Record<EntryPoint, GPUComputePipeline>>;
 }
 
 export interface TiledAahdColor {
@@ -272,6 +291,7 @@ interface Workspace {
   coreWidth: number;
   coreHeight: number;
   resources: GPUBuffer[];
+  bindGroups: Partial<Record<EntryPoint, GPUBindGroup>>;
   readback: GPUBuffer;
   outputReadbacks?: [GPUBuffer, GPUBuffer];
 }
@@ -358,10 +378,10 @@ export async function demosaicLibRawAahdWithWgsl(
     );
     runtime.device.queue.writeBuffer(workspace.resources[8], 0, extrema);
     runtime.device.queue.writeBuffer(workspace.resources[11], 0, parameters);
-    submitPass(runtime, workspace, "clear", true);
+    submitPass(runtime, workspace, "clear", { padded: true });
     submitPass(runtime, workspace, "initialize");
     if (outputStage === "scaled") {
-      submitPass(runtime, workspace, "write_corrected", false, true);
+      submitPass(runtime, workspace, "write_corrected", { paired: true });
     }
     await runtime.device.queue.onSubmittedWorkDone();
     const scaleAndInitializeMs = performance.now() - scaleStartedAt;
@@ -395,9 +415,9 @@ export async function demosaicLibRawAahdWithWgsl(
       submitPass(runtime, workspace, "copy_corrected");
     }
     if (outputStage === "corrected") {
-      submitPass(runtime, workspace, "write_corrected", false, true);
+      submitPass(runtime, workspace, "write_corrected", { paired: true });
     } else if (outputStage === "defects") {
-      submitPass(runtime, workspace, "write_defects", false, true);
+      submitPass(runtime, workspace, "write_defects", { paired: true });
     }
     await runtime.device.queue.onSubmittedWorkDone();
     const hotPixelMs = performance.now() - hotStartedAt;
@@ -407,15 +427,27 @@ export async function demosaicLibRawAahdWithWgsl(
     submitPass(runtime, workspace, "interpolate_rb_at_green");
     submitPass(runtime, workspace, "interpolate_remaining_rb");
     if (contract === "libraw-parity") {
-      submitPass(runtime, workspace, "initialize_yuv_first_products", true);
+      submitPass(runtime, workspace, "initialize_yuv_first_products", {
+        padded: true,
+      });
       for (const component of [0, 1, 2] as const) {
-        submitPass(runtime, workspace, `store_yuv_second_${component}`, true);
-        submitPass(runtime, workspace, `add_yuv_second_${component}`, true);
-        submitPass(runtime, workspace, `store_yuv_third_${component}`, true);
-        submitPass(runtime, workspace, `finish_yuv_${component}`, true);
+        submitPass(runtime, workspace, `store_yuv_second_${component}`, {
+          padded: true,
+        });
+        submitPass(runtime, workspace, `add_yuv_second_${component}`, {
+          padded: true,
+        });
+        submitPass(runtime, workspace, `store_yuv_third_${component}`, {
+          padded: true,
+        });
+        submitPass(runtime, workspace, `finish_yuv_${component}`, {
+          padded: true,
+        });
       }
     } else {
-      submitPass(runtime, workspace, "convert_candidates_to_yuv", true);
+      submitPass(runtime, workspace, "convert_candidates_to_yuv", {
+        padded: true,
+      });
     }
     await runtime.device.queue.onSubmittedWorkDone();
     const interpolateMs = performance.now() - interpolateStartedAt;
@@ -423,19 +455,17 @@ export async function demosaicLibRawAahdWithWgsl(
     const homogeneityStartedAt = performance.now();
     submitPass(runtime, workspace, "evaluate_homogeneity");
     if (outputStage === "horizontal-homogeneity") {
-      submitPass(
-        runtime,
-        workspace,
-        "write_horizontal_homogeneity",
-        false,
-        true,
-      );
+      submitPass(runtime, workspace, "write_horizontal_homogeneity", {
+        paired: true,
+      });
     } else if (outputStage === "vertical-homogeneity") {
-      submitPass(runtime, workspace, "write_vertical_homogeneity", false, true);
+      submitPass(runtime, workspace, "write_vertical_homogeneity", {
+        paired: true,
+      });
     }
     submitPass(runtime, workspace, "choose_direction");
     if (outputStage === "chosen-directions") {
-      submitPass(runtime, workspace, "write_directions", false, true);
+      submitPass(runtime, workspace, "write_directions", { paired: true });
     }
     await runtime.device.queue.onSubmittedWorkDone();
     const homogeneityMs = performance.now() - homogeneityStartedAt;
@@ -454,7 +484,7 @@ export async function demosaicLibRawAahdWithWgsl(
     let serialDirectionMs = 0;
     let candidateDirections: Uint32Array | undefined;
     if (outputStage === "candidate-directions") {
-      submitPass(runtime, workspace, "write_directions", false, true);
+      submitPass(runtime, workspace, "write_directions", { paired: true });
       await runtime.device.queue.onSubmittedWorkDone();
       const encoder = runtime.device.createCommandEncoder();
       encoder.copyBufferToBuffer(
@@ -482,7 +512,9 @@ export async function demosaicLibRawAahdWithWgsl(
       }
     }
     if (contract === "libraw-parity" && !stopsBeforeRefinement) {
-      submitPass(runtime, workspace, "write_direction_plane", false, true);
+      submitPass(runtime, workspace, "write_direction_plane", {
+        paired: true,
+      });
       await runtime.device.queue.onSubmittedWorkDone();
       const encoder = runtime.device.createCommandEncoder();
       encoder.copyBufferToBuffer(
@@ -519,9 +551,9 @@ export async function demosaicLibRawAahdWithWgsl(
       submitPass(runtime, workspace, "copy_refined_directions");
     }
     if (outputStage === "horizontal-yuv") {
-      submitPass(runtime, workspace, "write_horizontal_yuv", false, true);
+      submitPass(runtime, workspace, "write_horizontal_yuv", { paired: true });
     } else if (outputStage === "vertical-yuv") {
-      submitPass(runtime, workspace, "write_vertical_yuv", false, true);
+      submitPass(runtime, workspace, "write_vertical_yuv", { paired: true });
     } else if (
       outputStage === "scaled" ||
       outputStage === "corrected" ||
@@ -529,16 +561,16 @@ export async function demosaicLibRawAahdWithWgsl(
     ) {
       // The requested preprocessing boundary was packed before interpolation.
     } else if (outputStage === "horizontal") {
-      submitPass(runtime, workspace, "write_horizontal", false, true);
+      submitPass(runtime, workspace, "write_horizontal", { paired: true });
     } else if (outputStage === "vertical") {
-      submitPass(runtime, workspace, "write_vertical", false, true);
+      submitPass(runtime, workspace, "write_vertical", { paired: true });
     } else if (stopsBeforeRefinement) {
       // The requested diagnostic was packed before refinement.
     } else if (
       outputStage === "directions" ||
       outputStage === "candidate-directions"
     ) {
-      submitPass(runtime, workspace, "write_directions", false, true);
+      submitPass(runtime, workspace, "write_directions", { paired: true });
     } else {
       submitPass(runtime, workspace, "combine");
     }
@@ -564,7 +596,7 @@ export async function demosaicLibRawAahdWithWgsl(
     ) {
       // The candidate was packed before combine could overwrite it.
     } else if (outputStage === "aahd") {
-      submitPass(runtime, workspace, "write_aahd", false, true);
+      submitPass(runtime, workspace, "write_aahd", { paired: true });
     } else {
       const highlightStartedAt = performance.now();
       if (contract === "libraw-parity") {
@@ -582,8 +614,7 @@ export async function demosaicLibRawAahdWithWgsl(
         runtime,
         workspace,
         outputStage === "highlight" ? "write_aahd" : "write_final",
-        false,
-        true,
+        { paired: true },
       );
     }
     await runtime.device.queue.onSubmittedWorkDone();
@@ -673,6 +704,7 @@ export async function demosaicLibRawAahdTiledWithWgsl(
   const deviceStartedAt = performance.now();
   const runtime = await getRuntime(
     Math.max(mosaic.byteLength, tiledVectorBytes(info)),
+    TILED_ENTRY_POINTS,
   );
   const deviceCreateMs = performance.now() - deviceStartedAt;
   const sparsePreprocessing = await preprocessLibRawDefectsWithWgsl(
@@ -683,239 +715,267 @@ export async function demosaicLibRawAahdTiledWithWgsl(
   const workspaceStartedAt = performance.now();
   const workspace = getTiledWorkspace(runtime.device, info, mosaic.byteLength);
   const workspaceCreateMs = performance.now() - workspaceStartedAt;
-  const baseParameters = createTiledParameters(info, workspace, tiles[0]);
-  const preMultipliers = new Float32Array(
-    baseParameters.buffer,
-    16 * Uint32Array.BYTES_PER_ELEMENT,
-    4,
-  );
+  const activeReadbacks = new Set<PendingRgbReadback>();
+  const activeConsumers = new Set<Promise<void>>();
+  try {
+    const baseParameters = createTiledParameters(info, workspace, tiles[0]);
+    const preMultipliers = new Float32Array(
+      baseParameters.buffer,
+      16 * Uint32Array.BYTES_PER_ELEMENT,
+      4,
+    );
 
-  const correction = sparsePreprocessing;
-  if (
-    correction.corrected.length !== info.sampleCount ||
-    correction.defects.length !== Math.ceil(info.sampleCount / 32) ||
-    correction.extrema.length !== 6
-  ) {
-    throw new Error("LibRaw AAHD preprocessing returned invalid dimensions.");
-  }
-  const serialDefectMs = sparsePreprocessing.serialMs;
-  const scaleStartedAt = performance.now();
-  runtime.device.queue.writeBuffer(
-    workspace.resources[0],
-    0,
-    correction.corrected,
-  );
-  runtime.device.queue.writeBuffer(
-    workspace.resources[8],
-    0,
-    correction.extrema,
-  );
-  runtime.device.queue.writeBuffer(
-    workspace.resources[12],
-    0,
-    correction.defects,
-  );
-  const scaleAndInitializeMs =
-    sparsePreprocessing.gpuMs + performance.now() - scaleStartedAt;
+    const correction = sparsePreprocessing;
+    if (
+      correction.corrected.length !== info.sampleCount ||
+      correction.defects.length !== Math.ceil(info.sampleCount / 32) ||
+      correction.extrema.length !== 6
+    ) {
+      throw new Error("LibRaw AAHD preprocessing returned invalid dimensions.");
+    }
+    const serialDefectMs = sparsePreprocessing.serialMs;
+    const scaleStartedAt = performance.now();
+    runtime.device.queue.writeBuffer(
+      workspace.resources[0],
+      0,
+      correction.corrected,
+    );
+    runtime.device.queue.writeBuffer(
+      workspace.resources[8],
+      0,
+      correction.extrema,
+    );
+    runtime.device.queue.writeBuffer(
+      workspace.resources[12],
+      0,
+      correction.defects,
+    );
+    const scaleAndInitializeMs =
+      sparsePreprocessing.gpuMs + performance.now() - scaleStartedAt;
 
-  const chosenDirections = new Uint16Array(info.sampleCount);
-  let interpolateMs = 0;
-  let homogeneityMs = 0;
-  let readbackMs = 0;
-  for (const tile of tiles) {
-    prepareTile(runtime.device, workspace, mosaic, info, tile);
+    const chosenDirections = new Uint16Array(info.sampleCount);
+    let interpolateMs = 0;
+    let homogeneityMs = 0;
+    let readbackMs = 0;
+    for (const tile of tiles) {
+      prepareTile(runtime.device, workspace, mosaic, info, tile);
 
-    const interpolateStartedAt = performance.now();
-    submitPasses(runtime, workspace, [
-      { entryPoint: "clear_tile", padded: true },
-      { entryPoint: "initialize_parity" },
-      ...PARITY_INTERPOLATION_PASSES,
-    ]);
-    await runtime.device.queue.onSubmittedWorkDone();
-    interpolateMs += performance.now() - interpolateStartedAt;
+      const interpolateStartedAt = performance.now();
+      submitPasses(runtime, workspace, [
+        { entryPoint: "clear_tile", padded: true },
+        { entryPoint: "initialize_parity" },
+        ...PARITY_INTERPOLATION_PASSES,
+      ]);
+      interpolateMs += performance.now() - interpolateStartedAt;
 
-    const homogeneityStartedAt = performance.now();
-    submitPasses(runtime, workspace, [
-      { entryPoint: "evaluate_homogeneity" },
-      { entryPoint: "choose_direction" },
-      { entryPoint: "refine_checker_even" },
-      { entryPoint: "refine_checker_odd" },
-      { entryPoint: "write_direction_plane", paired: true },
-    ]);
-    await runtime.device.queue.onSubmittedWorkDone();
-    const readbackStartedAt = performance.now();
-    await readDirectionCore(
-      runtime.device,
-      workspace,
-      tile,
+      const homogeneityStartedAt = performance.now();
+      submitPasses(runtime, workspace, [
+        { entryPoint: "evaluate_homogeneity" },
+        { entryPoint: "choose_direction" },
+        { entryPoint: "refine_checker_even" },
+        { entryPoint: "refine_checker_odd" },
+        { entryPoint: "write_direction_plane", paired: true },
+      ]);
+      const readbackStartedAt = performance.now();
+      await readDirectionCore(
+        runtime.device,
+        workspace,
+        tile,
+        chosenDirections,
+        info.width,
+      );
+      readbackMs += performance.now() - readbackStartedAt;
+      homogeneityMs += readbackStartedAt - homogeneityStartedAt;
+    }
+
+    const serialDirectionStartedAt = performance.now();
+    const packedDirections = new Uint32Array(Math.ceil(info.sampleCount / 8));
+    refineLibRawSerialDirections(
       chosenDirections,
       info.width,
+      info.height,
+      packedDirections,
     );
-    readbackMs += performance.now() - readbackStartedAt;
-    homogeneityMs += readbackStartedAt - homogeneityStartedAt;
-  }
+    runtime.device.queue.writeBuffer(
+      workspace.resources[15],
+      0,
+      packedDirections,
+    );
+    const serialDirectionMs = performance.now() - serialDirectionStartedAt;
 
-  const serialDirectionStartedAt = performance.now();
-  const packedDirections = new Uint32Array(Math.ceil(info.sampleCount / 8));
-  refineLibRawSerialDirections(
-    chosenDirections,
-    info.width,
-    info.height,
-    packedDirections,
-  );
-  runtime.device.queue.writeBuffer(
-    workspace.resources[15],
-    0,
-    packedDirections,
-  );
-  const serialDirectionMs = performance.now() - serialDirectionStartedAt;
-
-  let band = writeBand
-    ? new Uint16Array(
-        info.width * Math.min(info.height, AAHD_TILE_CORE_SIZE) * 3,
-      )
-    : undefined;
-  let bandY = 0;
-  let serialHighlightMs = 0;
-  let highlightMs = 0;
-  let colorMs = 0;
-  let refineAndCombineMs = 0;
-  const outputReadbacks = workspace.outputReadbacks!;
-  let pendingReadback: PendingRgbReadback | undefined;
-  const consumeReadback = async (pending: PendingRgbReadback) => {
-    const readbackStartedAt = performance.now();
-    const tilePixels = await finishRgbReadback(pending);
-    readbackMs += performance.now() - readbackStartedAt;
-    if (band) {
-      writeRgbTile(tilePixels, pending.tile, band, info.width, bandY);
-      if (pending.tile.coreX + pending.tile.coreWidth === info.width) {
-        await writeBand!(band);
-        bandY += pending.tile.coreHeight;
-        const nextHeight = Math.min(AAHD_TILE_CORE_SIZE, info.height - bandY);
-        band =
-          nextHeight > 0
-            ? new Uint16Array(info.width * nextHeight * 3)
-            : undefined;
-      }
-    }
-  };
-  for (const [tileIndex, tile] of tiles.entries()) {
-    // Start mapping and encoding the previous core before submitting this
-    // core. The two readbacks alternate, so GPU work can overlap the CPU
-    // consumer without reusing a mapped buffer.
-    const consumePromise = pendingReadback
-      ? consumeReadback(pendingReadback)
+    let band = writeBand
+      ? new Uint16Array(
+          info.width * Math.min(info.height, AAHD_TILE_CORE_SIZE) * 3,
+        )
       : undefined;
-    prepareTile(runtime.device, workspace, mosaic, info, tile);
-    const interpolateStartedAt = performance.now();
-    submitPasses(runtime, workspace, [
-      { entryPoint: "clear_tile", padded: true },
-      { entryPoint: "initialize_parity" },
-      ...PARITY_INTERPOLATION_PASSES,
-    ]);
-    await runtime.device.queue.onSubmittedWorkDone();
-    interpolateMs += performance.now() - interpolateStartedAt;
+    let bandY = 0;
+    let serialHighlightMs = 0;
+    let highlightMs = 0;
+    let colorMs = 0;
+    let refineAndCombineMs = 0;
+    const outputReadbacks = workspace.outputReadbacks!;
+    let pendingReadback: PendingRgbReadback | undefined;
+    const consumeReadback = async (pending: PendingRgbReadback) => {
+      const readbackStartedAt = performance.now();
+      try {
+        await consumeRgbReadback(pending, async (tilePixels) => {
+          readbackMs += performance.now() - readbackStartedAt;
+          if (band) {
+            writeRgbTile(tilePixels, pending.tile, band, info.width, bandY);
+            if (pending.tile.coreX + pending.tile.coreWidth === info.width) {
+              await writeBand!(band);
+              bandY += pending.tile.coreHeight;
+              const nextHeight = Math.min(
+                AAHD_TILE_CORE_SIZE,
+                info.height - bandY,
+              );
+              band =
+                nextHeight > 0
+                  ? new Uint16Array(info.width * nextHeight * 3)
+                  : undefined;
+            }
+          }
+        });
+      } finally {
+        activeReadbacks.delete(pending);
+      }
+    };
+    for (const [tileIndex, tile] of tiles.entries()) {
+      // Start mapping and encoding the previous core before submitting this
+      // core. The two readbacks alternate, so GPU work can overlap the CPU
+      // consumer without reusing a mapped buffer.
+      const consumePromise = pendingReadback
+        ? consumeReadback(pendingReadback)
+        : undefined;
+      if (consumePromise) activeConsumers.add(consumePromise);
+      prepareTile(runtime.device, workspace, mosaic, info, tile);
+      const interpolateStartedAt = performance.now();
+      submitPasses(runtime, workspace, [
+        { entryPoint: "clear_tile", padded: true },
+        { entryPoint: "initialize_parity" },
+        ...PARITY_INTERPOLATION_PASSES,
+      ]);
+      interpolateMs += performance.now() - interpolateStartedAt;
 
-    const combineStartedAt = performance.now();
-    submitPasses(runtime, workspace, [
-      { entryPoint: "load_tiled_direction_plane" },
-      { entryPoint: "combine" },
-    ]);
-    await runtime.device.queue.onSubmittedWorkDone();
-    refineAndCombineMs += performance.now() - combineStartedAt;
+      const combineStartedAt = performance.now();
+      submitPasses(runtime, workspace, [
+        { entryPoint: "load_tiled_direction_plane" },
+        { entryPoint: "combine" },
+      ]);
+      refineAndCombineMs += performance.now() - combineStartedAt;
 
-    const highlightStartedAt = performance.now();
-    const serialMs = await blendLibRawHighlightsWithCpu(
-      runtime,
-      workspace,
-      preMultipliers,
-      true,
-    );
-    serialHighlightMs += serialMs;
-    highlightMs += performance.now() - highlightStartedAt;
-
-    const colorStartedAt = performance.now();
-    submitPass(runtime, workspace, "write_final", false, true);
-    let output = workspace.resources[10];
-    if (color) {
-      color.renderer.renderBuffer(
-        workspace.resources[10],
-        workspace.resources[3],
-        tile.coreWidth * tile.coreHeight,
-        color.ev,
+      const highlightStartedAt = performance.now();
+      const serialMs = await blendLibRawHighlightsWithCpu(
+        runtime,
+        workspace,
+        preMultipliers,
+        true,
       );
-      await runtime.device.queue.onSubmittedWorkDone();
-      output = workspace.resources[3];
-    }
-    colorMs += performance.now() - colorStartedAt;
-    const nextReadback = scheduleRgbReadback(
-      runtime.device,
-      tile,
-      output,
-      outputReadbacks[tileIndex & 1],
-    );
-    if (consumePromise) await consumePromise;
-    pendingReadback = nextReadback;
-  }
-  if (pendingReadback) await consumeReadback(pendingReadback);
+      serialHighlightMs += serialMs;
+      highlightMs += performance.now() - highlightStartedAt;
 
-  const tiledPeakGpuBytes = [
-    ...workspace.resources,
-    workspace.readback,
-    ...outputReadbacks,
-  ].reduce((sum, buffer) => sum + buffer.size, 0);
-  const tiledMaximumBufferBytes = Math.max(
-    workspace.readback.size,
-    ...outputReadbacks.map((buffer) => buffer.size),
-    ...workspace.resources.map((buffer) => buffer.size),
-  );
-  const peakGpuBytes = Math.max(
-    tiledPeakGpuBytes,
-    sparsePreprocessing.peakGpuBytes,
-  );
-  const maximumBufferBytes = Math.max(
-    tiledMaximumBufferBytes,
-    sparsePreprocessing.maximumBufferBytes,
-  );
-  return {
-    width: info.width,
-    height: info.height,
-    algorithm: "LibRaw AAHD parity",
-    contract: "libraw-parity",
-    backend: "native-wgsl",
-    outputStage: color ? "graded-final" : "final",
-    adapterInfo: {
-      vendor: runtime.adapter.info.vendor,
-      architecture: runtime.adapter.info.architecture,
-      device: runtime.adapter.info.device,
-      description: runtime.adapter.info.description,
-      isFallbackAdapter: runtime.adapter.info.isFallbackAdapter,
-    },
-    resources: {
-      tileCoreSize: AAHD_TILE_CORE_SIZE,
-      tileHalo: AAHD_TILE_HALO,
-      tileCount: tiles.length,
-      peakGpuBytes,
-      maximumBufferBytes,
-    },
-    timings: {
-      deviceCreateMs,
-      workspaceCreateMs,
-      scaleAndInitializeMs,
-      hotPixelMs: serialDefectMs,
-      serialDefectMs,
-      interpolateMs,
-      homogeneityMs,
-      refineAndCombineMs,
-      serialDirectionMs,
-      serialHighlightMs,
-      highlightMs,
-      colorMs,
-      readbackMs,
-      validationMs: 0,
-      totalMs: performance.now() - startedAt,
-    },
-  };
+      const colorStartedAt = performance.now();
+      submitPass(runtime, workspace, "write_final", { paired: true });
+      let output = workspace.resources[10];
+      if (color) {
+        color.renderer.renderBuffer(
+          workspace.resources[10],
+          workspace.resources[3],
+          tile.coreWidth * tile.coreHeight,
+          color.ev,
+        );
+        output = workspace.resources[3];
+      }
+      colorMs += performance.now() - colorStartedAt;
+      const nextReadback = scheduleRgbReadback(
+        runtime.device,
+        tile,
+        output,
+        outputReadbacks[tileIndex & 1],
+      );
+      activeReadbacks.add(nextReadback);
+      if (consumePromise) {
+        try {
+          await consumePromise;
+        } finally {
+          activeConsumers.delete(consumePromise);
+        }
+      }
+      pendingReadback = nextReadback;
+    }
+    if (pendingReadback) await consumeReadback(pendingReadback);
+
+    const tiledPeakGpuBytes = [
+      ...workspace.resources,
+      workspace.readback,
+      ...outputReadbacks,
+    ].reduce((sum, buffer) => sum + buffer.size, 0);
+    const tiledMaximumBufferBytes = Math.max(
+      workspace.readback.size,
+      ...outputReadbacks.map((buffer) => buffer.size),
+      ...workspace.resources.map((buffer) => buffer.size),
+    );
+    const peakGpuBytes = Math.max(
+      tiledPeakGpuBytes,
+      sparsePreprocessing.peakGpuBytes,
+    );
+    const maximumBufferBytes = Math.max(
+      tiledMaximumBufferBytes,
+      sparsePreprocessing.maximumBufferBytes,
+    );
+    return {
+      width: info.width,
+      height: info.height,
+      algorithm: "LibRaw AAHD parity",
+      contract: "libraw-parity",
+      backend: "native-wgsl",
+      outputStage: color ? "graded-final" : "final",
+      adapterInfo: {
+        vendor: runtime.adapter.info.vendor,
+        architecture: runtime.adapter.info.architecture,
+        device: runtime.adapter.info.device,
+        description: runtime.adapter.info.description,
+        isFallbackAdapter: runtime.adapter.info.isFallbackAdapter,
+      },
+      resources: {
+        tileCoreSize: AAHD_TILE_CORE_SIZE,
+        tileHalo: AAHD_TILE_HALO,
+        tileCount: tiles.length,
+        peakGpuBytes,
+        maximumBufferBytes,
+      },
+      timings: {
+        deviceCreateMs,
+        workspaceCreateMs,
+        scaleAndInitializeMs,
+        hotPixelMs: serialDefectMs,
+        serialDefectMs,
+        interpolateMs,
+        homogeneityMs,
+        refineAndCombineMs,
+        serialDirectionMs,
+        serialHighlightMs,
+        highlightMs,
+        colorMs,
+        readbackMs,
+        validationMs: 0,
+        totalMs: performance.now() - startedAt,
+      },
+    };
+  } catch (error) {
+    await Promise.allSettled(activeConsumers);
+    await Promise.allSettled(
+      Array.from(activeReadbacks, (pending) => pending.ready),
+    );
+    for (const pending of activeReadbacks) {
+      if (pending.buffer.mapState === "mapped") pending.buffer.unmap();
+    }
+    if (cachedTiledWorkspace === workspace) {
+      cachedTiledWorkspace = undefined;
+    }
+    destroyWorkspace(workspace);
+    throw error;
+  }
 }
 
 async function preprocessLibRawDefectsWithWgsl(
@@ -930,35 +990,42 @@ async function preprocessLibRawDefectsWithWgsl(
     Math.ceil(info.sampleCount / 32) * Uint32Array.BYTES_PER_ELEMENT;
   const extremaBytes = 6 * Uint32Array.BYTES_PER_ELEMENT;
   const readbackBytes = sampleBytes + defectBytes + extremaBytes;
-  const create = (size: number, usage: GPUBufferUsageFlags) =>
-    device.createBuffer({ size, usage });
-  const raw = create(
-    sampleBytes,
-    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  );
-  const scaled = create(
-    sampleBytes,
-    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-  );
-  const candidates = create(
-    defectBytes,
-    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-  );
-  const extrema = create(
-    extremaBytes,
-    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-  );
-  const parameterBuffer = create(
-    64 * Uint32Array.BYTES_PER_ELEMENT,
-    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  );
-  const readback = create(
-    readbackBytes,
-    GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  );
-  const buffers = [raw, scaled, candidates, extrema, parameterBuffer, readback];
-
+  const buffers: GPUBuffer[] = [];
+  let readback: GPUBuffer | undefined;
   try {
+    const create = (size: number, usage: GPUBufferUsageFlags) => {
+      const buffer = device.createBuffer({ size, usage });
+      buffers.push(buffer);
+      return buffer;
+    };
+    const raw = create(
+      sampleBytes,
+      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    );
+    const scaled = create(
+      sampleBytes,
+      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+    );
+    const candidates = create(
+      defectBytes,
+      GPUBufferUsage.STORAGE |
+        GPUBufferUsage.COPY_SRC |
+        GPUBufferUsage.COPY_DST,
+    );
+    const extrema = create(
+      extremaBytes,
+      GPUBufferUsage.STORAGE |
+        GPUBufferUsage.COPY_SRC |
+        GPUBufferUsage.COPY_DST,
+    );
+    const parameterBuffer = create(
+      64 * Uint32Array.BYTES_PER_ELEMENT,
+      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    );
+    readback = create(
+      readbackBytes,
+      GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    );
     const parameters = createPreprocessingParameters(info);
     const scale = new Float32Array(parameters.buffer, 12 * 4, 4);
     const firstColor = normalizedCfa(info.cfaPattern[0]);
@@ -985,7 +1052,7 @@ async function preprocessLibRawDefectsWithWgsl(
       "preprocess_scale_pairs",
       "preprocess_classify_defects",
     ] as const) {
-      const pipeline = runtime.pipelines[entryPoint];
+      const pipeline = runtime.pipelines[entryPoint]!;
       pass.setPipeline(pipeline);
       const resources: Partial<Record<number, GPUBuffer>> = {
         0: raw,
@@ -1063,7 +1130,7 @@ async function preprocessLibRawDefectsWithWgsl(
       maximumBufferBytes: Math.max(...buffers.map((buffer) => buffer.size)),
     };
   } finally {
-    if (readback.mapState === "mapped") readback.unmap();
+    if (readback?.mapState === "mapped") readback.unmap();
     for (const buffer of buffers) buffer.destroy();
   }
 }
@@ -1129,49 +1196,48 @@ function validateInput(mosaic: Uint16Array, info: SensorImageInfo): void {
   }
 }
 
-async function getRuntime(requiredBufferBytes: number): Promise<Runtime> {
+async function getRuntime(
+  requiredBufferBytes: number,
+  requiredEntries: readonly EntryPoint[] = ENTRY_POINTS,
+): Promise<Runtime> {
   if (runtimePromise) {
     await getWebGpuRuntime(requiredBufferBytes);
-    return runtimePromise;
-  }
-  runtimePromise = (async () => {
-    const { adapter, device } = await getWebGpuRuntime(requiredBufferBytes);
-    const module = device.createShaderModule({
-      code: shader,
-      label: "LibRaw AAHD",
-    });
-    const compilation = await module.getCompilationInfo();
-    const errors = compilation.messages.filter(
-      (message) => message.type === "error",
-    );
-    if (errors.length) {
-      throw new Error(
-        `LibRaw AAHD shader failed: ${errors.map((error) => `${error.lineNum}:${error.linePos} ${error.message}`).join("; ")}`,
+  } else {
+    runtimePromise = (async () => {
+      const { adapter, device } = await getWebGpuRuntime(requiredBufferBytes);
+      const module = device.createShaderModule({
+        code: shader,
+        label: "LibRaw AAHD",
+      });
+      const compilation = await module.getCompilationInfo();
+      const errors = compilation.messages.filter(
+        (message) => message.type === "error",
       );
-    }
-    const entries = await Promise.all(
-      ENTRY_POINTS.map(
-        async (entryPoint) =>
-          [
-            entryPoint,
-            await device.createComputePipelineAsync({
-              label: `LibRaw AAHD ${entryPoint}`,
-              layout: "auto",
-              compute: { module, entryPoint },
-            }),
-          ] as const,
-      ),
-    );
-    return {
-      adapter,
-      device,
-      pipelines: Object.fromEntries(entries) as Record<
-        EntryPoint,
-        GPUComputePipeline
-      >,
-    };
-  })();
-  return runtimePromise;
+      if (errors.length) {
+        throw new Error(
+          `LibRaw AAHD shader failed: ${errors.map((error) => `${error.lineNum}:${error.linePos} ${error.message}`).join("; ")}`,
+        );
+      }
+      return { adapter, device, module, pipelines: {} };
+    })();
+  }
+  const runtime = await runtimePromise;
+  const missing = requiredEntries.filter(
+    (entryPoint) => !runtime.pipelines[entryPoint],
+  );
+  const pipelines = await Promise.all(
+    missing.map((entryPoint) =>
+      runtime.device.createComputePipelineAsync({
+        label: `LibRaw AAHD ${entryPoint}`,
+        layout: "auto",
+        compute: { module: runtime.module, entryPoint },
+      }),
+    ),
+  );
+  for (const [index, entryPoint] of missing.entries()) {
+    runtime.pipelines[entryPoint] = pipelines[index];
+  }
+  return runtime;
 }
 
 function getWorkspace(
@@ -1185,7 +1251,11 @@ function getWorkspace(
   ) {
     return cachedWorkspace;
   }
-  if (cachedWorkspace) destroyWorkspace(cachedWorkspace);
+  if (cachedWorkspace) {
+    const previous = cachedWorkspace;
+    cachedWorkspace = undefined;
+    destroyWorkspace(previous);
+  }
   const paddedWidth = info.width + 8;
   const paddedHeight = info.height + 8;
   const paddedSamples = paddedWidth * paddedHeight;
@@ -1193,69 +1263,83 @@ function getWorkspace(
   const scalarBytes = paddedSamples * Uint32Array.BYTES_PER_ELEMENT;
   const packedBytes =
     (info.sampleCount / 2) * 3 * Uint32Array.BYTES_PER_ELEMENT;
-  const create = (size: number, usage: GPUBufferUsageFlags) =>
-    device.createBuffer({ size, usage });
   const gamma = createLibRawGammaLut();
-  const resources = [
-    create(
-      Math.ceil(mosaicBytes / 4) * 4,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    ),
-    create(vectorBytes, GPUBufferUsage.STORAGE),
-    create(vectorBytes, GPUBufferUsage.STORAGE),
-    create(vectorBytes, GPUBufferUsage.STORAGE),
-    create(vectorBytes, GPUBufferUsage.STORAGE),
-    create(scalarBytes, GPUBufferUsage.STORAGE),
-    create(scalarBytes, GPUBufferUsage.STORAGE),
-    create(scalarBytes, GPUBufferUsage.STORAGE),
-    create(
-      6 * Uint32Array.BYTES_PER_ELEMENT,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    ),
-    create(gamma.byteLength, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
-    create(
-      packedBytes,
-      GPUBufferUsage.STORAGE |
-        GPUBufferUsage.COPY_SRC |
-        GPUBufferUsage.COPY_DST,
-    ),
-    create(
-      64 * Uint32Array.BYTES_PER_ELEMENT,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    ),
-    create(
-      Math.ceil(info.sampleCount / 32) * Uint32Array.BYTES_PER_ELEMENT,
-      GPUBufferUsage.STORAGE |
-        GPUBufferUsage.COPY_SRC |
-        GPUBufferUsage.COPY_DST,
-    ),
-    create(
-      Math.ceil(mosaicBytes / 4) * 4,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    ),
-    create(
-      Uint32Array.BYTES_PER_ELEMENT,
-      GPUBufferUsage.STORAGE |
-        GPUBufferUsage.COPY_SRC |
-        GPUBufferUsage.COPY_DST,
-    ),
-  ];
-  device.queue.writeBuffer(resources[9], 0, gamma);
-  cachedWorkspace = {
-    width: info.width,
-    height: info.height,
-    paddedWidth,
-    paddedHeight,
-    packedBytes,
-    coreWidth: info.width,
-    coreHeight: info.height,
-    resources,
-    readback: create(
-      packedBytes,
-      GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-    ),
+  const buffers: GPUBuffer[] = [];
+  const create = (size: number, usage: GPUBufferUsageFlags) => {
+    const buffer = device.createBuffer({ size, usage });
+    buffers.push(buffer);
+    return buffer;
   };
-  return cachedWorkspace;
+  try {
+    const resources = [
+      create(
+        Math.ceil(mosaicBytes / 4) * 4,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      ),
+      create(vectorBytes, GPUBufferUsage.STORAGE),
+      create(vectorBytes, GPUBufferUsage.STORAGE),
+      create(vectorBytes, GPUBufferUsage.STORAGE),
+      create(vectorBytes, GPUBufferUsage.STORAGE),
+      create(scalarBytes, GPUBufferUsage.STORAGE),
+      create(scalarBytes, GPUBufferUsage.STORAGE),
+      create(scalarBytes, GPUBufferUsage.STORAGE),
+      create(
+        6 * Uint32Array.BYTES_PER_ELEMENT,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      ),
+      create(
+        gamma.byteLength,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      ),
+      create(
+        packedBytes,
+        GPUBufferUsage.STORAGE |
+          GPUBufferUsage.COPY_SRC |
+          GPUBufferUsage.COPY_DST,
+      ),
+      create(
+        64 * Uint32Array.BYTES_PER_ELEMENT,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      ),
+      create(
+        Math.ceil(info.sampleCount / 32) * Uint32Array.BYTES_PER_ELEMENT,
+        GPUBufferUsage.STORAGE |
+          GPUBufferUsage.COPY_SRC |
+          GPUBufferUsage.COPY_DST,
+      ),
+      create(
+        Math.ceil(mosaicBytes / 4) * 4,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      ),
+      create(
+        Uint32Array.BYTES_PER_ELEMENT,
+        GPUBufferUsage.STORAGE |
+          GPUBufferUsage.COPY_SRC |
+          GPUBufferUsage.COPY_DST,
+      ),
+    ];
+    device.queue.writeBuffer(resources[9], 0, gamma);
+    const workspace = {
+      width: info.width,
+      height: info.height,
+      paddedWidth,
+      paddedHeight,
+      packedBytes,
+      coreWidth: info.width,
+      coreHeight: info.height,
+      resources,
+      bindGroups: {},
+      readback: create(
+        packedBytes,
+        GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      ),
+    };
+    cachedWorkspace = workspace;
+    return workspace;
+  } catch (error) {
+    for (const buffer of buffers) buffer.destroy();
+    throw error;
+  }
 }
 
 function getTiledWorkspace(
@@ -1275,7 +1359,11 @@ function getTiledWorkspace(
   ) {
     return cachedTiledWorkspace;
   }
-  if (cachedTiledWorkspace) destroyWorkspace(cachedTiledWorkspace);
+  if (cachedTiledWorkspace) {
+    const previous = cachedTiledWorkspace;
+    cachedTiledWorkspace = undefined;
+    destroyWorkspace(previous);
+  }
   const paddedWidth = width + 8;
   const paddedHeight = height + 8;
   const paddedSamples = paddedWidth * paddedHeight;
@@ -1289,69 +1377,89 @@ function getTiledWorkspace(
     width * height * 4 * Uint32Array.BYTES_PER_ELEMENT,
   );
   const originalTileBytes = width * height * Uint16Array.BYTES_PER_ELEMENT;
-  const create = (size: number, usage: GPUBufferUsageFlags) =>
-    device.createBuffer({ size: Math.ceil(size / 4) * 4, usage });
   const gamma = createLibRawGammaLut();
-  const resources = [
-    create(mosaicBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
-    create(vectorBytes, GPUBufferUsage.STORAGE),
-    create(vectorBytes, GPUBufferUsage.STORAGE),
-    create(vectorBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC),
-    create(vectorBytes, GPUBufferUsage.STORAGE),
-    create(scalarBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
-    create(scalarBytes, GPUBufferUsage.STORAGE),
-    create(scalarBytes, GPUBufferUsage.STORAGE),
-    create(
-      6 * Uint32Array.BYTES_PER_ELEMENT,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    ),
-    create(gamma.byteLength, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
-    create(
-      outputBytes,
-      GPUBufferUsage.STORAGE |
-        GPUBufferUsage.COPY_SRC |
-        GPUBufferUsage.COPY_DST,
-    ),
-    create(
-      64 * Uint32Array.BYTES_PER_ELEMENT,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    ),
-    create(
-      Math.ceil(info.sampleCount / 32) * Uint32Array.BYTES_PER_ELEMENT,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    ),
-    create(originalTileBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
-    create(
-      Uint32Array.BYTES_PER_ELEMENT,
-      GPUBufferUsage.STORAGE |
-        GPUBufferUsage.COPY_SRC |
-        GPUBufferUsage.COPY_DST,
-    ),
-    create(
-      Math.ceil(info.sampleCount / 8) * Uint32Array.BYTES_PER_ELEMENT,
-      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    ),
-  ];
-  device.queue.writeBuffer(resources[9], 0, gamma);
-  cachedTiledWorkspace = {
-    width,
-    height,
-    paddedWidth,
-    paddedHeight,
-    packedBytes: outputBytes,
-    coreWidth: Math.min(info.width, AAHD_TILE_CORE_SIZE),
-    coreHeight: Math.min(info.height, AAHD_TILE_CORE_SIZE),
-    resources,
-    readback: create(
-      outputBytes,
-      GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-    ),
-    outputReadbacks: [
-      create(outputBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ),
-      create(outputBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ),
-    ],
+  const buffers: GPUBuffer[] = [];
+  const create = (size: number, usage: GPUBufferUsageFlags) => {
+    const buffer = device.createBuffer({
+      size: Math.ceil(size / 4) * 4,
+      usage,
+    });
+    buffers.push(buffer);
+    return buffer;
   };
-  return cachedTiledWorkspace;
+  try {
+    const resources = [
+      create(mosaicBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
+      create(vectorBytes, GPUBufferUsage.STORAGE),
+      create(vectorBytes, GPUBufferUsage.STORAGE),
+      create(vectorBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC),
+      create(vectorBytes, GPUBufferUsage.STORAGE),
+      create(scalarBytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST),
+      create(scalarBytes, GPUBufferUsage.STORAGE),
+      create(scalarBytes, GPUBufferUsage.STORAGE),
+      create(
+        6 * Uint32Array.BYTES_PER_ELEMENT,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      ),
+      create(
+        gamma.byteLength,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      ),
+      create(
+        outputBytes,
+        GPUBufferUsage.STORAGE |
+          GPUBufferUsage.COPY_SRC |
+          GPUBufferUsage.COPY_DST,
+      ),
+      create(
+        64 * Uint32Array.BYTES_PER_ELEMENT,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      ),
+      create(
+        Math.ceil(info.sampleCount / 32) * Uint32Array.BYTES_PER_ELEMENT,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      ),
+      create(
+        originalTileBytes,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      ),
+      create(
+        Uint32Array.BYTES_PER_ELEMENT,
+        GPUBufferUsage.STORAGE |
+          GPUBufferUsage.COPY_SRC |
+          GPUBufferUsage.COPY_DST,
+      ),
+      create(
+        Math.ceil(info.sampleCount / 8) * Uint32Array.BYTES_PER_ELEMENT,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      ),
+    ];
+    device.queue.writeBuffer(resources[9], 0, gamma);
+    const workspace: Workspace = {
+      width,
+      height,
+      paddedWidth,
+      paddedHeight,
+      packedBytes: outputBytes,
+      coreWidth: Math.min(info.width, AAHD_TILE_CORE_SIZE),
+      coreHeight: Math.min(info.height, AAHD_TILE_CORE_SIZE),
+      resources,
+      bindGroups: {},
+      readback: create(
+        outputBytes,
+        GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      ),
+      outputReadbacks: [
+        create(outputBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ),
+        create(outputBytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ),
+      ],
+    };
+    cachedTiledWorkspace = workspace;
+    return workspace;
+  } catch (error) {
+    for (const buffer of buffers) buffer.destroy();
+    throw error;
+  }
 }
 
 function tiledVectorBytes(info: SensorImageInfo): number {
@@ -1432,15 +1540,16 @@ function scheduleRgbReadback(
   };
 }
 
-async function finishRgbReadback(
+async function consumeRgbReadback(
   pending: PendingRgbReadback,
-): Promise<Uint16Array<ArrayBuffer>> {
+  consume: (pixels: Uint16Array) => void | Promise<void>,
+): Promise<void> {
   await pending.ready;
   try {
     const source = new Uint16Array(
       pending.buffer.getMappedRange(0, pending.bytes),
     );
-    return new Uint16Array(source);
+    await consume(source);
   } finally {
     pending.buffer.unmap();
   }
@@ -1484,15 +1593,7 @@ async function blendLibRawHighlightsWithCpu(
     0,
     new Uint32Array([0]),
   );
-  submitPass(
-    runtime,
-    workspace,
-    "collect_highlights",
-    false,
-    false,
-    undefined,
-    core,
-  );
+  submitPass(runtime, workspace, "collect_highlights", { core });
 
   const countEncoder = runtime.device.createCommandEncoder();
   countEncoder.copyBufferToBuffer(
@@ -1553,7 +1654,9 @@ async function blendLibRawHighlightsWithCpu(
     63 * Uint32Array.BYTES_PER_ELEMENT,
     new Uint32Array([recordCount]),
   );
-  submitPass(runtime, workspace, "apply_highlights", false, false, recordCount);
+  submitPass(runtime, workspace, "apply_highlights", {
+    linearWorkgroups: recordCount,
+  });
   return serialMs;
 }
 
@@ -1561,14 +1664,9 @@ function submitPass(
   runtime: Runtime,
   workspace: Workspace,
   entryPoint: EntryPoint,
-  padded = false,
-  paired = false,
-  linearWorkgroups?: number,
-  core = false,
+  options: Omit<PassCommand, "entryPoint"> = {},
 ): void {
-  submitPasses(runtime, workspace, [
-    { entryPoint, padded, paired, linearWorkgroups, core },
-  ]);
+  submitPasses(runtime, workspace, [{ entryPoint, ...options }]);
 }
 
 function submitPasses(
@@ -1579,18 +1677,19 @@ function submitPasses(
   const encoder = runtime.device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   for (const command of commands) {
-    const pipeline = runtime.pipelines[command.entryPoint];
+    const pipeline = runtime.pipelines[command.entryPoint]!;
     pass.setPipeline(pipeline);
-    pass.setBindGroup(
-      0,
+    const bindGroup =
+      workspace.bindGroups[command.entryPoint] ??
       runtime.device.createBindGroup({
         layout: pipeline.getBindGroupLayout(0),
         entries: BINDINGS[command.entryPoint].map((binding) => ({
           binding,
           resource: { buffer: workspace.resources[binding] },
         })),
-      }),
-    );
+      });
+    workspace.bindGroups[command.entryPoint] = bindGroup;
+    pass.setBindGroup(0, bindGroup);
     const width = command.padded
       ? workspace.paddedWidth
       : command.core || command.paired

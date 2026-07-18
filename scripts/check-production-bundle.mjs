@@ -22,6 +22,7 @@ if (workers.length !== 1) {
 const worker = await readFile(join(dist, workers[0]), "utf8");
 const forbiddenWorkerCode = [
   "Tiled AAHD captured",
+  "aahdReferenceInfo",
   "onnxruntime",
   ".onnx",
   "native-rcd",

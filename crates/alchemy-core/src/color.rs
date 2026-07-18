@@ -11,27 +11,6 @@ pub(crate) const LIBRAW_PROPHOTO_D65_TO_V_GAMUT: [[f32; 3]; 3] = [
     [0.012_854_77, -0.008_144_919, 0.995_291_2],
 ];
 
-// Raw Alchemy 0.4.2 treated LibRaw's D65 output as standard D50 ProPhoto and
-// asked colour-science to adapt it to V-Gamut. This matrix intentionally
-// freezes that historical mistake for the migration-only legacy mode.
-pub(crate) const LEGACY_PROPHOTO_D50_TO_V_GAMUT: [[f64; 3]; 3] = [
-    [
-        1.118_010_835_688_748,
-        -0.049_443_321_904_107,
-        -0.068_684_599_739_414,
-    ],
-    [
-        -0.026_195_765_214_153,
-        0.930_914_054_910_17,
-        0.095_305_605_611_064,
-    ],
-    [
-        0.011_479_100_883_736,
-        0.006_509_523_387_431,
-        0.981_765_875_974_032,
-    ],
-];
-
 const LIBRAW_PROPHOTO_D65_TO_SRGB: [[f32; 3]; 3] = [
     [2.034_192_6, -0.727_419_8, -0.306_765_53],
     [-0.228_810_76, 1.231_729_3, -0.002_921_616],
@@ -40,14 +19,6 @@ const LIBRAW_PROPHOTO_D65_TO_SRGB: [[f32; 3]; 3] = [
 
 pub(crate) fn multiply_matrix(matrix: &[[f32; 3]; 3], rgb: [f32; 3]) -> [f32; 3] {
     matrix.map(|row| row[0].mul_add(rgb[0], row[1].mul_add(rgb[1], row[2] * rgb[2])))
-}
-
-#[allow(clippy::cast_possible_truncation)]
-pub(crate) fn multiply_legacy_matrix(rgb: [f32; 3]) -> [f32; 3] {
-    LEGACY_PROPHOTO_D50_TO_V_GAMUT.map(|row| {
-        (f64::from(rgb[0]) * row[0] + f64::from(rgb[1]) * row[1] + f64::from(rgb[2]) * row[2])
-            as f32
-    })
 }
 
 pub(crate) fn encode_v_log(linear: f32) -> f32 {
@@ -88,18 +59,6 @@ fn srgb_preview(linear: f32) -> u8 {
     });
     let index = (linear.clamp(0.0, 1.0) * 65_535.0).round() as usize;
     table[index]
-}
-
-pub(crate) fn legacy_bt709_to_srgb(encoded: f32) -> f32 {
-    // Raw Alchemy 0.4.2 clipped LUT output, decoded its assumed BT.709
-    // transfer, then encoded sRGB for preview. Export skipped this transform.
-    let encoded = encoded.clamp(0.0, 1.0);
-    let linear = if encoded < 0.081 {
-        encoded / 4.5
-    } else {
-        ((encoded + 0.099) / 1.099).powf(1.0 / 0.45)
-    };
-    srgb_oetf(linear)
 }
 
 fn srgb_oetf(linear: f32) -> f32 {

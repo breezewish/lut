@@ -21,24 +21,20 @@
     "test:pages:prepared": "VITE_BASE_PATH=/lut/ playwright test --config playwright.pages.config.ts",
     "benchmark:libraw": "npm run libraw-wasm && node scripts/benchmark-libraw-algorithms.mjs",
     "benchmark:browser": "RAW_PERF=1 PLAYWRIGHT_HTTP_PORT=${PLAYWRIGHT_HTTP_PORT:-46731} playwright test web/e2e/raw-performance.spec.ts --project=chromium",
-    "benchmark:demosaic": "VITE_ENABLE_TEST_ENTRIES=1 npm run bundle:test && DEMOSAIC_PERF=1 PLAYWRIGHT_HTTP_PORT=${PLAYWRIGHT_HTTP_PORT:-46731} playwright test web/e2e/demosaic-performance.spec.ts --project=chromium",
     "benchmark:interaction": "RAW_PERF=1 PLAYWRIGHT_HTTP_PORT=${PLAYWRIGHT_HTTP_PORT:-46731} playwright test web/e2e/preview-interaction-performance.spec.ts --project=chromium",
     "benchmark:interaction:large": "node scripts/fetch-large-raw-fixture.mjs && RAW_PERF=1 RAW_PERF_FIXTURE=${RAW_LARGE_FIXTURE_PATH:-/tmp/raw-alchemy-ilce-7rm4-61mp.ARW} RAW_PERF_MIN_PIXELS=33000000 PLAYWRIGHT_HTTP_PORT=${PLAYWRIGHT_HTTP_PORT:-46731} playwright test web/e2e/preview-interaction-performance.spec.ts --project=chromium",
     "test:webgpu-camera-matrix": "npm run build && npm run test:webgpu-camera-matrix:prepared",
     "test:webgpu-camera-matrix:prepared": "node scripts/prepare-webgpu-camera-fixtures.mjs && WEBGPU_HARDWARE=1 WEBGPU_CAMERA_MATRIX_E2E=1 PLAYWRIGHT_HTTP_PORT=${PLAYWRIGHT_HTTP_PORT:-46731} playwright test web/e2e/aahd-camera-matrix.spec.ts --project=chromium",
-    "quality:preview": "node scripts/check-preview-quality.mjs",
     "check": "npm run test && npm run build && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings",
     "format:check": "prettier --check ."
   },
   "dependencies": {
     "@noble/hashes": "2.2.0",
     "@radix-ui/react-select": "2.2.6",
-    "clsx": "2.1.1",
     "fflate": "0.8.2",
     "lucide-react": "0.468.0",
     "react": "19.2.0",
-    "react-dom": "19.2.0",
-    "tailwind-merge": "3.3.1"
+    "react-dom": "19.2.0"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",

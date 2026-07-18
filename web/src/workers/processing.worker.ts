@@ -2,7 +2,7 @@
 
 import createLibRaw from "../libraw/libraw.js";
 import initAlchemy, {
-  PreviewRenderer,
+  PreviewSource,
   TiffEncoder,
   WasmLut,
 } from "../wasm/alchemy_core.js";
@@ -97,7 +97,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
           context.postMessage(reply, [thumbnail.data.buffer]);
         }
         const image = previewRaw.imageInfo();
-        const libraw = previewRaw.timings() as LibRawDecodeTimings;
+        const libraw = previewRaw.timings();
         decodeCount += 1;
         const lut = await loadLut(data.lut);
         const previewSourceStartedAt = performance.now();
@@ -229,7 +229,7 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
         data.ev,
       );
       const timings: ExportTimings = {
-        libraw: exportRaw.timings() as LibRawDecodeTimings,
+        libraw: exportRaw.timings(),
         rawBackend: "libraw",
         colorBackend: "webgpu",
         colorProcessingMs: rendered.colorProcessingMs,
@@ -287,9 +287,8 @@ function createPreviewRenderer(
   raw: InstanceType<Awaited<ReturnType<typeof createLibRaw>>["LibRaw"]>,
   width: number,
   height: number,
-  lut: WasmLut,
-): PreviewRenderer {
-  const renderer = lut.create_preview_renderer(width, height, PREVIEW_MAX_EDGE);
+): PreviewSource {
+  const renderer = new PreviewSource(width, height, PREVIEW_MAX_EDGE);
   const rowSamples = width * 3;
   try {
     for (;;) {
@@ -310,7 +309,7 @@ async function createCachedPreviewRenderer(
   height: number,
   lut: WasmLut,
 ): Promise<WebGpuPreviewRenderer> {
-  const source = createPreviewRenderer(raw, width, height, lut);
+  const source = createPreviewRenderer(raw, width, height);
   try {
     await previewGpuPreparation;
   } catch (error) {

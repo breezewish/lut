@@ -1,7 +1,7 @@
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
-use alchemy_core::{ColorPipeline, Lut3d, ProcessingMode};
+use alchemy_core::{ColorPipeline, Lut3d};
 use clap::{Parser, ValueEnum};
 
 #[derive(Debug, Parser)]
@@ -79,8 +79,7 @@ fn run(args: &Args, output: Output) -> Result<(), String> {
     let cube = std::fs::read_to_string(&args.lut)
         .map_err(|error| format!("could not read {}: {error}", args.lut.display()))?;
     let lut = Lut3d::parse(&cube).map_err(|error| error.to_string())?;
-    let pipeline = ColorPipeline::new(args.ev, ProcessingMode::CorrectedV2, lut)
-        .map_err(|error| error.to_string())?;
+    let pipeline = ColorPipeline::new(args.ev, lut).map_err(|error| error.to_string())?;
     let decoded = alchemy_libraw::decode(&input, false).map_err(|_| {
         format!(
             "could not decode {}: the file may be damaged or its camera format may not be supported yet",

@@ -14,7 +14,7 @@ mod tiff;
 pub use c_api::{AlchemyBuffer, AlchemyRenderResult, AlchemyStatus};
 pub use cube::Lut3d;
 pub use error::{AlchemyError, Result};
-pub use pipeline::{ColorPipeline, Preview, ProcessingMode};
+pub use pipeline::{ColorPipeline, Preview};
 
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 mod wasm;

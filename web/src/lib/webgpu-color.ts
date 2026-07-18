@@ -1,5 +1,10 @@
 import shader from "./color-transform.wgsl?raw";
-import { getWebGpuRuntime, type WebGpuRuntime } from "./webgpu-runtime";
+import {
+  createCheckedComputePipeline,
+  getWebGpuRuntime,
+  type WebGpuRuntime,
+  writePaddedBuffer,
+} from "./webgpu-runtime";
 
 export interface GpuLut {
   size(): number;
@@ -19,8 +24,14 @@ export interface WebGpuStrip {
   timings: GpuStripTimings;
 }
 
+const pipelinePromises = new WeakMap<GPUDevice, Promise<GPUComputePipeline>>();
+
 /** Persistent WebGPU resources for the current parsed LUT. */
 export class WebGpuColorRenderer {
+  readonly preferredBatchSamples = 4_000_000;
+  private readonly parameters = new ArrayBuffer(48);
+  private readonly parameterView = new DataView(this.parameters);
+
   private constructor(
     private readonly runtime: WebGpuRuntime,
     private readonly pipeline: GPUComputePipeline,
@@ -29,7 +40,17 @@ export class WebGpuColorRenderer {
     private readonly lutSize: number,
     private readonly domainMin: Float32Array,
     private readonly inverseDomainRange: Float32Array,
-  ) {}
+  ) {
+    this.parameterView.setUint32(4, this.lutSize, true);
+    for (let axis = 0; axis < 3; axis += 1) {
+      this.parameterView.setFloat32(16 + axis * 4, this.domainMin[axis], true);
+      this.parameterView.setFloat32(
+        32 + axis * 4,
+        this.inverseDomainRange[axis],
+        true,
+      );
+    }
+  }
 
   static async create(
     lut: GpuLut,
@@ -38,20 +59,16 @@ export class WebGpuColorRenderer {
     const sharedRuntime = runtime ?? (await getWebGpuRuntime());
     sharedRuntime.assertAvailable();
     const { device } = sharedRuntime;
-    const module = device.createShaderModule({ code: shader });
-    const compilation = await module.getCompilationInfo();
-    const errors = compilation.messages.filter(
-      (message) => message.type === "error",
-    );
-    if (errors.length > 0) {
-      throw new Error(
-        `WebGPU color shader failed to compile: ${errors.map((error) => error.message).join("; ")}`,
+    let pipelinePromise = pipelinePromises.get(device);
+    if (!pipelinePromise) {
+      pipelinePromise = createCheckedComputePipeline(
+        device,
+        shader,
+        "WebGPU color shader",
       );
+      pipelinePromises.set(device, pipelinePromise);
     }
-    const pipeline = await device.createComputePipelineAsync({
-      layout: "auto",
-      compute: { module, entryPoint: "main" },
-    });
+    const pipeline = await pipelinePromise;
     const samples = new Float32Array(lut.samples());
     const buffers: GPUBuffer[] = [];
     try {
@@ -117,21 +134,7 @@ export class WebGpuColorRenderer {
       });
       buffers.push(readbackBuffer);
       const uploadStartedAt = performance.now();
-      if (source.byteLength === packedBytes) {
-        this.runtime.device.queue.writeBuffer(
-          sourceBuffer,
-          0,
-          source.buffer,
-          source.byteOffset,
-          source.byteLength,
-        );
-      } else {
-        const padded = new Uint8Array(packedBytes);
-        padded.set(
-          new Uint8Array(source.buffer, source.byteOffset, source.byteLength),
-        );
-        this.runtime.device.queue.writeBuffer(sourceBuffer, 0, padded);
-      }
+      writePaddedBuffer(this.runtime.device, sourceBuffer, source, packedBytes);
       this.writeParameters(pixelCount, ev);
       const uploadMs = performance.now() - uploadStartedAt;
       const commands = this.runtime.device.createCommandEncoder();
@@ -184,16 +187,13 @@ export class WebGpuColorRenderer {
   }
 
   private writeParameters(pixelCount: number, ev: number): void {
-    const parameters = new ArrayBuffer(48);
-    const view = new DataView(parameters);
-    view.setFloat32(0, 2 ** ev, true);
-    view.setUint32(4, this.lutSize, true);
-    view.setUint32(8, pixelCount, true);
-    for (let axis = 0; axis < 3; axis += 1) {
-      view.setFloat32(16 + axis * 4, this.domainMin[axis], true);
-      view.setFloat32(32 + axis * 4, this.inverseDomainRange[axis], true);
-    }
-    this.runtime.device.queue.writeBuffer(this.parameterBuffer, 0, parameters);
+    this.parameterView.setFloat32(0, 2 ** ev, true);
+    this.parameterView.setUint32(8, pixelCount, true);
+    this.runtime.device.queue.writeBuffer(
+      this.parameterBuffer,
+      0,
+      this.parameters,
+    );
   }
 
   private encode(

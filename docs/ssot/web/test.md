@@ -48,6 +48,7 @@
 - The hardware Preview test verifies a non-fallback WebGPU adapter, requires the first EV response at 1024px, exercises every built-in Look, and records GPU execution plus readback time.
 - Losing the shared WebGPU device makes later work fail with one explicit reload instruction; preview allocation failure releases every buffer already created and never enters a CPU renderer.
 - The production build contains no ONNX Runtime, model asset, native RCD backend, benchmark worker, stage-capture entry, or CPU/GPU validation switch.
+- SwiftShader CI runs both the independent corrected-v2 Preview pixel oracle and two consecutive real Sony production AAHD exports. Software WebGPU has a pinned six-code ceiling; hardware export retains the two-code ceiling.
 - A main-branch GitHub Actions release gate runs production browser journeys and exact tiled AAHD checks through SwiftShader WebGPU before Pages deployment, without cloud-provider credentials or external runners.
 - A checksum-verified 9568 × 6376 Sony ILCE-7RM4 RAW under 4× CPU throttling accepts at least 45 exposure input events while decode is active, keeps animation-frame gap p95 below 25 ms and every gap below 100 ms, then publishes the exact settled frame.
 - A 6240 × 4168 Sony ARW produces a nontrivial full-resolution TIFF in under 30 seconds for the export operation, and a later EV preview rerender reuses the existing preview source without another RAW decode.

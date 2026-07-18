@@ -114,7 +114,7 @@ impl PreviewSource {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ColorPipeline, Lut3d, ProcessingMode};
+    use crate::{ColorPipeline, Lut3d};
 
     use super::*;
 
@@ -147,7 +147,7 @@ mod tests {
             301, 302, 310, 311, 312, 320, 321, 322, 330, 331, 332,
         ];
         let lut = Lut3d::parse(IDENTITY_2).unwrap();
-        let pipeline = ColorPipeline::new(0.0, ProcessingMode::CorrectedV2, lut).unwrap();
+        let pipeline = ColorPipeline::new(0.0, lut).unwrap();
         let direct = pipeline.render_preview(&full_source, 4, 4, 2).unwrap();
         let cached = pipeline
             .render_preview(source.pixels().unwrap(), 2, 2, 2)

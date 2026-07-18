@@ -21,11 +21,10 @@ function methodBody(signature) {
 }
 
 const previewConstructor = methodBody(
-  "create_preview_renderer(source_width, source_height, max_edge)",
+  "constructor(source_width, source_height, max_edge)",
 );
 const previewWrite = methodBody("write_source_row(pixels)");
 const lutConstructor = methodBody("constructor(bytes)");
-const previewRender = methodBody("render(ev, max_edge, include_base)");
 const tiffConstructor = methodBody("constructor(width, height)");
 const tiffWrite = methodBody("write_rendered_strip(pixels)");
 
@@ -48,14 +47,6 @@ if (previewConstructor.includes("passArray16ToWasm0")) {
 if (!previewWrite.includes("passArray16ToWasm0(pixels")) {
   throw new Error("Preview renderer no longer receives bounded RGB16 rows.");
 }
-if (previewRender.includes("passArray16ToWasm0")) {
-  throw new Error(
-    "Preview rerender unexpectedly copies an RGB16 source image.",
-  );
-}
-if (previewRender.includes("passStringToWasm0")) {
-  throw new Error("Preview EV rerender unexpectedly reparses the current LUT.");
-}
 if (!tiffWrite.includes("passArray16ToWasm0(pixels")) {
   throw new Error(
     "TIFF encoder no longer receives bounded GPU-rendered RGB16 views.",
@@ -63,9 +54,14 @@ if (!tiffWrite.includes("passArray16ToWasm0(pixels")) {
 }
 if (
   binding.includes("render_strip(pixels)") ||
-  binding.includes("write_strip()")
+  binding.includes("write_strip()") ||
+  binding.includes("class WasmPreview") ||
+  binding.includes("class PreviewRenderer") ||
+  binding.includes("create_preview_renderer(")
 ) {
-  throw new Error("CPU color rendering must not be exposed to the browser.");
+  throw new Error(
+    "CPU preview or color rendering must not be exposed to the browser.",
+  );
 }
 if (binding.includes("export function render_tiff(")) {
   throw new Error("The whole-image TIFF WASM binding must not be exported.");

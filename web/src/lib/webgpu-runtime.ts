@@ -7,6 +7,57 @@ export interface WebGpuRuntime {
 let runtimePromise: Promise<WebGpuRuntime> | undefined;
 let runtimeFailure: Error | undefined;
 
+/** Compiles one compute entry point and surfaces WGSL diagnostics clearly. */
+export async function createCheckedComputePipeline(
+  device: GPUDevice,
+  code: string,
+  label: string,
+  entryPoint = "main",
+): Promise<GPUComputePipeline> {
+  const module = device.createShaderModule({ code, label });
+  const compilation = await module.getCompilationInfo();
+  const errors = compilation.messages.filter(
+    (message) => message.type === "error",
+  );
+  if (errors.length > 0) {
+    throw new Error(
+      `${label} failed to compile: ${errors.map(({ message }) => message).join("; ")}`,
+    );
+  }
+  return device.createComputePipelineAsync({
+    label,
+    layout: "auto",
+    compute: { module, entryPoint },
+  });
+}
+
+/** Uploads a non-shared view, adding only the alignment padding WebGPU needs. */
+export function writePaddedBuffer(
+  device: GPUDevice,
+  destination: GPUBuffer,
+  source: ArrayBufferView<ArrayBufferLike>,
+  paddedBytes: number,
+): void {
+  if (
+    source.buffer instanceof ArrayBuffer &&
+    source.byteLength === paddedBytes
+  ) {
+    device.queue.writeBuffer(
+      destination,
+      0,
+      source.buffer,
+      source.byteOffset,
+      source.byteLength,
+    );
+    return;
+  }
+  const padded = new Uint8Array(paddedBytes);
+  padded.set(
+    new Uint8Array(source.buffer, source.byteOffset, source.byteLength),
+  );
+  device.queue.writeBuffer(destination, 0, padded);
+}
+
 /** Returns the one high-performance WebGPU device shared by browser compute stages. */
 export async function getWebGpuRuntime(
   requiredBufferBytes = 0,

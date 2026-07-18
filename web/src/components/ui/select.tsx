@@ -1,8 +1,6 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 
-import { cn } from "../../lib/cn";
-
 export interface SelectOption {
   value: string;
   label: string;
@@ -58,7 +56,7 @@ export function Select({
                   <SelectPrimitive.Item
                     key={option.value}
                     value={option.value}
-                    className={cn("select-item")}
+                    className="select-item"
                   >
                     <SelectPrimitive.ItemText>
                       {option.label}

@@ -1,6 +1,11 @@
 import shader from "./preview-transform.wgsl?raw";
 import type { GpuLut } from "./webgpu-color";
-import { getWebGpuRuntime, type WebGpuRuntime } from "./webgpu-runtime";
+import {
+  createCheckedComputePipeline,
+  getWebGpuRuntime,
+  type WebGpuRuntime,
+  writePaddedBuffer,
+} from "./webgpu-runtime";
 
 export interface WebGpuPreview {
   width: number;
@@ -29,6 +34,9 @@ export class WebGpuPreviewRenderer {
   private lutSize: number;
   private domainMin: Float32Array;
   private inverseDomainRange: Float32Array;
+  private bindGroup: GPUBindGroup;
+  private readonly parameters = new ArrayBuffer(64);
+  private readonly parameterView = new DataView(this.parameters);
 
   private constructor(
     private readonly runtime: WebGpuRuntime,
@@ -47,6 +55,7 @@ export class WebGpuPreviewRenderer {
     this.lutSize = lut.size();
     this.domainMin = lut.domain_min();
     this.inverseDomainRange = inverseRange(lut);
+    this.bindGroup = this.createBindGroup();
   }
 
   static async create(
@@ -82,21 +91,7 @@ export class WebGpuPreviewRenderer {
         size: sourceBytes,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       });
-      if (sourceBytes === source.byteLength) {
-        device.queue.writeBuffer(
-          sourceBuffer,
-          0,
-          source.buffer,
-          source.byteOffset,
-          source.byteLength,
-        );
-      } else {
-        const padded = new Uint8Array(sourceBytes);
-        padded.set(
-          new Uint8Array(source.buffer, source.byteOffset, source.byteLength),
-        );
-        device.queue.writeBuffer(sourceBuffer, 0, padded);
-      }
+      writePaddedBuffer(device, sourceBuffer, source, sourceBytes);
       const renderer = new WebGpuPreviewRenderer(
         runtime,
         pipeline,
@@ -130,6 +125,7 @@ export class WebGpuPreviewRenderer {
     this.lutSize = lut.size();
     this.domainMin = lut.domain_min();
     this.inverseDomainRange = inverseRange(lut);
+    this.bindGroup = this.createBindGroup();
     previous.destroy();
   }
 
@@ -145,19 +141,9 @@ export class WebGpuPreviewRenderer {
     this.writeParameters(ev, width, height, pixelCount, includeBase);
 
     const commands = this.runtime.device.createCommandEncoder();
-    const bindGroup = this.runtime.device.createBindGroup({
-      layout: this.pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.sourceBuffer } },
-        { binding: 1, resource: { buffer: this.lutBuffer } },
-        { binding: 2, resource: { buffer: this.baseBuffer } },
-        { binding: 3, resource: { buffer: this.lutOutputBuffer } },
-        { binding: 4, resource: { buffer: this.parameterBuffer } },
-      ],
-    });
     const pass = commands.beginComputePass();
     pass.setPipeline(this.pipeline);
-    pass.setBindGroup(0, bindGroup);
+    pass.setBindGroup(0, this.bindGroup);
     pass.dispatchWorkgroups(Math.ceil(pixelCount / 256));
     pass.end();
     if (includeBase) {
@@ -233,8 +219,7 @@ export class WebGpuPreviewRenderer {
     pixelCount: number,
     includeBase: boolean,
   ): void {
-    const parameters = new ArrayBuffer(64);
-    const view = new DataView(parameters);
+    const view = this.parameterView;
     view.setFloat32(0, 2 ** ev, true);
     view.setUint32(4, this.lutSize, true);
     view.setUint32(8, this.width, true);
@@ -247,7 +232,24 @@ export class WebGpuPreviewRenderer {
       view.setFloat32(32 + axis * 4, this.domainMin[axis], true);
       view.setFloat32(48 + axis * 4, this.inverseDomainRange[axis], true);
     }
-    this.runtime.device.queue.writeBuffer(this.parameterBuffer, 0, parameters);
+    this.runtime.device.queue.writeBuffer(
+      this.parameterBuffer,
+      0,
+      this.parameters,
+    );
+  }
+
+  private createBindGroup(): GPUBindGroup {
+    return this.runtime.device.createBindGroup({
+      layout: this.pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.sourceBuffer } },
+        { binding: 1, resource: { buffer: this.lutBuffer } },
+        { binding: 2, resource: { buffer: this.baseBuffer } },
+        { binding: 3, resource: { buffer: this.lutOutputBuffer } },
+        { binding: 4, resource: { buffer: this.parameterBuffer } },
+      ],
+    });
   }
 }
 
@@ -256,20 +258,11 @@ async function createPipeline(): Promise<{
   pipeline: GPUComputePipeline;
 }> {
   const runtime = await getWebGpuRuntime();
-  const module = runtime.device.createShaderModule({ code: shader });
-  const compilation = await module.getCompilationInfo();
-  const errors = compilation.messages.filter(
-    (message) => message.type === "error",
+  const pipeline = await createCheckedComputePipeline(
+    runtime.device,
+    shader,
+    "WebGPU preview shader",
   );
-  if (errors.length > 0) {
-    throw new Error(
-      `WebGPU preview shader failed to compile: ${errors.map(({ message }) => message).join("; ")}`,
-    );
-  }
-  const pipeline = await runtime.device.createComputePipelineAsync({
-    layout: "auto",
-    compute: { module, entryPoint: "main" },
-  });
   return { runtime, pipeline };
 }
 
