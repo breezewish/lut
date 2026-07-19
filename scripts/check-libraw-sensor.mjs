@@ -1,9 +1,15 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
-import createLibRaw from "../web/src/libraw/libraw.js";
+import createRegularLibRaw from "../web/src/libraw/libraw.js";
+import createLibRaw from "./libraw-node-runtime.mjs";
 
 const root = resolve(import.meta.dirname, "..");
+await promisify(execFile)("python3", [
+  resolve(root, "tests/fixtures/make_packed_dng.py"),
+]);
 const fixtures = [
   {
     name: "Sony ILME-FX30 ARW",
@@ -15,10 +21,10 @@ const fixtures = [
     cfa: [0, 1, 3, 2],
     blackLevels: [512, 512, 512, 512],
     whiteLevel: 16380,
-    aahdScaleRange: 15868,
+    demosaicScaleRange: 15868,
     orientation: 0,
     whiteBalance: [2643, 1024, 1590, 1024],
-    aahdPreMultipliers: [
+    demosaicPreMultipliers: [
       1, 0.38743850588798523, 0.6015890836715698, 0.38743850588798523,
     ],
     xyzToCamera: [
@@ -28,6 +34,8 @@ const fixtures = [
     sum: 28170738174,
     samples: [702, 940, 622, 1036, 642, 518],
     webGpuAahd: true,
+    webGpuXtrans: false,
+    parallelUnpack: true,
   },
   {
     name: "Leica M8 DNG",
@@ -39,10 +47,10 @@ const fixtures = [
     cfa: [0, 1, 3, 2],
     blackLevels: [0, 0, 0, 0],
     whiteLevel: 16383,
-    aahdScaleRange: 16256,
+    demosaicScaleRange: 16256,
     orientation: 0,
     whiteBalance: [2.0458984375, 1, 1.29052734375, 0],
-    aahdPreMultipliers: [
+    demosaicPreMultipliers: [
       1, 0.4887828230857849, 0.6307876110076904, 0.4887828230857849,
     ],
     xyzToCamera: [
@@ -52,6 +60,29 @@ const fixtures = [
     sum: 31653712396,
     samples: [3080, 6806, 3306, 6806, 441, 812],
     webGpuAahd: true,
+    webGpuXtrans: false,
+    parallelUnpack: true,
+  },
+  {
+    name: "Synthetic 12-bit packed DNG",
+    path: "tests/fixtures/packed-12.dng",
+    width: 1024,
+    height: 1024,
+    sensorType: "bayer",
+    cfaSize: 2,
+    cfa: [0, 1, 3, 2],
+    blackLevels: [0, 0, 0, 0],
+    whiteLevel: 4095,
+    demosaicScaleRange: 4095,
+    orientation: 0,
+    whiteBalance: [1, 1, 1, 0],
+    demosaicPreMultipliers: [1, 1, 1, 1],
+    xyzToCamera: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    sum: 2_148_237_312,
+    samples: [0, 268, 34, 302, 3584, 705],
+    webGpuAahd: true,
+    webGpuXtrans: false,
+    parallelUnpack: true,
   },
 ];
 if (process.env.XTRANS_FIXTURE) {
@@ -68,7 +99,7 @@ if (process.env.XTRANS_FIXTURE) {
     ],
     blackLevels: [1023, 1023, 1023, 1023],
     whiteLevel: 16383,
-    aahdScaleRange: 0,
+    demosaicScaleRange: 15360,
     orientation: 0,
     whiteBalance: [581, 302, 482, 0],
     xyzToCamera: [
@@ -78,25 +109,45 @@ if (process.env.XTRANS_FIXTURE) {
     sum: 56057963413,
     samples: [2653, 4891, 5299, 4840, 1893, 7488],
     webGpuAahd: false,
+    webGpuXtrans: true,
+    parallelUnpack: true,
   });
 }
 
-const wasmBytes = await readFile(resolve(root, "web/src/libraw/libraw.wasm"));
+const wasmBytes = await readFile(
+  resolve(root, "web/src/libraw/threaded/libraw.wasm"),
+);
+const regularWasmBytes = await readFile(
+  resolve(root, "web/src/libraw/libraw.wasm"),
+);
+const regularModule = await createRegularLibRaw({
+  wasmBinary: regularWasmBytes,
+});
 const module = await createLibRaw({ wasmBinary: wasmBytes });
 
 for (const fixture of fixtures) {
+  const rawBytes = new Uint8Array(await readFile(resolve(root, fixture.path)));
+  let directInfoJson;
   const raw = new module.LibRaw();
   try {
-    raw.open(
-      new Uint8Array(await readFile(resolve(root, fixture.path))),
-      false,
+    raw.open(rawBytes, false);
+    assertEqual(
+      raw.usesParallelUnpack(),
+      fixture.parallelUnpack,
+      `${fixture.name} parallel unpack route`,
     );
     assertEqual(
       raw.supportsWebGpuAahd(),
       fixture.webGpuAahd,
       `${fixture.name} WebGPU AAHD route`,
     );
+    assertEqual(
+      raw.supportsWebGpuXtrans(),
+      fixture.webGpuXtrans,
+      `${fixture.name} WebGPU X-Trans support`,
+    );
     const info = raw.sensorInfo();
+    directInfoJson = JSON.stringify(info);
     if (process.env.PRINT_SENSOR_INFO === "1")
       console.log(JSON.stringify(info));
     const mosaic = raw.sensorView(0, info.sampleCount);
@@ -134,9 +185,9 @@ for (const fixture of fixtures) {
       `${fixture.name} white level`,
     );
     assertEqual(
-      info.aahdScaleRange,
-      fixture.aahdScaleRange,
-      `${fixture.name} AAHD scale range`,
+      info.demosaicScaleRange,
+      fixture.demosaicScaleRange,
+      `${fixture.name} demosaic scale range`,
     );
     assertEqual(
       info.orientation,
@@ -150,8 +201,8 @@ for (const fixture of fixtures) {
     );
     if (fixture.sensorType === "bayer") {
       assertArray(
-        info.aahdPreMultipliers,
-        fixture.aahdPreMultipliers,
+        info.demosaicPreMultipliers,
+        fixture.demosaicPreMultipliers,
         `${fixture.name} effective AAHD WB`,
         1e-6,
       );
@@ -171,6 +222,26 @@ for (const fixture of fixtures) {
     let sum = 0;
     for (const sample of mosaic) sum += sample;
     assertEqual(sum, fixture.sum, `${fixture.name} mosaic checksum`);
+    const regularRaw = new regularModule.LibRaw();
+    try {
+      regularRaw.open(rawBytes, false);
+      const regularInfo = regularRaw.sensorInfo();
+      assertEqual(
+        JSON.stringify(regularInfo),
+        directInfoJson,
+        `${fixture.name} regular/threaded metadata parity`,
+      );
+      const regularMosaic = regularRaw.sensorView(0, regularInfo.sampleCount);
+      for (let index = 0; index < mosaic.length; index += 1) {
+        if (mosaic[index] !== regularMosaic[index]) {
+          throw new Error(
+            `${fixture.name} regular/threaded mosaic differs at ${index}: ${regularMosaic[index]} != ${mosaic[index]}`,
+          );
+        }
+      }
+    } finally {
+      regularRaw.delete();
+    }
     if (raw.sensorView(0, 1).buffer !== mosaic.buffer) {
       throw new Error(
         `${fixture.name} sensor slices are copies instead of WASM views`,
@@ -191,10 +262,45 @@ for (const fixture of fixtures) {
       }
     }
     console.log(
-      `${fixture.name} sensor mosaic and metadata match rawpy exactly`,
+      `${fixture.name} regular and threaded sensor mosaics match exactly`,
     );
   } finally {
     raw.delete();
+  }
+
+  const previewRaw = new module.LibRaw();
+  try {
+    previewRaw.openPreview(rawBytes, 1_024);
+    assertEqual(
+      previewRaw.supportsWebGpuAahd() || previewRaw.supportsWebGpuXtrans(),
+      true,
+      `${fixture.name} preview sensor capture route`,
+    );
+    previewRaw.captureSensorMosaic();
+    previewRaw.imageInfoRetainingDecoder();
+    const capturedInfo = previewRaw.finishSensorInfo();
+    assertEqual(
+      JSON.stringify(capturedInfo),
+      directInfoJson,
+      `${fixture.name} preview/export sensor metadata parity`,
+    );
+    const capturedMosaic = previewRaw.sensorView(0, capturedInfo.sampleCount);
+    let capturedSum = 0;
+    for (const sample of capturedMosaic) capturedSum += sample;
+    assertEqual(
+      capturedSum,
+      fixture.sum,
+      `${fixture.name} preview/export mosaic parity`,
+    );
+
+    previewRaw.discardImage();
+    assertEqual(
+      previewRaw.sensorView(0, 1)[0],
+      fixture.samples[0],
+      `${fixture.name} captured mosaic lifetime`,
+    );
+  } finally {
+    previewRaw.delete();
   }
 }
 

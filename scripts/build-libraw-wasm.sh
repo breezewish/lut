@@ -4,15 +4,20 @@ set -euo pipefail
 
 readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly OUTPUT_DIR="$ROOT/web/src/libraw"
+readonly THREAD_OUTPUT_DIR="$OUTPUT_DIR/threaded"
 readonly IMAGE="emscripten/emsdk:5.0.7"
 readonly LIBRAW_COMMIT="0029e79482c3a133d3de72ff51117ca7d0a4ff43"
 readonly JPEG_COMMIT="4e151a4ad91001b3aa8c2ece2205c15f487ce320"
 readonly FMA_OVERRIDE_SHA256="4d17be3e69bd0995410c07181ea56f35353ee60aa47bfe2d874ff687f593a146"
 readonly AAHD_MATH_SHA256="4e06458a46291439b3c3db0571fcb0a29d9d3a2ed4be75d98b9b2e46529cc7f2"
+readonly PTHREAD_PATCH_SHA256="$(sha256sum "$ROOT/scripts/patch-libraw-pthreads.mjs" | cut -d ' ' -f 1)"
+readonly PARALLEL_FOR_SHA256="$(sha256sum "$ROOT/crates/alchemy-libraw/src/parallel_for.h" | cut -d ' ' -f 1)"
 readonly BROWSER_WRAPPER_SHA256="$(sha256sum "$ROOT/crates/alchemy-libraw/src/browser_wrapper.cpp" | cut -d ' ' -f 1)"
-readonly BUILD_ID="libraw-${LIBRAW_COMMIT}-wrapper-${BROWSER_WRAPPER_SHA256:0:12}-jpeg-${JPEG_COMMIT}-fma-${FMA_OVERRIDE_SHA256:0:12}-aahd-${AAHD_MATH_SHA256:0:12}-emcc-5.0.7-signed-char-wrapv-no-contract"
+readonly BUILD_ID="libraw-${LIBRAW_COMMIT}-wrapper-${BROWSER_WRAPPER_SHA256:0:12}-jpeg-${JPEG_COMMIT}-fma-${FMA_OVERRIDE_SHA256:0:12}-aahd-${AAHD_MATH_SHA256:0:12}-pthread-${PTHREAD_PATCH_SHA256:0:12}-${PARALLEL_FOR_SHA256:0:12}-emcc-5.0.7-signed-char-wrapv-no-contract"
 readonly JPEG_BUILD_DIR="$OUTPUT_DIR/.libjpeg-build"
 readonly AAHD_OBJECT="$OUTPUT_DIR/.aahd_demosaic.o"
+readonly AAHD_PTHREAD_OBJECT="$OUTPUT_DIR/.aahd_demosaic_pthread.o"
+readonly PATCHED_SOURCE_DIR="web/src/libraw/.patched-libraw"
 readonly -a CONTAINER_RUN=(
   "${CONTAINER_RUNTIME:-docker}" run --rm
   --user "$(id -u):$(id -g)"
@@ -41,14 +46,19 @@ git -C "$ROOT/vendor/libjpeg-turbo" diff --cached --quiet \
 if [[ -f "$OUTPUT_DIR/.build-id" ]] \
   && [[ "$(<"$OUTPUT_DIR/.build-id")" == "$BUILD_ID" ]] \
   && [[ -f "$OUTPUT_DIR/libraw.js" ]] \
-  && [[ -f "$OUTPUT_DIR/libraw.wasm" ]]; then
+  && [[ -f "$OUTPUT_DIR/libraw.wasm" ]] \
+  && [[ -f "$THREAD_OUTPUT_DIR/libraw.js" ]] \
+  && [[ -f "$THREAD_OUTPUT_DIR/libraw.wasm" ]]; then
   echo "LibRaw WASM is current ($BUILD_ID)."
   exit 0
 fi
 
-mkdir -p "$OUTPUT_DIR"
+cd "$ROOT"
+mkdir -p "$OUTPUT_DIR" "$THREAD_OUTPUT_DIR"
+rm -rf "$JPEG_BUILD_DIR" "$PATCHED_SOURCE_DIR"
+cp -a vendor/LibRaw "$PATCHED_SOURCE_DIR"
+node scripts/patch-libraw-pthreads.mjs "$PATCHED_SOURCE_DIR"
 mapfile -d '' SOURCES < <(
-  cd "$ROOT"
   find vendor/LibRaw/src -name '*.cpp' \
     ! -path '*/integration/*' \
     ! -name 'postprocessing_ph.cpp' \
@@ -58,9 +68,16 @@ mapfile -d '' SOURCES < <(
     ! -path '*/postprocessing/postprocessing_utils.cpp' \
     -print0 | sort -z
 )
-
-cd "$ROOT"
-rm -rf "$JPEG_BUILD_DIR"
+mapfile -d '' PTHREAD_SOURCES < <(
+  find "$PATCHED_SOURCE_DIR/src" -name '*.cpp' \
+    ! -path '*/integration/*' \
+    ! -name 'postprocessing_ph.cpp' \
+    ! -name 'preprocessing_ph.cpp' \
+    ! -name 'write_ph.cpp' \
+    ! -path '*/demosaic/aahd_demosaic.cpp' \
+    ! -path '*/postprocessing/postprocessing_utils.cpp' \
+    -print0 | sort -z
+)
 "${CONTAINER_RUN[@]}" \
   "$IMAGE" \
   bash -lc \
@@ -123,6 +140,59 @@ rm -rf "$JPEG_BUILD_DIR"
     web/src/libraw/.libjpeg-build/libjpeg.a \
     -o web/src/libraw/libraw.js
 
-rm -rf "$JPEG_BUILD_DIR" "$AAHD_OBJECT"
+"${CONTAINER_RUN[@]}" \
+  "$IMAGE" \
+  em++ \
+    -std=c++17 \
+    -O3 \
+    -pthread \
+    -fsigned-char \
+    -fwrapv \
+    -ffp-contract=off \
+    -DLIBRAW_NODLL \
+    -DUSE_JPEG \
+    -DUSE_JPEG8 \
+    -I"$PATCHED_SOURCE_DIR" \
+    -Ivendor/libjpeg-turbo/src \
+    -Iweb/src/libraw/.libjpeg-build \
+    -include crates/alchemy-libraw/src/parallel_for.h \
+    -include crates/alchemy-libraw/src/aahd_math_override.h \
+    -c "$PATCHED_SOURCE_DIR/src/demosaic/aahd_demosaic.cpp" \
+    -o web/src/libraw/.aahd_demosaic_pthread.o
+
+"${CONTAINER_RUN[@]}" \
+  "$IMAGE" \
+  em++ \
+    -std=c++17 \
+    -O3 \
+    -pthread \
+    -fsigned-char \
+    -fwrapv \
+    -ffp-contract=off \
+    -DLIBRAW_NODLL \
+    -DUSE_JPEG \
+    -DUSE_JPEG8 \
+    -I"$PATCHED_SOURCE_DIR" \
+    -Ivendor/libjpeg-turbo/src \
+    -Iweb/src/libraw/.libjpeg-build \
+    -include crates/alchemy-libraw/src/parallel_for.h \
+    --bind \
+    -sMODULARIZE=1 \
+    -sEXPORT_ES6=1 \
+    -sENVIRONMENT=worker \
+    -sDISABLE_EXCEPTION_CATCHING=0 \
+    -sEXPORTED_RUNTIME_METHODS=getExceptionMessage,decrementExceptionRefcount \
+    -sALLOW_MEMORY_GROWTH=1 \
+    -sINITIAL_MEMORY=128MB \
+    '-sPTHREAD_POOL_SIZE=Math.max(1, Math.min(3, navigator.hardwareConcurrency - 1))' \
+    -sPTHREAD_POOL_SIZE_STRICT=2 \
+    "${PTHREAD_SOURCES[@]}" \
+    crates/alchemy-libraw/src/postprocessing_utils.cpp \
+    crates/alchemy-libraw/src/browser_wrapper.cpp \
+    web/src/libraw/.aahd_demosaic_pthread.o \
+    web/src/libraw/.libjpeg-build/libjpeg.a \
+    -o web/src/libraw/threaded/libraw.js
+
+rm -rf "$JPEG_BUILD_DIR" "$AAHD_OBJECT" "$AAHD_PTHREAD_OBJECT" "$PATCHED_SOURCE_DIR"
 printf '%s' "$BUILD_ID" > "$OUTPUT_DIR/.build-id"
 echo "Built $BUILD_ID."

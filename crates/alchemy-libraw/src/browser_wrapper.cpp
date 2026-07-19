@@ -73,8 +73,24 @@ public:
     preview_resize_ms_ = 0;
   }
 
+  void enable_demosaic_capture() {
+    capture_demosaic_ = true;
+    demosaic_capture_.clear();
+  }
+
+  const std::vector<std::uint16_t> &demosaic_capture() const {
+    return demosaic_capture_;
+  }
+
   bool has_legacy_fuji_geometry() const {
     return libraw_internal_data.internal_output_params.fuji_width != 0;
+  }
+
+  bool has_parallel_packed_dng() const {
+    const unsigned bits = libraw_internal_data.unpacker_data.tiff_bps;
+    return imgdata.idata.filters != 0 &&
+           libraw_internal_data.unpacker_data.tiff_samples == 1 && bits >= 8 &&
+           bits <= 15;
   }
 
   bool has_standard_aahd_geometry() {
@@ -107,6 +123,16 @@ public:
       }
     }
     return real_colors == 3 && bad_bayer == 0;
+  }
+
+  bool has_standard_xtrans_geometry() const {
+    const auto &sizes = imgdata.sizes;
+    const auto &identity = imgdata.idata;
+    const auto &internal = libraw_internal_data.internal_output_params;
+    return identity.colors == 3 && identity.filters == LIBRAW_XTRANS &&
+           !identity.is_foveon && !internal.zero_is_bad &&
+           internal.fuji_width == 0 && !imgdata.params.four_color_rgb &&
+           std::abs(sizes.pixel_aspect - 1.0) <= 0.005;
   }
 
   void finish_process_timings(DecodeTimings &timings) const {
@@ -146,6 +172,8 @@ private:
   double color_finished_at_ = 0;
   double preview_resize_ms_ = 0;
   unsigned preview_max_edge_ = 0;
+  bool capture_demosaic_ = false;
+  std::vector<std::uint16_t> demosaic_capture_;
 
   static std::size_t oriented_index(unsigned row, unsigned col,
                                     unsigned width, unsigned height,
@@ -343,6 +371,18 @@ private:
 
   static void finish_demosaic(void *raw) {
     auto *processor = static_cast<TimedLibRaw *>(raw);
+    if (processor->capture_demosaic_) {
+      const std::size_t pixels =
+          static_cast<std::size_t>(processor->imgdata.sizes.width) *
+          processor->imgdata.sizes.height;
+      processor->demosaic_capture_.resize(pixels * 3);
+      for (std::size_t index = 0; index < pixels; ++index) {
+        for (unsigned channel = 0; channel < 3; ++channel) {
+          processor->demosaic_capture_[index * 3 + channel] =
+              processor->imgdata.image[index][channel];
+        }
+      }
+    }
     processor->demosaic_finished_at_ = emscripten_get_now();
   }
 
@@ -390,6 +430,8 @@ public:
     }
     clear_image();
     sensor_.clear();
+    sensor_metadata_ = val::undefined();
+    sensor_black_captured_ = false;
     processor_.recycle();
     timings_ = {};
     sensor_timings_ = {};
@@ -480,7 +522,47 @@ public:
     return result;
   }
 
-  val image_info() {
+  val xtrans_cbrt_view() const {
+    static const std::array<float, 65536> table = [] {
+      std::array<float, 65536> values{};
+      for (unsigned index = 0; index < values.size(); ++index) {
+        const float ratio = index / 65535.0f;
+        values[index] = ratio > 0.008856f
+                            ? std::pow(ratio, 1.f / 3.0f)
+                            : 7.787f * ratio + 16.f / 116.0f;
+      }
+      return values;
+    }();
+    return val(typed_memory_view(table.size(), table.data()));
+  }
+
+  bool uses_parallel_unpack() {
+    require_opened();
+    libraw_decoder_info_t decoder{};
+    processor_.get_decoder_info(&decoder);
+    if (decoder.decoder_name == nullptr) return false;
+    if (std::strcmp(decoder.decoder_name, "fuji_compressed_load_raw()") == 0 ||
+        std::strcmp(decoder.decoder_name, "panasonicC8_load_raw()") == 0 ||
+        std::strcmp(decoder.decoder_name, "crxLoadRaw()") == 0 ||
+        std::strcmp(decoder.decoder_name, "sony_arw2_load_raw()") == 0) {
+      return true;
+    }
+
+    // Packed DNG is only expensive when LibRaw's generic getbits() extraction
+    // is required. Tiny generated fixtures must not pay the lazy pthread
+    // runtime startup cost.
+    const auto pixels =
+        static_cast<std::size_t>(processor_.imgdata.sizes.raw_width) *
+        processor_.imgdata.sizes.raw_height;
+    return std::strcmp(decoder.decoder_name, "packed_dng_load_raw()") == 0 &&
+           pixels >= 1'000'000 && processor_.has_parallel_packed_dng();
+  }
+
+  val image_info() { return prepare_image_info(true); }
+
+  val image_info_retaining_decoder() { return prepare_image_info(false); }
+
+  val prepare_image_info(bool release_after_decode) {
     if (image_ == nullptr) {
       require_opened();
       int status = ensure_unpacked();
@@ -514,10 +596,10 @@ public:
             "LibRaw returned an unexpected processed image layout");
       }
 
-      // dcraw_make_mem_image owns an independent copy. Release the input RAW,
-      // mosaic, and four-channel processing state before color rendering. The
-      // remaining RGB16 allocation is read through bounded zero-copy views.
-      release_decoder_state();
+      // dcraw_make_mem_image owns an independent copy. Production normally
+      // releases the larger decoder state here. Preview may retain it briefly
+      // so the settled frame can publish before analyzing its copied mosaic.
+      if (release_after_decode) release_decoder_state();
       timings_.total_ms = emscripten_get_now() - total_started_at_;
     }
 
@@ -526,6 +608,22 @@ public:
     result.set("height", image_->height);
     result.set("sampleCount", image_->data_size / sizeof(std::uint16_t));
     return result;
+  }
+
+  void discard_image() { clear_image(); }
+
+  void enable_demosaic_capture() { processor_.enable_demosaic_capture(); }
+
+  val demosaic_view(std::size_t offset, std::size_t length) const {
+    const auto &capture = processor_.demosaic_capture();
+    if (capture.empty()) {
+      throw std::runtime_error(
+          "LibRaw demosaic capture must be enabled before image_info()");
+    }
+    if (offset > capture.size() || length > capture.size() - offset) {
+      throw std::runtime_error("LibRaw demosaic view exceeds the captured image");
+    }
+    return val(typed_memory_view(length, capture.data() + offset));
   }
 
   bool supports_webgpu_aahd() {
@@ -551,81 +649,98 @@ public:
     return true;
   }
 
-  val sensor_info() {
+  bool supports_webgpu_xtrans() {
     require_opened();
-    if (sensor_.empty()) {
-      const int status = ensure_unpacked();
-      if (status != LIBRAW_SUCCESS) {
-        release_decoder_state();
-        fail("unpack the sensor mosaic", status);
-      }
+    const int status = ensure_unpacked();
+    if (status != LIBRAW_SUCCESS) {
+      release_decoder_state();
+      fail("unpack the sensor mosaic", status);
+    }
 
-      const auto &sizes = processor_.imgdata.sizes;
-      const auto &idata = processor_.imgdata.idata;
+    const auto &sizes = processor_.imgdata.sizes;
+    if (processor_.imgdata.rawdata.raw_image == nullptr ||
+        !processor_.has_standard_xtrans_geometry() || sizes.flip != 0 ||
+        sizes.width < LIBRAW_AHD_TILE || sizes.height < LIBRAW_AHD_TILE) {
+      return false;
+    }
+    try {
+      adjusted_black_levels();
+    } catch (const SpatialBlackLevelsUnsupported &) {
+      return false;
+    }
+    return true;
+  }
+
+  val sensor_info() {
+    val result = prepare_sensor_info(false);
+    release_decoder_state();
+    return result;
+  }
+
+  val finish_sensor_info() {
+    val result = prepare_sensor_info(true);
+    release_decoder_state();
+    return result;
+  }
+
+  val prepare_sensor_info(bool opened_for_preview) {
+    require_opened();
+    capture_sensor_mosaic();
+    if (sensor_metadata_.isUndefined()) {
       const auto &color = processor_.imgdata.rawdata.color;
-      if (processor_.imgdata.rawdata.raw_image == nullptr ||
-          (idata.filters != 9 && idata.filters <= 1000)) {
-        release_decoder_state();
+      if (!sensor_black_captured_) {
         throw std::runtime_error(
-            "LibRaw did not return a Bayer or X-Trans sensor mosaic");
+            "LibRaw sensor black levels were not captured before processing");
       }
-      if (sizes.width == 0 || sizes.height == 0 ||
-          sizes.left_margin + sizes.width > sizes.raw_width ||
-          sizes.top_margin + sizes.height > sizes.raw_height ||
-          sizes.raw_pitch < sizes.raw_width * sizeof(std::uint16_t)) {
-        release_decoder_state();
-        throw std::runtime_error("LibRaw returned invalid sensor geometry");
-      }
-
-      const auto black = adjusted_black_levels();
-      const double copy_started_at = emscripten_get_now();
-      sensor_.resize(static_cast<std::size_t>(sizes.width) * sizes.height);
-      const std::size_t source_stride = sizes.raw_pitch / sizeof(std::uint16_t);
+      const AdjustedBlackLevels black{sensor_black_channels_,
+                                      sensor_black_common_};
       unsigned data_maximum = 0;
-      for (unsigned row = 0; row < sizes.height; ++row) {
-        const auto *source = processor_.imgdata.rawdata.raw_image +
-                             (row + sizes.top_margin) * source_stride +
-                             sizes.left_margin;
-        auto *destination =
-            sensor_.data() + static_cast<std::size_t>(row) * sizes.width;
-        std::memcpy(destination, source, sizes.width * sizeof(std::uint16_t));
-        if (idata.filters != 9) {
-          for (unsigned col = 0; col < sizes.width; ++col) {
-            const unsigned channel = processor_.COLOR(row, col);
-            const unsigned sample =
-                destination[col] > black.channels[channel]
-                    ? destination[col] - black.channels[channel]
-                    : 0;
-            data_maximum = std::max(data_maximum, sample);
-          }
+      for (unsigned row = 0; row < sensor_height_; ++row) {
+        const auto *source =
+            sensor_.data() + static_cast<std::size_t>(row) * sensor_width_;
+        const auto *cfa = sensor_cfa_.data() +
+                          (row % sensor_cfa_size_) * sensor_cfa_size_;
+        unsigned cfa_col = 0;
+        for (unsigned col = 0; col < sensor_width_; ++col) {
+          const unsigned channel = cfa[cfa_col];
+          const unsigned sample = source[col] > black.channels[channel]
+                                      ? source[col] - black.channels[channel]
+                                      : 0;
+          data_maximum = std::max(data_maximum, sample);
+          if (++cfa_col == sensor_cfa_size_) cfa_col = 0;
         }
       }
-      sensor_timings_.mosaic_copy_ms = emscripten_get_now() - copy_started_at;
 
       val cfa = val::array();
-      const unsigned cfa_size = idata.filters == 9 ? 6 : 2;
-      for (unsigned row = 0; row < cfa_size; ++row) {
-        for (unsigned col = 0; col < cfa_size; ++col) {
-          cfa.set(row * cfa_size + col, processor_.COLOR(row, col));
+      for (unsigned row = 0; row < sensor_cfa_size_; ++row) {
+        for (unsigned col = 0; col < sensor_cfa_size_; ++col) {
+          cfa.set(row * sensor_cfa_size_ + col,
+                  sensor_cfa_[row * sensor_cfa_size_ + col]);
         }
       }
       sensor_metadata_ = val::object();
-      sensor_metadata_.set("width", sizes.width);
-      sensor_metadata_.set("height", sizes.height);
+      sensor_metadata_.set("width", sensor_width_);
+      sensor_metadata_.set("height", sensor_height_);
       sensor_metadata_.set("sampleCount", sensor_.size());
-      sensor_metadata_.set("sensorType", idata.filters == 9 ? "xtrans" : "bayer");
-      sensor_metadata_.set("cfaSize", cfa_size);
+      sensor_metadata_.set("sensorType",
+                           sensor_cfa_size_ == 6 ? "xtrans" : "bayer");
+      sensor_metadata_.set("cfaSize", sensor_cfa_size_);
       sensor_metadata_.set("cfaPattern", cfa);
       sensor_metadata_.set("whiteLevel", color.maximum);
       unsigned scale_range = 0;
-      if (idata.filters != 9 && color.maximum > black.common) {
-        // Mirror LibRaw's adjust_maximum() policy. Its effective AAHD range can
-        // be lower than the advertised white level on cameras whose brightest
-        // meaningful sample is close enough to that level.
+      if (color.maximum > black.common) {
+        // Mirror LibRaw's adjust_maximum() policy. Its effective demosaic range
+        // can be lower than the advertised white level when a frame's brightest
+        // meaningful sample is sufficiently close to that level.
         scale_range = color.maximum - black.common;
         libraw_decoder_info_t decoder{};
         processor_.get_decoder_info(&decoder);
-        float threshold = processor_.imgdata.params.adjust_maximum_thr;
+        // Preview disables this full-frame adjustment for its display decode.
+        // A captured mosaic is reused by export, so retain export's default
+        // scale range instead of leaking the preview-only parameter into it.
+        float threshold = opened_for_preview
+                              ? LIBRAW_DEFAULT_ADJUST_MAXIMUM_THRESHOLD
+                              : processor_.imgdata.params.adjust_maximum_thr;
         if (threshold > 0.99999f) {
           threshold = LIBRAW_DEFAULT_ADJUST_MAXIMUM_THRESHOLD;
         }
@@ -636,15 +751,15 @@ public:
           scale_range = data_maximum;
         }
       }
-      sensor_metadata_.set("aahdScaleRange", scale_range);
+      sensor_metadata_.set("demosaicScaleRange", scale_range);
       const auto pre_multipliers =
           aahd_pre_multipliers(black, scale_range);
       val pre_multiplier_array = val::array();
       for (unsigned channel = 0; channel < 4; ++channel) {
         pre_multiplier_array.set(channel, pre_multipliers[channel]);
       }
-      sensor_metadata_.set("aahdPreMultipliers", pre_multiplier_array);
-      sensor_metadata_.set("orientation", sizes.flip);
+      sensor_metadata_.set("demosaicPreMultipliers", pre_multiplier_array);
+      sensor_metadata_.set("orientation", sensor_orientation_);
 
       val black_levels = val::array();
       val camera_white_balance = val::array();
@@ -670,28 +785,93 @@ public:
       };
       val rgb_camera = val::array();
       val aahd_yuv_matrix = val::array();
+      val xtrans_lab_matrix = val::array();
       val prophoto_matrix = val::array();
+      static constexpr double xyz_rgb[3][3] = {
+          {0.4124564, 0.3575761, 0.1804375},
+          {0.2126729, 0.7151522, 0.0721750},
+          {0.0193339, 0.1191920, 0.9503041},
+      };
+      static constexpr float d65_white[3] = {0.95047f, 1.0f, 1.08883f};
       for (unsigned row = 0; row < 3; ++row) {
         for (unsigned col = 0; col < 4; ++col) {
           rgb_camera.set(row * 4 + col, color.rgb_cam[row][col]);
           float yuv = 0;
+          float lab = 0;
           float prophoto = 0;
           for (unsigned term = 0; term < 3; ++term) {
             yuv += yuv_coefficients[row][term] * color.rgb_cam[term][col];
+            lab += static_cast<float>(xyz_rgb[row][term] *
+                                      color.rgb_cam[term][col] /
+                                      d65_white[row]);
             prophoto += float(LibRaw_constants::prophoto_rgb[row][term] *
                               color.rgb_cam[term][col]);
           }
           if (col < 3) aahd_yuv_matrix.set(row * 3 + col, yuv);
+          if (col < 3) xtrans_lab_matrix.set(row * 3 + col, lab);
           prophoto_matrix.set(row * 4 + col, prophoto);
         }
       }
       sensor_metadata_.set("rgbCamera", rgb_camera);
       sensor_metadata_.set("aahdYuvMatrix", aahd_yuv_matrix);
+      sensor_metadata_.set("xtransLabMatrix", xtrans_lab_matrix);
       sensor_metadata_.set("librawProPhotoMatrix", prophoto_matrix);
       sensor_timings_.total_ms = emscripten_get_now() - total_started_at_;
-      release_decoder_state();
     }
     return sensor_metadata_;
+  }
+
+  void capture_sensor_mosaic() {
+    require_opened();
+    if (!sensor_.empty()) return;
+    const int status = ensure_unpacked();
+    if (status != LIBRAW_SUCCESS) {
+      release_decoder_state();
+      fail("unpack the sensor mosaic", status);
+    }
+
+    const auto &sizes = processor_.imgdata.sizes;
+    const auto &idata = processor_.imgdata.idata;
+    if (processor_.imgdata.rawdata.raw_image == nullptr ||
+        (idata.filters != 9 && idata.filters <= 1000)) {
+      release_decoder_state();
+      throw std::runtime_error(
+          "LibRaw did not return a Bayer or X-Trans sensor mosaic");
+    }
+    if (sizes.width == 0 || sizes.height == 0 ||
+        sizes.left_margin + sizes.width > sizes.raw_width ||
+        sizes.top_margin + sizes.height > sizes.raw_height ||
+        sizes.raw_pitch < sizes.raw_width * sizeof(std::uint16_t)) {
+      release_decoder_state();
+      throw std::runtime_error("LibRaw returned invalid sensor geometry");
+    }
+    const auto black = adjusted_black_levels();
+    sensor_black_channels_ = black.channels;
+    sensor_black_common_ = black.common;
+    sensor_black_captured_ = true;
+    sensor_width_ = sizes.width;
+    sensor_height_ = sizes.height;
+    sensor_orientation_ = sizes.flip;
+    sensor_cfa_size_ = idata.filters == 9 ? 6 : 2;
+    for (unsigned row = 0; row < sensor_cfa_size_; ++row) {
+      for (unsigned col = 0; col < sensor_cfa_size_; ++col) {
+        sensor_cfa_[row * sensor_cfa_size_ + col] =
+            processor_.COLOR(row, col);
+      }
+    }
+
+    const double copy_started_at = emscripten_get_now();
+    sensor_.resize(static_cast<std::size_t>(sizes.width) * sizes.height);
+    const std::size_t source_stride = sizes.raw_pitch / sizeof(std::uint16_t);
+    for (unsigned row = 0; row < sizes.height; ++row) {
+      const auto *source = processor_.imgdata.rawdata.raw_image +
+                           (row + sizes.top_margin) * source_stride +
+                           sizes.left_margin;
+      auto *destination =
+          sensor_.data() + static_cast<std::size_t>(row) * sizes.width;
+      std::memcpy(destination, source, sizes.width * sizeof(std::uint16_t));
+    }
+    sensor_timings_.mosaic_copy_ms = emscripten_get_now() - copy_started_at;
   }
 
   val sensor_timings() const {
@@ -753,7 +933,15 @@ private:
   TimedLibRaw processor_;
   std::vector<std::uint8_t> input_;
   std::vector<std::uint16_t> sensor_;
+  std::array<unsigned, 36> sensor_cfa_{};
+  std::array<unsigned, 4> sensor_black_channels_{};
   libraw_processed_image_t *image_ = nullptr;
+  unsigned sensor_width_ = 0;
+  unsigned sensor_height_ = 0;
+  unsigned sensor_orientation_ = 0;
+  unsigned sensor_cfa_size_ = 0;
+  unsigned sensor_black_common_ = 0;
+  bool sensor_black_captured_ = false;
   bool opened_ = false;
   bool unpacked_ = false;
   bool half_size_ = false;
@@ -991,11 +1179,24 @@ EMSCRIPTEN_BINDINGS(raw_alchemy_libraw) {
       .function("openWithQuality", &BrowserLibRaw::open_with_quality)
       .function("metadata", &BrowserLibRaw::metadata)
       .function("thumbnailData", &BrowserLibRaw::thumbnail_data)
+      .function("xtransCbrtView", &BrowserLibRaw::xtrans_cbrt_view)
+      .function("usesParallelUnpack", &BrowserLibRaw::uses_parallel_unpack)
       .function("imageInfo", &BrowserLibRaw::image_info)
+      .function("imageInfoRetainingDecoder",
+                &BrowserLibRaw::image_info_retaining_decoder)
+      .function("discardImage", &BrowserLibRaw::discard_image)
+      .function("enableDemosaicCapture",
+                &BrowserLibRaw::enable_demosaic_capture)
+      .function("demosaicView", &BrowserLibRaw::demosaic_view)
       .function("supportsWebGpuAahd", &BrowserLibRaw::supports_webgpu_aahd)
+      .function("supportsWebGpuXtrans",
+                &BrowserLibRaw::supports_webgpu_xtrans)
       .function("timings", &BrowserLibRaw::timings)
       .function("imageView", &BrowserLibRaw::image_view)
       .function("sensorInfo", &BrowserLibRaw::sensor_info)
+      .function("captureSensorMosaic",
+                &BrowserLibRaw::capture_sensor_mosaic)
+      .function("finishSensorInfo", &BrowserLibRaw::finish_sensor_info)
       .function("sensorTimings", &BrowserLibRaw::sensor_timings)
       .function("sensorView", &BrowserLibRaw::sensor_view);
 }

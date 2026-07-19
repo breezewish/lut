@@ -83,9 +83,15 @@ if (worker.includes("parsed.write_")) {
 }
 if (
   !worker.includes('data.type === "clear"') ||
-  !worker.includes("cached?.renderer.free()")
+  !worker.includes('data.type === "release"') ||
+  !worker.includes("releaseAllPreviews()") ||
+  !worker.includes("releasePreview(preview)") ||
+  !worker.includes("preview.source.free()") ||
+  !worker.includes("sensor.raw.delete()")
 ) {
-  throw new Error("Removing the active RAW no longer frees its preview cache.");
+  throw new Error(
+    "Removing retained RAWs no longer frees their GPU and sensor caches.",
+  );
 }
 const imageViewStart = browserWrapper.indexOf("val image_view(");
 const imageViewEnd = browserWrapper.indexOf("\nprivate:", imageViewStart);

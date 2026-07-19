@@ -11,6 +11,7 @@ test("imports, previews, and exports from the HTTPS production bundle", async ({
   page,
 }) => {
   await page.goto("/");
+  await page.waitForFunction(() => crossOriginIsolated);
   expect(await page.evaluate(() => isSecureContext)).toBe(true);
   const hasWebGpu = await page.evaluate(() => "gpu" in navigator);
   await page.locator('input[type="file"]').setInputFiles(linearFixture);

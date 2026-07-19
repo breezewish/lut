@@ -49,6 +49,9 @@ test("tiled AAHD streams repeated aligned RGB16 exports", async ({
     );
     expect(timings.rawBackend).toBe("webgpu-aahd");
     expect(timings.colorBackend).toBe("webgpu");
+    expect(timings.sensorCacheHit).toBe(true);
+    expect(timings.sensorCacheBytes).toBe(6_240 * 4_168 * 2);
+    expect(timings.libraw.totalMs).toBe(0);
     runs.push(timings);
   }
   const nativeTiff = await readFile(nativeOutput);

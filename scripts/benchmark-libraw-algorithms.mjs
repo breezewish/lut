@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import createLibRaw from "../web/src/libraw/libraw.js";
+import createLibRaw from "./libraw-node-runtime.mjs";
 
 const availableAlgorithms = [
   { name: "AHD", quality: 3 },
@@ -39,7 +39,7 @@ if (!Number.isInteger(warmups) || warmups < 0) {
 
 const [rawBytes, wasmBytes] = await Promise.all([
   readFile(fixture),
-  readFile(resolve("web/src/libraw/libraw.wasm")),
+  readFile(resolve("web/src/libraw/threaded/libraw.wasm")),
 ]);
 const module = await createLibRaw({ wasmBinary: wasmBytes });
 const results = [];

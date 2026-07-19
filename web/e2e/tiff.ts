@@ -12,6 +12,10 @@ interface TiffComparison {
   samplesOverTwoCodes: number;
   samplesOverSixCodes: number;
   maximumDifferenceSample: number;
+  maximumDifferenceX: number;
+  maximumDifferenceY: number;
+  maximumDifferenceChannel: number;
+  differingSamplesByChannel: [number, number, number];
   actualAtMaximum: number;
   expectedAtMaximum: number;
   meanAbsoluteDifference: number;
@@ -69,6 +73,7 @@ export function compareRgb16Tiffs(
   let maximumDifferenceSample = 0;
   let actualAtMaximum = 0;
   let expectedAtMaximum = 0;
+  const differingSamplesByChannel: [number, number, number] = [0, 0, 0];
   let absoluteDifference = 0;
   let comparedBytes = 0;
   for (let index = 0; index < actual.stripOffsets.length; index += 1) {
@@ -82,7 +87,10 @@ export function compareRgb16Tiffs(
       const expectedSample = expectedStrip.readUInt16LE(offset);
       const difference = Math.abs(actualSample - expectedSample);
       absoluteDifference += difference;
-      if (difference !== 0) differingSamples += 1;
+      if (difference !== 0) {
+        differingSamples += 1;
+        differingSamplesByChannel[((comparedBytes + offset) / 2) % 3] += 1;
+      }
       if (difference > 2) samplesOverTwoCodes += 1;
       if (difference > 6) samplesOverSixCodes += 1;
       if (difference > maxCodeDifference) {
@@ -97,6 +105,7 @@ export function compareRgb16Tiffs(
   if (comparedBytes !== actual.width * actual.height * 3 * 2) {
     throw new Error(`TIFF strips contain ${comparedBytes} unexpected bytes.`);
   }
+  const maximumDifferencePixel = Math.floor(maximumDifferenceSample / 3);
   return {
     width: actual.width,
     height: actual.height,
@@ -105,6 +114,10 @@ export function compareRgb16Tiffs(
     samplesOverTwoCodes,
     samplesOverSixCodes,
     maximumDifferenceSample,
+    maximumDifferenceX: maximumDifferencePixel % actual.width,
+    maximumDifferenceY: Math.floor(maximumDifferencePixel / actual.width),
+    maximumDifferenceChannel: maximumDifferenceSample % 3,
+    differingSamplesByChannel,
     actualAtMaximum,
     expectedAtMaximum,
     meanAbsoluteDifference:

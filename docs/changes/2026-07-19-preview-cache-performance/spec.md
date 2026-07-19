@@ -12,12 +12,13 @@ Photo switching must preserve the user's editing flow instead of behaving like a
 - LUT changes render a Worker-created longest-edge-256 Look bitmap before the 1024px Look bitmap and never resend the unchanged Base pane.
 - Changing EV retains the previous tiles and regenerates every Look thumbnail for the active photo in one interruptible, progressively replacing batch.
 - Look thumbnails remain display-sized and never reuse the 1024px comparison buffers.
-- Removing a photo releases only that photo's resources; clearing the queue releases all preview resources.
+- Compressed GPU-demosaic inputs may retain sensor mosaics under one 64 MiB queue-wide budget without reducing the six-photo GPU source cache.
+- Removing a photo releases only that photo's resources; clearing the queue releases all preview and sensor resources.
 - Camera and dimensions appear with the active document.
 - Output contains only the export action; progress uses the action and completion uses a toast.
 - The filmstrip has no redundant photo-count label.
 
 ## Non-goals
 
-- Full-resolution export data is never cached.
+- Full-resolution RGB output is never cached.
 - The preview cache is not persistent across page reloads.

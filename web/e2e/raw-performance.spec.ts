@@ -29,6 +29,7 @@ test("records phased production Worker performance", async ({
     | undefined;
 
   await page.goto("/");
+  await page.waitForFunction(() => crossOriginIsolated);
   const adapterInfo = await page.evaluate(async () => {
     if (!("gpu" in navigator)) return undefined;
     const adapter = await navigator.gpu.requestAdapter({
@@ -117,7 +118,9 @@ test("records phased production Worker performance", async ({
     contentType: "application/json",
   });
 
-  expect(runs[0].initial.thumbnailMs).toBeLessThan(300);
+  if (runs[0].initial.thumbnailMs !== null) {
+    expect(runs[0].initial.thumbnailMs).toBeLessThan(300);
+  }
   expect(runs[0].initial.processedPreviewMs).toBeLessThan(1_200);
   expect(runs[0].initial.settledPreviewMs).toBeLessThan(1_500);
   expect(
@@ -160,7 +163,7 @@ async function initialPreviewBoundaries(page: Page) {
       }));
     return {
       fileReadMs: fileRead.detail.durationMs as number,
-      thumbnailMs: thumbnail.startTime - selectedAt,
+      thumbnailMs: thumbnail ? thumbnail.startTime - selectedAt : null,
       processedPreviewMs:
         draws.find(({ width }) => width === 384)!.at - selectedAt,
       settledPreviewMs:

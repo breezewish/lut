@@ -17,6 +17,7 @@
 - Real Leica DNG and Sony ARW files render nonblank previews and export full-resolution TIFFs; browser output matches native corrected-v2 output within one code value.
 - The HTTPS production bundle previews and exports where WebGPU is available; browsers without WebGPU show the required compatibility error without a fake preview.
 - The GitHub Pages repository-path bundle loads its manifest, LUT, Worker, and WASM assets below `/lut/` and previews a DNG without root-path requests or failed responses.
+- Root and repository-path production bundles become cross-origin isolated through the scoped same-origin service worker before starting the application, and Chromium, Firefox, and WebKit complete the browser smoke journey.
 - A non-secure remote HTTP origin that cannot expose WebGPU rejects RAW processing with the required compatibility error.
 - Every built-in LUT produces browser WASM RGB16 output within one code value of the optimized native corrected-v2 export.
 - Two selected RAW files make the single Output action export separately named RGB16 TIFF entries in one ZIP while locking import, queue selection, EV, and LUT controls; each extracted TIFF matches its independent native export within one code value, proving isolated sequential processing state.
@@ -34,10 +35,28 @@
 - A second opt-in hardware export compares every Leica M8 RGB16 channel with
   production LibRaw and covers its data-adjusted AAHD scaling maximum.
 - The hardware camera matrix downloads SHA-256-pinned CC0 Nikon Z 6,
-  Panasonic GH5, Bayer Fujifilm X-A5, and X-Trans Fujifilm X-T2 RAW files into
+  Panasonic GH5, Bayer Fujifilm X-A5, and X-Trans Fujifilm X-T1 and X-T2 RAW files into
   an ignored cache. It rejects fallback adapters, verifies GPU AAHD for strict
-  Bayer input, verifies LibRaw demosaic plus required GPU color for X-Trans,
+  Bayer input, verifies GPU Markesteijn for both X-Trans generations, retains
+  LibRaw demosaic for unsupported Panasonic geometry,
   and compares every browser TIFF channel with an independent native export.
+- The hardware camera matrix reuses the Preview-unpacked mosaic for compressed
+  Nikon Z 6, Fujifilm X-T2, and lossless Canon DNG export, reports zero
+  second-decode time, skips the cache for uncompressed X-A5 and X-T1 input, and
+  stays within one RGB16 code of the native oracle on all seven fixtures.
+- A T4 production benchmark compares the same single-thread and selective
+  pthread bundles. Sony ARW2 unpack improves from 186.16 ms to 80.62 ms, and
+  Leica packed DNG improves from 436.98 ms to 16.03 ms, while every sensor
+  sample remains exact. Nikon sequential unpack and uncompressed Bayer Preview
+  remain aligned with the single-thread baseline.
+- The downloadable hardware matrix includes matched full-resolution lossless
+  JPEG and lossy JPEG DNG files. Both compare every browser TIFF channel with
+  the native LibRaw oracle, and the report records their Preview and Export
+  decoder timings and selected backend.
+- A test-only hardware entry compares GPU X-Trans camera RGB with a captured
+  LibRaw result before highlights and color. X-T1 and X-T2 must match every
+  RGB16 sample exactly; X-T1 also supplies nonempty Blend-highlight coverage to
+  the end-to-end TIFF comparison.
 - A synthetic hardware fixture proves that sparse ordered defect correction and
   tiled AAHD bit-match the full-frame parity route across all four Bayer phases,
   both tile axes, rectangular edge tiles, a smaller-than-tile image, and
@@ -54,7 +73,7 @@
 - Losing the shared WebGPU device makes later work fail with one explicit reload instruction; preview allocation failure releases every buffer already created and never enters a CPU renderer.
 - Retained photo sources share one Preview LUT and output/readback workspace; switching to a smaller source allocates no workspace, switching to a larger source replaces the workspace once, and source lifetime remains independent from renderer lifetime.
 - The production build contains no ONNX Runtime, model asset, native RCD backend, benchmark worker, stage-capture entry, or CPU/GPU validation switch.
-- SwiftShader CI runs both the independent corrected-v2 Preview pixel oracle and two consecutive real Sony production AAHD exports. Software WebGPU has a pinned six-code ceiling; hardware export retains the two-code ceiling.
+- SwiftShader CI runs the independent corrected-v2 Preview pixel oracle and exact tiled AAHD fixtures across all Bayer phases, both tile seams, small images, unequal black levels, and repeated cached workspaces. Real-camera production AAHD alignment remains an opt-in hardware test with a two-code ceiling; software WebGPU validation may use the pinned six-code ceiling.
 - A main-branch GitHub Actions release gate runs production browser journeys and exact tiled AAHD checks through SwiftShader WebGPU before Pages deployment, without cloud-provider credentials or external runners.
 - A checksum-verified 9568 × 6376 Sony ILCE-7RM4 RAW under 4× CPU throttling accepts at least 45 exposure input events while decode is active, keeps animation-frame gap p95 below 25 ms and every gap below 100 ms, then publishes the exact settled frame.
 - A 6240 × 4168 Sony ARW produces a nontrivial full-resolution TIFF in under 30 seconds for the export operation, and a later EV preview rerender reuses the existing preview source without another RAW decode.

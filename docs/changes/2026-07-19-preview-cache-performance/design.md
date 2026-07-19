@@ -6,7 +6,7 @@ The preview pipeline uses bounded reuse at both processing and presentation boun
 
 ## Detailed Design
 
-The Worker owns an LRU of six independent longest-edge-1024 RGB16 WebGPU sources. One preview renderer owns the current LUT and a shared Base output, Look output, and two readback buffers. Serialized render commands select a retained source by file identity before using this workspace. The workspace grows to the largest selected source and smaller sources reuse it without allocation. An activation command refreshes recency without rendering, and decode replaces only the matching file entry. Release frees one source; clear frees all sources and the shared renderer.
+The Worker owns an LRU of six independent longest-edge-1024 RGB16 WebGPU sources. One preview renderer owns the current LUT and a shared Base output, Look output, and two readback buffers. Serialized render commands select a retained source by file identity before using this workspace. The workspace grows to the largest selected source and smaller sources reuse it without allocation. An activation command refreshes recency without rendering, and decode replaces only the matching file entry. Compressed strict WebGPU demosaic input may attach a sensor mosaic to an entry for export; mosaics share one 64 MiB budget and can be evicted without evicting the GPU source. Release frees one photo's source and mosaic; clear frees all sources, mosaics, and the shared renderer.
 
 React retains three photos' settled comparison buffers. Look thumbnails use a separate three-photo cache keyed by file identity and EV. LUT identity is the tile key inside that cache because every tile represents one LUT. App startup conditionally revalidates the manifest and starts every hash-versioned LUT request concurrently through the browser HTTP cache. An EV change installs a new empty completion entry while leaving the previous tiles displayed. As soon as the main preview settles, one Worker command renders the selected LUT and then the missing 132px tiles in LUT-readiness order. The Worker converts each tile to `ImageBitmap`; the UI replaces only that tile in a low-priority transition. A main-preview command preempts the batch between LUTs, and a preempted batch resumes only its genuinely missing tiles. Switching to a retained recipe publishes its cached comparison synchronously before the Worker activation reply.
 
@@ -16,7 +16,7 @@ The toolbar owns document metadata and the compact unverified-output status. The
 
 ## Trade-offs
 
-Six retained GPU sources cover a longer comparison journey while the smaller three-frame UI cache bounds transferable RGBA8 memory. Output, readback, and LUT memory does not scale with the number of photos. With retained source pixel counts `N1..N6`, largest workspace capacity `M`, and LUT edge `S`, GPU buffers use `6 * sum(N) + 16 * M + 12 * S^3 + 64` bytes. Six common 1024 × 683 sources and a 33³ LUT use about 35 MiB; the worst 1024 × 1024 shape uses about 52 MiB. Keeping sources avoids both RAW decode and GPU source reallocation on a cache hit.
+Six retained GPU sources cover a longer comparison journey while the smaller three-frame UI cache bounds transferable RGBA8 memory. Output, readback, and LUT memory does not scale with the number of photos. With retained source pixel counts `N1..N6`, largest workspace capacity `M`, and LUT edge `S`, GPU buffers use `6 * sum(N) + 16 * M + 12 * S^3 + 64` bytes. Six common 1024 × 683 sources and a 33³ LUT use about 35 MiB; the worst 1024 × 1024 shape uses about 52 MiB. Sensor mosaics add at most 64 MiB of WASM memory across the queue. Keeping sources avoids both RAW decode and GPU source reallocation on a cache hit; a retained mosaic also avoids compressed RAW unpack during export.
 
 ## Test Plan
 
@@ -26,4 +26,5 @@ Six retained GPU sources cover a longer comparison journey while the smaller thr
 - Unit-test hash-versioned HTTP cache requests, startup preparation, and progressive per-LUT publication.
 - Unit-test that render backpressure retains the newest EV and refines it at 1024px.
 - Unit-test that retained sources share one output workspace and one LUT, including workspace growth and independent source release.
+- Verify compressed Bayer and X-Trans exports reuse a retained sensor mosaic without changing six-photo source retention.
 - Run production Chromium journeys that assert two-photo return switches keep two decode marks and that a seventh distinct source evicts only the least-recently-used GPU source.

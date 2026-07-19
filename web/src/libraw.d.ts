@@ -29,13 +29,22 @@ declare module "*libraw.js" {
     ): void;
     metadata(): Metadata;
     imageInfo(): DecodedImageInfo;
+    imageInfoRetainingDecoder(): DecodedImageInfo;
+    discardImage(): void;
+    enableDemosaicCapture(): void;
+    demosaicView(offset: number, length: number): Uint16Array;
     imageView(offset: number, length: number): Uint16Array;
     supportsWebGpuAahd(): boolean;
+    supportsWebGpuXtrans(): boolean;
     sensorInfo(): import("./lib/sensor-image").SensorImageInfo;
+    captureSensorMosaic(): void;
+    finishSensorInfo(): import("./lib/sensor-image").SensorImageInfo;
     sensorView(offset: number, length: number): Uint16Array;
     sensorTimings(): import("./types").LibRawSensorTimings;
     timings(): import("./types").LibRawDecodeTimings;
     thumbnailData(): Thumbnail | undefined;
+    xtransCbrtView(): Float32Array;
+    usesParallelUnpack(): boolean;
     delete(): void;
   }
 
