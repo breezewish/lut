@@ -115,15 +115,48 @@ export interface PreviewResult {
   timings: PreviewTimings;
 }
 
+/** Interaction-only Preview transport that keeps RGBA buffers off the UI thread. */
+export interface BitmapPreviewResult
+  extends Omit<PreviewResult, "base" | "lut"> {
+  baseBitmap?: ImageBitmap;
+  lutBitmap: ImageBitmap;
+}
+
+export type DisplayPreviewResult = PreviewResult | BitmapPreviewResult;
+
 export interface CameraPreview {
   fileId: string;
   jpeg: Uint8Array<ArrayBuffer>;
 }
 
+export interface LookPreviewResult {
+  fileId: string;
+  ev: number;
+  lutId: string;
+  width: number;
+  height: number;
+  bitmap: ImageBitmap;
+}
+
 export type WorkerCommand =
   | {
       requestId: number;
+      type: "prepare-luts";
+      luts: LutDefinition[];
+    }
+  | {
+      requestId: number;
       type: "clear";
+    }
+  | {
+      requestId: number;
+      type: "activate";
+      fileId: string;
+    }
+  | {
+      requestId: number;
+      type: "release";
+      fileId: string;
     }
   | {
       requestId: number;
@@ -144,6 +177,14 @@ export type WorkerCommand =
     }
   | {
       requestId: number;
+      type: "render-looks";
+      fileId: string;
+      ev: number;
+      luts: LutDefinition[];
+      maxEdge: number;
+    }
+  | {
+      requestId: number;
       type: "export";
       fileId: string;
       buffer: ArrayBuffer;
@@ -156,6 +197,17 @@ export type WorkerReply =
       requestId: number;
       ok: true;
       type: "cleared";
+    }
+  | {
+      requestId: number;
+      ok: true;
+      type: "activated";
+      cached: boolean;
+    }
+  | {
+      requestId: number;
+      ok: true;
+      type: "released";
     }
   | {
       requestId: number;
@@ -173,7 +225,20 @@ export type WorkerReply =
       requestId: number;
       ok: true;
       type: "preview";
-      result: PreviewResult;
+      result: DisplayPreviewResult;
+    }
+  | {
+      requestId: number;
+      ok: true;
+      type: "look-preview";
+      result: LookPreviewResult;
+    }
+  | {
+      requestId: number;
+      ok: true;
+      type: "look-previews";
+      fileId: string;
+      completed: number;
     }
   | {
       requestId: number;

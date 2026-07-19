@@ -1,6 +1,8 @@
 import type {
   CameraPreview,
+  DisplayPreviewResult,
   ExportResult,
+  LookPreviewResult,
   LutDefinition,
   PreviewResult,
   WorkerCommand,
@@ -13,7 +15,7 @@ type Pending = {
 };
 
 type PreviewPending = {
-  resolve: (result: PreviewResult) => void;
+  resolve: (result: DisplayPreviewResult) => void;
   reject: (error: Error) => void;
 };
 
@@ -43,6 +45,7 @@ export class ProcessingClient {
   private nextRequestId = 1;
   private thumbnailListener?: (preview: CameraPreview) => void;
   private previewFrameListener?: (preview: PreviewResult) => void;
+  private lookPreviewListener?: (preview: LookPreviewResult) => void;
   private activeRender?: RenderBatch;
   private queuedRender?: RenderBatch;
   private stoppedError?: Error;
@@ -57,6 +60,10 @@ export class ProcessingClient {
           detail: data.result.timings,
         });
         this.previewFrameListener?.(data.result);
+        return;
+      }
+      if (data.ok && data.type === "look-preview") {
+        this.lookPreviewListener?.(data.result);
         return;
       }
       const pending = this.pending.get(data.requestId);
@@ -92,6 +99,22 @@ export class ProcessingClient {
     };
   }
 
+  /** Publishes each Look thumbnail as soon as its GPU render completes. */
+  onLookPreview(listener: (preview: LookPreviewResult) => void): () => void {
+    this.lookPreviewListener = listener;
+    return () => {
+      if (this.lookPreviewListener === listener)
+        this.lookPreviewListener = undefined;
+    };
+  }
+
+  /** Starts every LUT download concurrently without delaying app startup. */
+  async prepareLuts(luts: LutDefinition[]): Promise<void> {
+    if (this.stoppedError) throw this.stoppedError;
+    const requestId = this.nextRequestId++;
+    this.worker.postMessage({ requestId, type: "prepare-luts", luts });
+  }
+
   async clear(): Promise<void> {
     this.rejectQueuedRender(
       new Error("Preview render was superseded by clearing the selection."),
@@ -99,6 +122,20 @@ export class ProcessingClient {
     const reply = await this.send({ type: "clear" });
     if (reply.ok && reply.type === "cleared") return;
     throw new Error("Worker returned an unexpected clear response.");
+  }
+
+  /** Marks one decoded photo as recently used without rendering it. */
+  async activate(fileId: string): Promise<boolean> {
+    const reply = await this.send({ type: "activate", fileId });
+    if (reply.ok && reply.type === "activated") return reply.cached;
+    throw new Error("Worker returned an unexpected activate response.");
+  }
+
+  /** Frees preview resources owned by a removed photo. */
+  async release(fileId: string): Promise<void> {
+    const reply = await this.send({ type: "release", fileId });
+    if (reply.ok && reply.type === "released") return;
+    throw new Error("Worker returned an unexpected release response.");
   }
 
   async decode(
@@ -120,7 +157,7 @@ export class ProcessingClient {
       },
       [buffer],
     );
-    if (reply.ok && reply.type === "preview") {
+    if (reply.ok && reply.type === "preview" && "lut" in reply.result) {
       performance.mark("raw-alchemy:preview-worker", {
         detail: reply.result.timings,
       });
@@ -134,7 +171,7 @@ export class ProcessingClient {
     ev: number,
     lut: LutDefinition,
     options: PreviewRenderOptions = { maxEdge: 1_024, includeBase: true },
-  ): Promise<PreviewResult> {
+  ): Promise<DisplayPreviewResult> {
     if (this.stoppedError) return Promise.reject(this.stoppedError);
 
     return new Promise((resolve, reject) => {
@@ -157,6 +194,36 @@ export class ProcessingClient {
         pending,
       };
     });
+  }
+
+  /** Progressively renders one photo through an interruptible LUT batch. */
+  async renderLooks(
+    fileId: string,
+    ev: number,
+    luts: LutDefinition[],
+    maxEdge: number,
+  ): Promise<number> {
+    const startedAt = performance.now();
+    const reply = await this.send({
+      type: "render-looks",
+      fileId,
+      ev,
+      luts,
+      maxEdge,
+    });
+    if (reply.ok && reply.type === "look-previews") {
+      performance.mark("raw-alchemy:look-preview-batch", {
+        detail: {
+          fileId,
+          ev,
+          requested: luts.length,
+          completed: reply.completed,
+          durationMs: performance.now() - startedAt,
+        },
+      });
+      return reply.completed;
+    }
+    throw new Error("Worker returned an unexpected Look preview response.");
   }
 
   async export(

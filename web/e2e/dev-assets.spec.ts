@@ -69,10 +69,9 @@ test("rebuilding assets keeps a live development server usable", async ({
 
     await page.reload();
     await page.locator('input[type="file"]').setInputFiles(linearFixture);
-    await page.getByRole("button", { name: /Browse all/ }).click();
     await expect(
-      page.getByRole("combobox", { name: "Built-in V-Log look" }),
-    ).toContainText("Classic Negative");
+      page.getByRole("button", { name: "Classic Negative", exact: true }),
+    ).toBeVisible();
     await expect(page.getByLabel("Base preview")).toBeVisible({
       timeout: 20_000,
     });

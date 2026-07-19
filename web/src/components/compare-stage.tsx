@@ -1,24 +1,33 @@
 import {
   useCallback,
   useEffect,
+  memo,
   useRef,
   type PointerEvent as ReactPointerEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { ChevronsLeftRight } from "lucide-react";
 
-export interface StageImage {
+export interface PixelStageImage {
   pixels: Uint8Array<ArrayBuffer>;
   width: number;
   height: number;
 }
 
+export interface BitmapStageImage {
+  bitmap: ImageBitmap;
+  width: number;
+  height: number;
+}
+
+export type StageImage = PixelStageImage | BitmapStageImage;
+
 export type CompareMode = "wipe" | "split";
 
 /**
- * Paints an RGBA buffer into a canvas exactly once, wrapping the transferred
- * bytes without a second full copy (the `Uint8ClampedArray` view shares the
- * source `ArrayBuffer`). Returns the canvas ref to mount.
+ * Paints one transferred Preview image into a canvas. Pixel frames wrap their
+ * bytes without another complete copy; Worker bitmaps draw without putting a
+ * large RGBA allocation on the UI thread.
  */
 function useCanvasImage(image: StageImage | undefined) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -27,8 +36,12 @@ function useCanvasImage(image: StageImage | undefined) {
     if (!canvas || !image) return;
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) return;
-    canvas.width = image.width;
-    canvas.height = image.height;
+    if (canvas.width !== image.width) canvas.width = image.width;
+    if (canvas.height !== image.height) canvas.height = image.height;
+    if ("bitmap" in image) {
+      context.drawImage(image.bitmap, 0, 0);
+      return;
+    }
     const clamped = new Uint8ClampedArray(
       image.pixels.buffer,
       image.pixels.byteOffset,
@@ -49,7 +62,7 @@ function useCanvasImage(image: StageImage | undefined) {
  * Base; in "split" mode they sit side by side. The divider position lives in a
  * ref and drives a CSS variable, so dragging never re-renders React.
  */
-export function CompareStage({
+export const CompareStage = memo(function CompareStage({
   base,
   look,
   lookLabel,
@@ -193,4 +206,4 @@ export function CompareStage({
       )}
     </div>
   );
-}
+});

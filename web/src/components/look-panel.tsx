@@ -1,10 +1,16 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { Check, Search } from "lucide-react";
 
-import type { StageImage } from "./compare-stage";
 import type { LutDefinition } from "../types";
-/** Draws a look thumbnail buffer into its canvas without a second full copy. */
-function LookThumb({ image, alt }: { image: StageImage; alt: string }) {
+
+export interface LookThumbImage {
+  bitmap: ImageBitmap;
+  width: number;
+  height: number;
+}
+
+/** Composites one Worker-created look thumbnail without main-thread pixels. */
+function LookThumb({ image, alt }: { image: LookThumbImage; alt: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -13,16 +19,7 @@ function LookThumb({ image, alt }: { image: StageImage; alt: string }) {
     if (!context) return;
     canvas.width = image.width;
     canvas.height = image.height;
-    const clamped = new Uint8ClampedArray(
-      image.pixels.buffer,
-      image.pixels.byteOffset,
-      image.pixels.byteLength,
-    );
-    context.putImageData(
-      new ImageData(clamped, image.width, image.height),
-      0,
-      0,
-    );
+    context.drawImage(image.bitmap, 0, 0);
   }, [image]);
   return <canvas ref={ref} role="img" aria-label={alt} />;
 }
@@ -32,7 +29,7 @@ function LookThumb({ image, alt }: { image: StageImage; alt: string }) {
  * the current photo under that look, so a photographer chooses by seeing the
  * result. Selecting a tile applies the look to every selected photo.
  */
-export function LookPanel({
+export const LookPanel = memo(function LookPanel({
   looks,
   activeId,
   onChoose,
@@ -44,7 +41,7 @@ export function LookPanel({
   looks: LutDefinition[];
   activeId: string;
   onChoose: (id: string) => void;
-  thumbs: Map<string, StageImage>;
+  thumbs: Map<string, LookThumbImage>;
   query: string;
   onQuery: (value: string) => void;
   disabled?: boolean;
@@ -91,6 +88,7 @@ export function LookPanel({
                 key={lut.id}
                 ref={active ? activeRef : undefined}
                 type="button"
+                aria-label={lut.name}
                 aria-pressed={active}
                 className={`look ${active ? "is-active" : ""} ${image ? "" : "is-loading"}`}
                 title={`${lut.group} · ${lut.name}`}
@@ -113,4 +111,4 @@ export function LookPanel({
       </div>
     </>
   );
-}
+});

@@ -8,6 +8,7 @@ import {
   X,
 } from "lucide-react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+import { memo } from "react";
 
 import type { QueueItem } from "../types";
 
@@ -46,7 +47,7 @@ export interface PhotoSelect {
  * it (Cmd/Ctrl-click adds to a multi-selection, Shift-click extends a range).
  * Each edit follows its photo. Arrow-key navigation is handled by the app shell.
  */
-export function Filmstrip({
+export const Filmstrip = memo(function Filmstrip({
   items,
   activeId,
   selectedIds,
@@ -68,19 +69,6 @@ export function Filmstrip({
 
   return (
     <div className="filmstrip" aria-label="Photo filmstrip">
-      <div className="filmstrip__head">
-        <span className="filmstrip__count">
-          {items.length === 1 ? "1 photo" : `${items.length} photos`}
-        </span>
-        {multi && (
-          <span
-            className="filmstrip__count"
-            style={{ color: "var(--tint-ink)" }}
-          >
-            {selectedIds.size} selected
-          </span>
-        )}
-      </div>
       {items.length === 0 ? (
         <button
           type="button"
@@ -164,4 +152,4 @@ export function Filmstrip({
       )}
     </div>
   );
-}
+});

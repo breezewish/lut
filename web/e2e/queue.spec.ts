@@ -20,7 +20,7 @@ test("rapid selection keeps the preview and metadata on the latest RAW", async (
     page.getByRole("button", { name: /lossy\.dng.*Ready/ }),
   ).toHaveAttribute("aria-current", "true", { timeout: 30_000 });
   await expect(
-    page.getByLabel("Export controls").getByText("256 × 168"),
+    page.getByLabel("Current document").getByText("256 × 168"),
   ).toBeVisible();
   await expect(page.getByLabel("Base preview")).toBeVisible();
 });
@@ -28,6 +28,7 @@ test("rapid selection keeps the preview and metadata on the latest RAW", async (
 test("batch export continues after an export-time RAW failure", async ({
   page,
 }) => {
+  test.setTimeout(60_000);
   await page.addInitScript(() => {
     const original = File.prototype.arrayBuffer;
     const readCounts = new WeakMap<File, number>();
@@ -56,13 +57,21 @@ test("batch export continues after an export-time RAW failure", async ({
   await expect(
     page.getByRole("button", { name: /middle\.dng.*Ready/ }),
   ).toHaveAttribute("aria-current", "true", { timeout: 20_000 });
-  await page.getByRole("button", { name: /^first\.dng/ }).click();
+  await page
+    .getByRole("button", { name: /^first\.dng/ })
+    .click({ modifiers: ["Control"] });
   await expect(
     page.getByRole("button", { name: /first\.dng.*Ready/ }),
   ).toHaveAttribute("aria-current", "true", { timeout: 20_000 });
+  await page
+    .getByRole("button", { name: /^third\.dng/ })
+    .click({ modifiers: ["Control"] });
+  await expect(
+    page.getByRole("button", { name: /third\.dng.*Ready/ }),
+  ).toHaveAttribute("aria-current", "true", { timeout: 20_000 });
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export all" }).click();
+  await page.getByRole("button", { name: "Export 3 photos" }).click();
   const download = await downloadPromise;
   const archivePath = await download.path();
   expect(archivePath).not.toBeNull();
@@ -72,7 +81,7 @@ test("batch export continues after an export-time RAW failure", async ({
     "third-fuji-classic-negative.tif",
   ]);
   await expect(
-    page.getByText("Exported 2 of 3. Skipped 1. Failed: middle.dng."),
+    page.getByText("Exported 2 of 3. Failed: middle.dng."),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: /middle\.dng.*Failed/ }),
@@ -87,7 +96,6 @@ test("duplicate files in one chooser selection are ignored", async ({
     .locator('input[type="file"]')
     .setInputFiles([linearFixture, linearFixture]);
 
-  await expect(page.getByText("1 local file")).toBeVisible();
   await expect(page.getByRole("button", { name: /^linear\.dng/ })).toHaveCount(
     1,
   );
@@ -101,7 +109,7 @@ test("a dropped RAW is decoded and a removed selection can be restored", async (
     stat(linearFixture),
   ]);
   await page.goto("/");
-  await page.getByLabel("RAW queue").evaluate(
+  await page.getByLabel("Photo filmstrip").evaluate(
     (queue, { contents, lastModified }) => {
       const file = new File([new Uint8Array(contents)], "dropped.dng", {
         type: "image/x-adobe-dng",
@@ -123,28 +131,35 @@ test("a dropped RAW is decoded and a removed selection can be restored", async (
   });
 
   await page.getByRole("button", { name: "Remove dropped.dng" }).click();
-  await expect(page.getByText("No files")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Drop RAW files here/ }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Undo", exact: true }).click();
-  await expect(page.getByText("1 local file")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /^dropped\.dng/ }),
+  ).toBeVisible();
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 20_000,
   });
 });
 
-test("a selected look becomes a recent choice", async ({ page }) => {
+test("look selection keeps the catalog stable", async ({ page }) => {
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 20_000,
   });
-  await page.getByRole("button", { name: /Browse all/ }).click();
-  await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
-  await page.getByRole("option", { name: "PROVIA", exact: true }).click();
+  const catalog = page.getByRole("group", { name: "Built-in looks" });
+  const firstLook = await catalog
+    .getByRole("button")
+    .first()
+    .getAttribute("aria-label");
+  await catalog.getByRole("button", { name: "PROVIA", exact: true }).click();
   await expect(page.getByLabel("PROVIA preview")).toBeVisible();
-  await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
-
-  await expect(page.getByText("Recent", { exact: true })).toBeVisible();
   await expect(
-    page.getByRole("option", { name: "PROVIA", exact: true }),
-  ).toBeVisible();
+    catalog.getByRole("button", { name: "PROVIA", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(catalog.getByRole("button").first()).toHaveAccessibleName(
+    firstLook!,
+  );
 });

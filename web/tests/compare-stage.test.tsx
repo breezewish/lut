@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { CompareStage } from "../src/components/compare-stage";
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -38,6 +39,31 @@ test("paints the transferred base buffer without another complete copy", async (
   await waitFor(() => expect(putImageData).toHaveBeenCalledOnce());
   expect(screen.getByRole("img", { name: "Base preview" })).toBeVisible();
   expect(imagePixels?.buffer).toBe(pixels.buffer);
+});
+
+test("draws a Worker-created interaction bitmap", async () => {
+  const drawImage = vi.fn();
+  vi.spyOn(
+    HTMLCanvasElement.prototype as unknown as {
+      getContext(contextId: "2d"): CanvasRenderingContext2D | null;
+    },
+    "getContext",
+  ).mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
+  const bitmap = {
+    width: 256,
+    height: 171,
+    close: vi.fn(),
+  } as unknown as ImageBitmap;
+
+  render(
+    <CompareStage
+      look={{ bitmap, width: 256, height: 171 }}
+      lookLabel="PROVIA"
+      mode="wipe"
+    />,
+  );
+
+  await waitFor(() => expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0));
 });
 
 test("labels and sizes the look layer in split mode", async () => {

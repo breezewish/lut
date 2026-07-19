@@ -28,12 +28,87 @@ export function prepareWebGpuPreview(): Promise<{
   return pipelinePromise;
 }
 
-/** Keeps one display-sized RGB16 source and its current LUT on the GPU. */
+type PreviewSourceState = {
+  runtime: WebGpuRuntime;
+  buffer: GPUBuffer;
+};
+
+const previewSourceStates = new WeakMap<
+  WebGpuPreviewSource,
+  PreviewSourceState
+>();
+
+/** Owns one display-sized RGB16 photo source on the shared GPU device. */
+export class WebGpuPreviewSource {
+  private constructor(
+    readonly width: number,
+    readonly height: number,
+  ) {}
+
+  /** Uploads a display-sized RGB16 photo source for later preview renders. */
+  static async create(
+    pixels: Uint16Array,
+    width: number,
+    height: number,
+  ): Promise<WebGpuPreviewSource> {
+    if (pixels.length !== width * height * 3) {
+      throw new Error(
+        "WebGPU preview source dimensions do not match its pixels.",
+      );
+    }
+    if (!(pixels.buffer instanceof ArrayBuffer)) {
+      throw new Error("WebGPU preview source must use non-shared memory.");
+    }
+    const sourceBytes = align(pixels.byteLength, Uint32Array.BYTES_PER_ELEMENT);
+    const { runtime } = await prepareWebGpuPreview();
+    await getWebGpuRuntime(sourceBytes);
+    runtime.assertAvailable();
+    let buffer: GPUBuffer | undefined;
+    try {
+      buffer = runtime.device.createBuffer({
+        size: sourceBytes,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+      writePaddedBuffer(runtime.device, buffer, pixels, sourceBytes);
+      const source = new WebGpuPreviewSource(width, height);
+      previewSourceStates.set(source, { runtime, buffer });
+      return source;
+    } catch (error) {
+      buffer?.destroy();
+      throw new Error("WebGPU could not allocate the preview source.", {
+        cause: error,
+      });
+    }
+  }
+
+  /** Releases this photo's RGB16 GPU source. */
+  free(): void {
+    const state = previewSourceStates.get(this);
+    if (!state) return;
+    state.buffer.destroy();
+    previewSourceStates.delete(this);
+  }
+}
+
+type PreviewWorkspace = {
+  baseBuffer: GPUBuffer;
+  lutOutputBuffer: GPUBuffer;
+  baseReadback: GPUBuffer;
+  lutReadback: GPUBuffer;
+};
+
+/** Renders any retained photo through one shared LUT and output workspace. */
 export class WebGpuPreviewRenderer {
+  private source: WebGpuPreviewSource;
   private lutBuffer: GPUBuffer;
   private lutSize: number;
   private domainMin: Float32Array;
   private inverseDomainRange: Float32Array;
+  private baseBuffer: GPUBuffer;
+  private lutOutputBuffer: GPUBuffer;
+  private baseReadback: GPUBuffer;
+  private lutReadback: GPUBuffer;
+  private workspaceBytes: number;
   private bindGroup: GPUBindGroup;
   private readonly parameters = new ArrayBuffer(64);
   private readonly parameterView = new DataView(this.parameters);
@@ -41,71 +116,63 @@ export class WebGpuPreviewRenderer {
   private constructor(
     private readonly runtime: WebGpuRuntime,
     private readonly pipeline: GPUComputePipeline,
-    private readonly sourceBuffer: GPUBuffer,
-    private readonly baseBuffer: GPUBuffer,
-    private readonly lutOutputBuffer: GPUBuffer,
-    private readonly baseReadback: GPUBuffer,
-    private readonly lutReadback: GPUBuffer,
     private readonly parameterBuffer: GPUBuffer,
-    private readonly width: number,
-    private readonly height: number,
+    source: WebGpuPreviewSource,
+    workspace: PreviewWorkspace,
+    workspaceBytes: number,
+    lutBuffer: GPUBuffer,
     lut: GpuLut,
   ) {
-    this.lutBuffer = this.createLutBuffer(lut);
+    this.source = source;
+    this.baseBuffer = workspace.baseBuffer;
+    this.lutOutputBuffer = workspace.lutOutputBuffer;
+    this.baseReadback = workspace.baseReadback;
+    this.lutReadback = workspace.lutReadback;
+    this.workspaceBytes = workspaceBytes;
+    this.lutBuffer = lutBuffer;
     this.lutSize = lut.size();
     this.domainMin = lut.domain_min();
     this.inverseDomainRange = inverseRange(lut);
-    this.bindGroup = this.createBindGroup();
+    this.bindGroup = this.createBindGroup(
+      getPreviewSourceState(source).buffer,
+      lutBuffer,
+      workspace.baseBuffer,
+      workspace.lutOutputBuffer,
+    );
   }
 
   static async create(
-    source: Uint16Array,
-    width: number,
-    height: number,
+    source: WebGpuPreviewSource,
     lut: GpuLut,
   ): Promise<WebGpuPreviewRenderer> {
-    if (source.length !== width * height * 3) {
-      throw new Error(
-        "WebGPU preview source dimensions do not match its pixels.",
-      );
-    }
-    if (!(source.buffer instanceof ArrayBuffer)) {
-      throw new Error("WebGPU preview source must use non-shared memory.");
-    }
-    const outputBytes = width * height * Uint32Array.BYTES_PER_ELEMENT;
-    const sourceBytes = align(source.byteLength, Uint32Array.BYTES_PER_ELEMENT);
+    const sourceState = getPreviewSourceState(source);
+    const outputBytes =
+      source.width * source.height * Uint32Array.BYTES_PER_ELEMENT;
     const { runtime, pipeline } = await prepareWebGpuPreview();
-    await getWebGpuRuntime(Math.max(sourceBytes, outputBytes));
+    await getWebGpuRuntime(outputBytes);
     runtime.assertAvailable();
+    if (sourceState.runtime !== runtime) {
+      throw new Error("WebGPU preview source belongs to another device.");
+    }
     const { device } = runtime;
-    const outputUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC;
-    const readbackUsage = GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ;
     const buffers: GPUBuffer[] = [];
-    const createBuffer = (descriptor: GPUBufferDescriptor) => {
-      const buffer = device.createBuffer(descriptor);
-      buffers.push(buffer);
-      return buffer;
-    };
     try {
-      const sourceBuffer = createBuffer({
-        size: sourceBytes,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      const workspace = createWorkspace(device, outputBytes, buffers);
+      const parameterBuffer = device.createBuffer({
+        size: 64,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
-      writePaddedBuffer(device, sourceBuffer, source, sourceBytes);
+      buffers.push(parameterBuffer);
+      const lutBuffer = createLutBuffer(device, lut);
+      buffers.push(lutBuffer);
       const renderer = new WebGpuPreviewRenderer(
         runtime,
         pipeline,
-        sourceBuffer,
-        createBuffer({ size: outputBytes, usage: outputUsage }),
-        createBuffer({ size: outputBytes, usage: outputUsage }),
-        createBuffer({ size: outputBytes, usage: readbackUsage }),
-        createBuffer({ size: outputBytes, usage: readbackUsage }),
-        createBuffer({
-          size: 64,
-          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        }),
-        width,
-        height,
+        parameterBuffer,
+        source,
+        workspace,
+        outputBytes,
+        lutBuffer,
         lut,
       );
       buffers.length = 0;
@@ -118,14 +185,83 @@ export class WebGpuPreviewRenderer {
     }
   }
 
+  /** Selects a retained photo, growing the shared output workspace only when needed. */
+  setSource(source: WebGpuPreviewSource): void {
+    this.runtime.assertAvailable();
+    const sourceState = getPreviewSourceState(source);
+    if (sourceState.runtime !== this.runtime) {
+      throw new Error("WebGPU preview source belongs to another device.");
+    }
+    if (source === this.source) return;
+
+    const requiredBytes =
+      source.width * source.height * Uint32Array.BYTES_PER_ELEMENT;
+    if (requiredBytes <= this.workspaceBytes) {
+      const bindGroup = this.createBindGroup(
+        sourceState.buffer,
+        this.lutBuffer,
+        this.baseBuffer,
+        this.lutOutputBuffer,
+      );
+      this.source = source;
+      this.bindGroup = bindGroup;
+      return;
+    }
+
+    const buffers: GPUBuffer[] = [];
+    try {
+      const workspace = createWorkspace(
+        this.runtime.device,
+        requiredBytes,
+        buffers,
+      );
+      const bindGroup = this.createBindGroup(
+        sourceState.buffer,
+        this.lutBuffer,
+        workspace.baseBuffer,
+        workspace.lutOutputBuffer,
+      );
+      const previous = this.workspace();
+      this.source = source;
+      this.baseBuffer = workspace.baseBuffer;
+      this.lutOutputBuffer = workspace.lutOutputBuffer;
+      this.baseReadback = workspace.baseReadback;
+      this.lutReadback = workspace.lutReadback;
+      this.workspaceBytes = requiredBytes;
+      this.bindGroup = bindGroup;
+      buffers.length = 0;
+      destroyWorkspace(previous);
+    } catch (error) {
+      for (const buffer of buffers) buffer.destroy();
+      throw new Error("WebGPU could not grow the preview workspace.", {
+        cause: error,
+      });
+    }
+  }
+
+  /** Replaces the one LUT shared by every retained photo. */
   setLut(lut: GpuLut): void {
     this.runtime.assertAvailable();
+    const sourceState = getPreviewSourceState(this.source);
+    const next = createLutBuffer(this.runtime.device, lut);
+    let bindGroup: GPUBindGroup;
+    try {
+      bindGroup = this.createBindGroup(
+        sourceState.buffer,
+        next,
+        this.baseBuffer,
+        this.lutOutputBuffer,
+      );
+    } catch (error) {
+      next.destroy();
+      throw error;
+    }
     const previous = this.lutBuffer;
-    this.lutBuffer = this.createLutBuffer(lut);
+    this.lutBuffer = next;
     this.lutSize = lut.size();
     this.domainMin = lut.domain_min();
     this.inverseDomainRange = inverseRange(lut);
-    this.bindGroup = this.createBindGroup();
+    this.bindGroup = bindGroup;
     previous.destroy();
   }
 
@@ -135,7 +271,11 @@ export class WebGpuPreviewRenderer {
     includeBase: boolean,
   ): Promise<WebGpuPreview> {
     this.runtime.assertAvailable();
-    const [width, height] = previewDimensions(this.width, this.height, maxEdge);
+    const [width, height] = previewDimensions(
+      this.source.width,
+      this.source.height,
+      maxEdge,
+    );
     const pixelCount = width * height;
     const outputBytes = pixelCount * Uint32Array.BYTES_PER_ELEMENT;
     this.writeParameters(ev, width, height, pixelCount, includeBase);
@@ -188,28 +328,9 @@ export class WebGpuPreviewRenderer {
   }
 
   free(): void {
-    this.sourceBuffer.destroy();
     this.lutBuffer.destroy();
-    this.baseBuffer.destroy();
-    this.lutOutputBuffer.destroy();
-    this.baseReadback.destroy();
-    this.lutReadback.destroy();
+    destroyWorkspace(this.workspace());
     this.parameterBuffer.destroy();
-  }
-
-  private createLutBuffer(lut: GpuLut): GPUBuffer {
-    const samples = new Float32Array(lut.samples());
-    const buffer = this.runtime.device.createBuffer({
-      size: samples.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    try {
-      this.runtime.device.queue.writeBuffer(buffer, 0, samples);
-      return buffer;
-    } catch (error) {
-      buffer.destroy();
-      throw error;
-    }
   }
 
   private writeParameters(
@@ -222,8 +343,8 @@ export class WebGpuPreviewRenderer {
     const view = this.parameterView;
     view.setFloat32(0, 2 ** ev, true);
     view.setUint32(4, this.lutSize, true);
-    view.setUint32(8, this.width, true);
-    view.setUint32(12, this.height, true);
+    view.setUint32(8, this.source.width, true);
+    view.setUint32(12, this.source.height, true);
     view.setUint32(16, outputWidth, true);
     view.setUint32(20, outputHeight, true);
     view.setUint32(24, pixelCount, true);
@@ -239,17 +360,81 @@ export class WebGpuPreviewRenderer {
     );
   }
 
-  private createBindGroup(): GPUBindGroup {
+  private createBindGroup(
+    sourceBuffer: GPUBuffer,
+    lutBuffer: GPUBuffer,
+    baseBuffer: GPUBuffer,
+    lutOutputBuffer: GPUBuffer,
+  ): GPUBindGroup {
     return this.runtime.device.createBindGroup({
       layout: this.pipeline.getBindGroupLayout(0),
       entries: [
-        { binding: 0, resource: { buffer: this.sourceBuffer } },
-        { binding: 1, resource: { buffer: this.lutBuffer } },
-        { binding: 2, resource: { buffer: this.baseBuffer } },
-        { binding: 3, resource: { buffer: this.lutOutputBuffer } },
+        { binding: 0, resource: { buffer: sourceBuffer } },
+        { binding: 1, resource: { buffer: lutBuffer } },
+        { binding: 2, resource: { buffer: baseBuffer } },
+        { binding: 3, resource: { buffer: lutOutputBuffer } },
         { binding: 4, resource: { buffer: this.parameterBuffer } },
       ],
     });
+  }
+
+  private workspace(): PreviewWorkspace {
+    return {
+      baseBuffer: this.baseBuffer,
+      lutOutputBuffer: this.lutOutputBuffer,
+      baseReadback: this.baseReadback,
+      lutReadback: this.lutReadback,
+    };
+  }
+}
+
+function getPreviewSourceState(
+  source: WebGpuPreviewSource,
+): PreviewSourceState {
+  const state = previewSourceStates.get(source);
+  if (!state) throw new Error("WebGPU preview source has been released.");
+  return state;
+}
+
+function createWorkspace(
+  device: GPUDevice,
+  outputBytes: number,
+  allocated: GPUBuffer[],
+): PreviewWorkspace {
+  const outputUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC;
+  const readbackUsage = GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ;
+  const createBuffer = (usage: GPUBufferUsageFlags) => {
+    const buffer = device.createBuffer({ size: outputBytes, usage });
+    allocated.push(buffer);
+    return buffer;
+  };
+  return {
+    baseBuffer: createBuffer(outputUsage),
+    lutOutputBuffer: createBuffer(outputUsage),
+    baseReadback: createBuffer(readbackUsage),
+    lutReadback: createBuffer(readbackUsage),
+  };
+}
+
+function destroyWorkspace(workspace: PreviewWorkspace): void {
+  workspace.baseBuffer.destroy();
+  workspace.lutOutputBuffer.destroy();
+  workspace.baseReadback.destroy();
+  workspace.lutReadback.destroy();
+}
+
+function createLutBuffer(device: GPUDevice, lut: GpuLut): GPUBuffer {
+  const samples = new Float32Array(lut.samples());
+  const buffer = device.createBuffer({
+    size: samples.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+  try {
+    device.queue.writeBuffer(buffer, 0, samples);
+    return buffer;
+  } catch (error) {
+    buffer.destroy();
+    throw error;
   }
 }
 

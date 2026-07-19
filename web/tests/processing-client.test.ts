@@ -39,6 +39,10 @@ const exportTimings: ExportTimings = {
   workerTotalMs: 66,
 };
 
+function bitmap(value: number): ImageBitmap {
+  return { width: 1, height: 1, value } as unknown as ImageBitmap;
+}
+
 class ControlledWorker {
   static instance: ControlledWorker;
   readonly messages: WorkerCommand[] = [];
@@ -85,6 +89,95 @@ function preview(fileId: string, value: number): PreviewResult {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+test("activates and releases retained photo previews", async () => {
+  vi.stubGlobal("Worker", ControlledWorker);
+  const client = new ProcessingClient();
+
+  const activation = client.activate("one");
+  const activateCommand = ControlledWorker.instance.messages[0];
+  ControlledWorker.instance.reply({
+    requestId: activateCommand.requestId,
+    ok: true,
+    type: "activated",
+    cached: true,
+  });
+  await expect(activation).resolves.toBe(true);
+
+  const release = client.release("one");
+  const releaseCommand = ControlledWorker.instance.messages[1];
+  ControlledWorker.instance.reply({
+    requestId: releaseCommand.requestId,
+    ok: true,
+    type: "released",
+  });
+  await expect(release).resolves.toBeUndefined();
+  expect(ControlledWorker.instance.messages.map(({ type }) => type)).toEqual([
+    "activate",
+    "release",
+  ]);
+  client.dispose();
+});
+
+test("starts LUT preparation without waiting for every download", async () => {
+  vi.stubGlobal("Worker", ControlledWorker);
+  const client = new ProcessingClient();
+
+  await expect(client.prepareLuts([lut])).resolves.toBeUndefined();
+  expect(ControlledWorker.instance.messages).toEqual([
+    expect.objectContaining({ type: "prepare-luts", luts: [lut] }),
+  ]);
+  client.dispose();
+});
+
+test("publishes each look thumbnail before its Worker batch finishes", async () => {
+  vi.stubGlobal("Worker", ControlledWorker);
+  const client = new ProcessingClient();
+  const onLookPreview = vi.fn();
+  client.onLookPreview(onLookPreview);
+
+  const rendering = client.renderLooks("one", 1, [lut], 132);
+  const command = ControlledWorker.instance.messages[0];
+  expect(command).toMatchObject({
+    type: "render-looks",
+    fileId: "one",
+    ev: 1,
+    luts: [lut],
+    maxEdge: 132,
+  });
+  const image = bitmap(1);
+  ControlledWorker.instance.reply({
+    requestId: command.requestId,
+    ok: true,
+    type: "look-preview",
+    result: {
+      fileId: "one",
+      ev: 1,
+      lutId: lut.id,
+      width: 1,
+      height: 1,
+      bitmap: image,
+    },
+  });
+  expect(onLookPreview).toHaveBeenCalledWith({
+    fileId: "one",
+    ev: 1,
+    lutId: lut.id,
+    width: 1,
+    height: 1,
+    bitmap: image,
+  });
+  ControlledWorker.instance.reply({
+    requestId: command.requestId,
+    ok: true,
+    type: "look-previews",
+    fileId: "one",
+    completed: 1,
+  });
+
+  await expect(rendering).resolves.toBe(1);
+  client.dispose();
 });
 
 test("supersedes queued exposure renders with the latest request", async () => {

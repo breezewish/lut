@@ -3,8 +3,11 @@
 - Selecting a RAW shows its labeled embedded JPEG only as a placeholder, decodes a display-sized linear source through the Preview-only LibRaw entry point, draws a longest-edge-384 processed comparison before the longest-edge-1024 settled comparison, exposes local camera metadata and readiness to assistive technology, and rerenders EV plus LUT through a persistent WebGPU source without another RAW decode or source-image transfer.
 - Progressive longest-edge-384 and longest-edge-1024 frames keep identical preview Canvas geometry while changing only the pixel buffer resolution.
 - EV and LUT changes show a processing spinner in Adjustments and a Processing canvas status until the exact settled recipe is rendered.
-- Decode completion and export status changes do not repeat an unchanged preview recipe; continuous EV changes keep native input painting independent, commit the latest value at a bounded rate, keep at most one render active and one latest recipe waiting, publish only monotonically newer same-file and same-LUT interaction generations, reject frames from older files or LUTs, render exact-color longest-edge-1024 WebGPU frames without idle refinement, and enable export only after the final exact frame.
-- Selected and batch export stay disabled while the selected RAW is decoding or its visible EV/LUT recipe is waiting to render, then become available only when that exact processed preview is ready.
+- Decode completion and export status changes do not repeat an unchanged preview recipe; continuous EV changes keep native input painting independent, keep at most one render active and one latest recipe waiting without dropping the newest value, publish only monotonically newer same-file and same-LUT 256px bitmap interaction generations, reject frames from older files or LUTs, refine at 1024px after 80 ms idle even while the pointer remains down, leave pointer-down without value change untouched, and enable export only after that final exact frame.
+- Changing EV keeps the previous Look canvases visible, regenerates every 132px thumbnail for the current photo in one interruptible selected-Look-first batch, replaces each tile in place as it completes, resumes only missing tiles after preemption, and restores the cached set when switching away and back to the same EV.
+- App startup conditionally revalidates the manifest and starts all hash-versioned LUT requests concurrently; unchanged hashes use the browser HTTP cache, changed hashes produce new request URLs, and thumbnails publish in LUT-readiness order without a fixed idle delay.
+- Returning to any of six recently decoded photos avoids another file read or RAW decode; the three most recent also restore their EV, Look, comparison, and thumbnails immediately.
+- The single Output action stays disabled while the active RAW is decoding or its visible EV/LUT recipe is waiting to render, then exports one TIFF or a selected-photo ZIP only when that exact processed preview is ready.
 - A real camera RAW displays its labeled embedded JPEG before the processed preview replaces it.
 - Decode, rerender, and export issue only same-origin static GET requests; no photo data is uploaded.
 - A populated queue accepts another drop, and duplicate files in the same drop event create only one queue entry.
@@ -16,7 +19,7 @@
 - The GitHub Pages repository-path bundle loads its manifest, LUT, Worker, and WASM assets below `/lut/` and previews a DNG without root-path requests or failed responses.
 - A non-secure remote HTTP origin that cannot expose WebGPU rejects RAW processing with the required compatibility error.
 - Every built-in LUT produces browser WASM RGB16 output within one code value of the optimized native corrected-v2 export.
-- Two different RAW files make batch export the sole primary action, lock import, queue selection, EV, and LUT controls for the operation, and export as separately named RGB16 TIFF entries in one ZIP; each extracted TIFF matches its independent native export within one code value, proving isolated sequential processing state.
+- Two selected RAW files make the single Output action export separately named RGB16 TIFF entries in one ZIP while locking import, queue selection, EV, and LUT controls; each extracted TIFF matches its independent native export within one code value, proving isolated sequential processing state.
 - A rapid file-selection race leaves only the final selected file and its preview active.
 - A mixed-success batch continues past a decode that fails during export, includes both successful files, and reports the failed file.
 - A full-resolution export failure announces its concrete error, keeps the processed preview visible, remains retryable, and removing that final queue item sends a Worker clear command before returning to the empty state.
@@ -44,9 +47,12 @@
   final hardware TIFF remains within two codes of production LibRaw.
 - An opt-in production Chromium benchmark records cold and warm file reading, embedded JPEG, first processed frame, settled processed frame, Canvas drawing, and phased LibRaw Preview without substituting a test decoder; after those samples it records one independent full LibRaw decode, color processing, TIFF encoding, Blob, and export boundary so Export cannot contaminate Preview timings.
 - An opt-in production Chromium benchmark measures at least 20 EV edits, every initially uncached built-in LUT, and at least 20 cached LUT changes from control input through Canvas drawing; it enforces the preview p95 budgets and records Worker LUT-load and color stages.
-- A 60-event EV burst scheduled at nominal 60 Hz in the production Chromium bundle finishes input dispatch within 1.1 seconds, paints at least 30 monotonically newer 1024px WebGPU frames, and meets the first and final interaction latency budgets.
+- A 4× CPU-throttled SwiftShader LUT change paints a 256px Worker bitmap before its 1024px Worker bitmap while keeping UI frame-gap p95 below 100 ms, every gap below 150 ms, and interaction-overlapping long tasks below three.
+- A 60-event EV burst scheduled at nominal 60 Hz on the acceptance GPU finishes input dispatch within 1.1 seconds, paints at least 30 monotonically newer 256px WebGPU bitmap frames, retains the newest EV under render backpressure, and publishes one final 1024px frame within the settle budget; SwiftShader records diagnostics without acting as hardware evidence.
+- After the RAW and every Look tile are ready, a 60-step pointer drag under SwiftShader plus 4× CPU throttling enforces UI frame-gap, input-handler, and long-task ceilings independently of Preview throughput.
 - The hardware Preview test verifies a non-fallback WebGPU adapter, requires the first EV response at 1024px, exercises every built-in Look, and records GPU execution plus readback time.
 - Losing the shared WebGPU device makes later work fail with one explicit reload instruction; preview allocation failure releases every buffer already created and never enters a CPU renderer.
+- Retained photo sources share one Preview LUT and output/readback workspace; switching to a smaller source allocates no workspace, switching to a larger source replaces the workspace once, and source lifetime remains independent from renderer lifetime.
 - The production build contains no ONNX Runtime, model asset, native RCD backend, benchmark worker, stage-capture entry, or CPU/GPU validation switch.
 - SwiftShader CI runs both the independent corrected-v2 Preview pixel oracle and two consecutive real Sony production AAHD exports. Software WebGPU has a pinned six-code ceiling; hardware export retains the two-code ceiling.
 - A main-branch GitHub Actions release gate runs production browser journeys and exact tiled AAHD checks through SwiftShader WebGPU before Pages deployment, without cloud-provider credentials or external runners.
@@ -56,12 +62,11 @@
 - Blocking WASM startup requests produces a visible reload instruction and clears the indefinite decoding state.
 - A worker error rejects every pending processing command instead of leaving unresolved promises.
 - A LUT hash mismatch, missing LUT, and hash-valid malformed compact LUT each show a specific error, stop the decoding state, disable export, and allow a later valid import.
-- Duplicate files in one chooser action are ignored, drag and drop decodes the file, remove plus undo restores it, and choosing a LUT records it as a recent look.
-- Malformed local recent-look preferences do not prevent the empty application from rendering or accepting RAW files.
+- Duplicate files in one chooser action are ignored, drag and drop decodes the file, remove plus undo restores it, and choosing a LUT keeps the stable catalog order.
 - At mobile width, the empty-state chooser and Add RAW action are visible before any processing controls or export action.
-- A processed RAW exposes Fit and 1:1-preview controls, pans Base and Look around one synchronized normalized focus, returns to Fit without changing the preview recipe, and offers keyboard view shortcuts outside form controls.
-- Look discovery starts without the full catalog, expands into a searchable grouped browser, retains the current and previous choices in a four-item working set, and explains the V-Gamut/V-Log context inline.
-- Below 560px only the selected Base or Look pane occupies layout, the comparison switch and visible application actions have at least 44px hit targets, and the actionable output color-space explanation remains before export.
+- A processed RAW exposes Wipe and Split comparison controls; the Wipe divider supports pointer and keyboard adjustment without changing the preview recipe.
+- Look discovery uses a stable searchable thumbnail grid, keeps the current choice visible, and explains the V-Gamut/V-Log context inline.
+- Below 560px both comparison buffers remain available, and the comparison switch plus visible application actions have at least 44px hit targets.
 - Switching between Light and Dark modes updates the complete application shell and persists the chosen theme across reloads without changing preview pixels.
 - At a short desktop height, wheel scrolling brings the selected-file export action into the viewport.
 - The asset build verifies every pinned source CUBE hash, emits a compact float32 LUT with equivalent domain and samples, and publishes only generated files whose SHA-256 matches the runtime manifest.

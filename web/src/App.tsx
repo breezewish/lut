@@ -29,21 +29,30 @@ import { Zip, ZipPassThrough } from "fflate";
 import {
   CompareStage,
   type CompareMode,
+  type PixelStageImage,
   type StageImage,
 } from "./components/compare-stage";
 import { Filmstrip, type PhotoSelect } from "./components/filmstrip";
-import { LookPanel } from "./components/look-panel";
+import { LookPanel, type LookThumbImage } from "./components/look-panel";
 import { Button } from "./components/ui/button";
 import { ProcessingClient } from "./lib/processing-client";
-import type { LutManifest, PreviewResult, QueueItem } from "./types";
+import type {
+  DisplayPreviewResult,
+  LutManifest,
+  PreviewResult,
+  QueueItem,
+} from "./types";
 
 const RAW_ACCEPT =
   ".3fr,.ari,.arw,.bay,.cap,.cr2,.cr3,.dcr,.dcs,.dng,.drf,.eip,.erf,.fff,.gpr,.iiq,.k25,.kdc,.mdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.pef,.ptx,.pxn,.r3d,.raf,.raw,.rwl,.rw2,.rwz,.sr2,.srf,.srw,.x3f";
 const DEFAULT_LUT_ID = "fuji-classic-negative";
 const SETTLED_PREVIEW_MAX_EDGE = 1_024;
+const INTERACTION_PREVIEW_MAX_EDGE = 256;
 const THUMB_MAX_EDGE = 132;
 const FILMSTRIP_THUMB_WIDTH = 220;
 const GPU_EXPOSURE_PREVIEW_INTERVAL_MS = 16;
+const EXPOSURE_SETTLE_DELAY_MS = 80;
+const UI_PREVIEW_CACHE_LIMIT = 3;
 
 const PANEL_MIN = 240;
 const PANEL_MAX = 560;
@@ -98,6 +107,16 @@ interface DisplayedPreview {
   decodeCount: number;
 }
 
+interface CachedDisplayedPreview {
+  recipe: string;
+  preview: DisplayedPreview;
+}
+
+interface CachedLookThumbs {
+  ev: number;
+  images: Map<string, LookThumbImage>;
+}
+
 function isDecodeFailure(item: QueueItem): boolean {
   return item.status === "decode-error";
 }
@@ -115,29 +134,86 @@ function basePreviewRecipeKey(fileId: string, ev: number): string {
   return `${fileId}\n${ev}`;
 }
 
+function rememberCacheEntry<Key, Value>(
+  cache: Map<Key, Value>,
+  key: Key,
+  value: Value,
+): void {
+  cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > UI_PREVIEW_CACHE_LIMIT) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) return;
+    cache.delete(oldestKey);
+  }
+}
+
 function mergePreview(
   current: DisplayedPreview | undefined,
-  result: PreviewResult,
+  result: DisplayPreviewResult,
 ): DisplayedPreview {
-  const image = (pixels: Uint8Array<ArrayBuffer>): StageImage => ({
-    pixels,
-    width: result.width,
-    height: result.height,
-  });
+  const bitmapResult = "lutBitmap" in result;
+  const base = bitmapResult ? result.baseBitmap : result.base;
+  const lut = bitmapResult ? result.lutBitmap : result.lut;
+  const image = (source: Uint8Array<ArrayBuffer> | ImageBitmap): StageImage =>
+    source instanceof Uint8Array
+      ? { pixels: source, width: result.width, height: result.height }
+      : { bitmap: source, width: result.width, height: result.height };
   return {
     fileId: result.fileId,
-    base: result.base
-      ? image(result.base)
+    base: base
+      ? image(base)
       : current?.fileId === result.fileId
         ? current.base
         : undefined,
-    lut: image(result.lut),
+    lut: image(lut),
     decodeCount: result.decodeCount,
   };
 }
 
+function releasePreviewBitmaps(
+  preview: DisplayedPreview,
+  retained?: DisplayedPreview,
+): void {
+  for (const image of [preview.base, preview.lut]) {
+    if (
+      image &&
+      "bitmap" in image &&
+      image !== retained?.base &&
+      image !== retained?.lut
+    ) {
+      image.bitmap.close();
+    }
+  }
+}
+
+function rememberPreviewCacheEntry(
+  cache: Map<string, CachedDisplayedPreview>,
+  key: string,
+  value: CachedDisplayedPreview,
+): void {
+  const previous = cache.get(key);
+  if (previous && previous !== value) {
+    releasePreviewBitmaps(previous.preview, value.preview);
+  }
+  cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > UI_PREVIEW_CACHE_LIMIT) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) return;
+    const oldest = cache.get(oldestKey);
+    if (oldest) releasePreviewBitmaps(oldest.preview);
+    cache.delete(oldestKey);
+  }
+}
+
+function clearPreviewCache(cache: Map<string, CachedDisplayedPreview>): void {
+  for (const entry of cache.values()) releasePreviewBitmaps(entry.preview);
+  cache.clear();
+}
+
 /** Downscales a base preview buffer to a small filmstrip JPEG data URL. */
-function makeThumbUrl(image: StageImage): string | undefined {
+function makeThumbUrl(image: PixelStageImage): string | undefined {
   const scale = Math.min(1, FILMSTRIP_THUMB_WIDTH / image.width);
   const tw = Math.max(1, Math.round(image.width * scale));
   const th = Math.max(1, Math.round(image.height * scale));
@@ -188,22 +264,16 @@ export default function App() {
   const [lookQuery, setLookQuery] = useState("");
   const [compareMode, setCompareMode] = useState<CompareMode>("wipe");
   const [dragOver, setDragOver] = useState(false);
-  const [thumbs, setThumbs] = useState<Map<string, StageImage>>(new Map());
-  const [thumbTick, setThumbTick] = useState(0);
+  const [thumbs, setThumbs] = useState<Map<string, LookThumbImage>>(new Map());
+  const [thumbBatchTick, setThumbBatchTick] = useState(0);
+  const [sourceTick, setSourceTick] = useState(0);
+  const [exposureInteracting, setExposureInteracting] = useState(false);
+  const [interactionExposure, setInteractionExposure] = useState<{
+    fileId: string;
+    ev: number;
+  }>();
+  const [interactionLookRecipe, setInteractionLookRecipe] = useState<string>();
   const [theme, setTheme] = useState<Theme>(initialTheme);
-  const [recentLutIds, setRecentLutIds] = useState<string[]>(() => {
-    try {
-      const stored: unknown = JSON.parse(
-        localStorage.getItem("raw-alchemy-recent-luts") ?? "[]",
-      );
-      return Array.isArray(stored) &&
-        stored.every((value) => typeof value === "string")
-        ? stored
-        : [];
-    } catch {
-      return [];
-    }
-  });
   const [panelWidth, setPanelWidth] = useState(() =>
     readStoredSize("raw-alchemy-panel-w", 288, PANEL_MIN, PANEL_MAX),
   );
@@ -223,18 +293,29 @@ export default function App() {
   const exposureInput = useRef<HTMLInputElement>(null);
   const exposureRange = useRef<HTMLInputElement>(null);
   const exposureCommitTimer = useRef<number | undefined>(undefined);
+  const exposureSettleTimer = useRef<number | undefined>(undefined);
   const pendingExposure = useRef(0);
+  const committedExposure = useRef(0);
+  const persistedExposure = useRef(0);
   const exposureHasPendingRecipe = useRef(false);
+  const exposureRenderBusy = useRef(false);
+  const previewRendersInFlight = useRef(0);
   const lastExposureCommitAt = useRef(0);
   const stopAfterCurrent = useRef(false);
   const thumbBusy = useRef(false);
-  const failedThumbs = useRef(new Set<string>());
+  const failedThumbRecipe = useRef<string | undefined>(undefined);
+  const previewCache = useRef(new Map<string, CachedDisplayedPreview>());
+  const lookThumbCache = useRef(new Map<string, CachedLookThumbs>());
+  const displayedThumbFileId = useRef<string | undefined>(undefined);
   const panelWidthRef = useRef(panelWidth);
   const stripHeightRef = useRef(stripHeight);
 
   // ── Derived active-photo recipe ──────────────────────────────────────────
   const active = items.find((item) => item.id === activeId);
-  const ev = active?.ev ?? 0;
+  const ev =
+    active && interactionExposure?.fileId === active.id
+      ? interactionExposure.ev
+      : (active?.ev ?? 0);
   const lutId = active?.lutId ?? DEFAULT_LUT_ID;
   const activeLut = manifest?.luts.find((lut) => lut.id === lutId);
   const currentRecipe = active
@@ -340,16 +421,43 @@ export default function App() {
     [activeId, items],
   );
 
-  // Reset the exposure input + look thumbnails whenever the active photo
-  // changes; pending exposure follows the newly active photo.
+  // Switching photos replaces the exposure scheduling domain. Never reset
+  // these refs for an EV update: a render may still be working on an older EV
+  // while pendingExposure already holds the user's newest slider position.
   useEffect(() => {
+    setInteractionExposure(undefined);
+    setInteractionLookRecipe(undefined);
     pendingExposure.current = active?.ev ?? 0;
+    committedExposure.current = active?.ev ?? 0;
+    persistedExposure.current = active?.ev ?? 0;
     exposureHasPendingRecipe.current = false;
-    setThumbs(new Map());
-    failedThumbs.current = new Set();
-    setThumbTick((tick) => tick + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
+
+  // Restore exact thumbnails when cached. For a new EV, retain the visible
+  // previous recipe while a separate empty cache entry tracks which new
+  // results have arrived. Each tile is then replaced in place.
+  useEffect(() => {
+    const cached = active ? lookThumbCache.current.get(active.id) : undefined;
+    if (active && cached?.ev === ev) {
+      rememberCacheEntry(lookThumbCache.current, active.id, cached);
+      setThumbs(new Map(cached.images));
+      displayedThumbFileId.current = active.id;
+    } else {
+      if (active) {
+        rememberCacheEntry(lookThumbCache.current, active.id, {
+          ev,
+          images: new Map(),
+        });
+      }
+      if (!active || displayedThumbFileId.current !== active.id) {
+        setThumbs(active && cached ? new Map(cached.images) : new Map());
+        displayedThumbFileId.current = active?.id;
+      }
+    }
+    failedThumbRecipe.current = undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, ev]);
 
   // Arrow-key photo navigation (single-select), when focus is outside a text
   // field. Photo buttons are allowed so arrows keep working inside the strip.
@@ -380,7 +488,15 @@ export default function App() {
   const setExposure = useCallback(
     (value: number) => {
       const next = clamp(value, -4, 4);
+      if (exposureSettleTimer.current !== undefined) {
+        window.clearTimeout(exposureSettleTimer.current);
+        exposureSettleTimer.current = undefined;
+      }
+      setExposureInteracting(false);
+      setInteractionExposure(undefined);
       pendingExposure.current = next;
+      committedExposure.current = next;
+      persistedExposure.current = next;
       exposureHasPendingRecipe.current = true;
       setRenderedRecipe(undefined);
       if (exposureCommitTimer.current !== undefined) {
@@ -393,6 +509,52 @@ export default function App() {
     [patchSelected],
   );
 
+  const schedulePendingExposureRender = useCallback(() => {
+    if (
+      pendingExposure.current === committedExposure.current ||
+      exposureRenderBusy.current ||
+      exposureCommitTimer.current !== undefined
+    )
+      return;
+    const elapsed = lastExposureCommitAt.current
+      ? performance.now() - lastExposureCommitAt.current
+      : 0;
+    exposureCommitTimer.current = window.setTimeout(
+      () => {
+        exposureCommitTimer.current = undefined;
+        if (exposureRenderBusy.current) return;
+        lastExposureCommitAt.current = performance.now();
+        const next = pendingExposure.current;
+        committedExposure.current = next;
+        if (activeId) setInteractionExposure({ fileId: activeId, ev: next });
+      },
+      Math.max(0, GPU_EXPOSURE_PREVIEW_INTERVAL_MS - elapsed),
+    );
+  }, [activeId]);
+
+  const persistPendingExposure = useCallback(() => {
+    const next = pendingExposure.current;
+    if (!activeId) return;
+    if (exposureCommitTimer.current !== undefined) {
+      window.clearTimeout(exposureCommitTimer.current);
+      exposureCommitTimer.current = undefined;
+    }
+    committedExposure.current = next;
+    setInteractionExposure(undefined);
+    if (persistedExposure.current === next) return;
+    persistedExposure.current = next;
+    patchSelected({ ev: next });
+  }, [activeId, patchSelected]);
+
+  const finishExposureGesture = useCallback(() => {
+    if (exposureSettleTimer.current !== undefined) {
+      window.clearTimeout(exposureSettleTimer.current);
+      exposureSettleTimer.current = undefined;
+    }
+    setExposureInteracting(false);
+    persistPendingExposure();
+  }, [persistPendingExposure]);
+
   const scheduleExposurePreview = useCallback(
     (input: HTMLInputElement) => {
       const next = Number(input.value);
@@ -401,42 +563,37 @@ export default function App() {
         exposureHasPendingRecipe.current = true;
         setRenderedRecipe(undefined);
       }
+      setExposureInteracting(true);
+      if (exposureSettleTimer.current !== undefined) {
+        window.clearTimeout(exposureSettleTimer.current);
+      }
+      exposureSettleTimer.current = window.setTimeout(() => {
+        exposureSettleTimer.current = undefined;
+        setExposureInteracting(false);
+        persistPendingExposure();
+      }, EXPOSURE_SETTLE_DELAY_MS);
       input.style.setProperty("--range-progress", `${((next + 4) / 8) * 100}%`);
       input.setAttribute("aria-valuetext", `${next} EV`);
       if (exposureInput.current) exposureInput.current.value = String(next);
-      if (exposureCommitTimer.current !== undefined) return;
-      const elapsed = lastExposureCommitAt.current
-        ? performance.now() - lastExposureCommitAt.current
-        : 0;
-      exposureCommitTimer.current = window.setTimeout(
-        () => {
-          exposureCommitTimer.current = undefined;
-          lastExposureCommitAt.current = performance.now();
-          startTransition(() => patchSelected({ ev: pendingExposure.current }));
-        },
-        Math.max(0, GPU_EXPOSURE_PREVIEW_INTERVAL_MS - elapsed),
-      );
+      if (active && hasUsablePreview(active)) schedulePendingExposureRender();
     },
-    [patchSelected],
+    [active, persistPendingExposure, schedulePendingExposureRender],
   );
 
   const chooseLut = useCallback(
     (value: string) => {
+      if (!active || value === active.lutId) return;
+      setInteractionLookRecipe(previewRecipeKey(active.id, ev, value));
       patchSelected({ lutId: value });
-      const next = Array.from(new Set([value, ...recentLutIds])).slice(0, 6);
-      setRecentLutIds(next);
-      try {
-        localStorage.setItem("raw-alchemy-recent-luts", JSON.stringify(next));
-      } catch {
-        // Recent looks are a non-essential aid.
-      }
     },
-    [patchSelected, recentLutIds],
+    [active, ev, patchSelected],
   );
 
   const releasePreview = useCallback(() => {
     decodedFileId.current = undefined;
     settledBaseRecipe.current = undefined;
+    clearPreviewCache(previewCache.current);
+    lookThumbCache.current.clear();
     setRenderedRecipe(undefined);
     setPreview(undefined);
     setCameraPreview(undefined);
@@ -445,16 +602,19 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    fetch(`${import.meta.env.BASE_URL}luts/manifest.json`)
+    fetch(`${import.meta.env.BASE_URL}luts/manifest.json`, {
+      cache: "no-cache",
+    })
       .then((response) => {
         if (!response.ok)
           throw new Error("The built-in LUT manifest could not be loaded.");
         return response.json() as Promise<LutManifest>;
       })
-      .then((value) => {
+      .then(async (value) => {
         if (!Array.isArray(value.luts) || value.luts.length === 0) {
           throw new Error("The built-in LUT manifest is empty.");
         }
+        await client.prepareLuts(value.luts);
         if (active) setManifest(value);
       })
       .catch(() => {
@@ -483,6 +643,37 @@ export default function App() {
     });
   }, [client, activeId]);
 
+  useEffect(() => {
+    return client.onLookPreview((result) => {
+      if (
+        result.fileId !== activeId ||
+        result.ev !== ev ||
+        decodedFileId.current !== result.fileId
+      )
+        return;
+      const cached = lookThumbCache.current.get(result.fileId);
+      const rendered =
+        cached?.ev === result.ev ? new Map(cached.images) : new Map();
+      const image = {
+        bitmap: result.bitmap,
+        width: result.width,
+        height: result.height,
+      };
+      rendered.set(result.lutId, image);
+      rememberCacheEntry(lookThumbCache.current, result.fileId, {
+        ev: result.ev,
+        images: rendered,
+      });
+      startTransition(() => {
+        setThumbs((current) => {
+          const displayed = new Map(current);
+          displayed.set(result.lutId, image);
+          return displayed;
+        });
+      });
+    });
+  }, [client, activeId, ev]);
+
   useEffect(
     () => () => {
       if (cameraPreview) URL.revokeObjectURL(cameraPreview.url);
@@ -490,50 +681,93 @@ export default function App() {
     [cameraPreview],
   );
 
-  // Decode the active photo when it changes (using its own recipe).
+  // Activate a retained photo source when possible. A cache hit restores the
+  // exact last frame synchronously and never enters the decoding state; a miss
+  // performs the normal RAW decode and repopulates both bounded caches.
   useEffect(() => {
     if (!active || !activeLut) return;
     let running = true;
     const decodeRecipe = previewRecipeKey(active.id, ev, activeLut.id);
+    const cachedDisplay = previewCache.current.get(active.id);
+    if (cachedDisplay) {
+      rememberPreviewCacheEntry(previewCache.current, active.id, cachedDisplay);
+    }
     decodedFileId.current = undefined;
     settledBaseRecipe.current = undefined;
     desiredPreview.current = undefined;
-    setRenderedRecipe(undefined);
-    setPreview(undefined);
+    if (cachedDisplay?.recipe === decodeRecipe) {
+      setRenderedRecipe(decodeRecipe);
+      setPreview(cachedDisplay.preview);
+    } else {
+      setRenderedRecipe(undefined);
+      setPreview(cachedDisplay?.preview);
+    }
     setCameraPreview(undefined);
     setGlobalError(undefined);
-    updateItem(active.id, { status: "decoding", error: undefined });
 
-    const fileReadStartedAt = performance.now();
-    active.file
-      .arrayBuffer()
-      .then((buffer) => {
-        performance.mark("raw-alchemy:file-read", {
-          detail: { durationMs: performance.now() - fileReadStartedAt },
-        });
-        return buffer;
-      })
-      .then((buffer) => client.decode(active.id, buffer, ev, activeLut))
-      .then((result) => {
-        if (!running) return;
-        decodedFileId.current = active.id;
-        settledBaseRecipe.current = basePreviewRecipeKey(active.id, ev);
-        if (pendingExposure.current === ev)
-          exposureHasPendingRecipe.current = false;
-        setRenderedRecipe(decodeRecipe);
-        setPreview(mergePreview(undefined, result));
-        setCameraPreview(undefined);
-        updateItem(active.id, {
-          status: "ready",
-          camera: result.metadata.camera || "Unknown camera",
-          dimensions: `${result.metadata.width} × ${result.metadata.height}`,
-        });
-      })
-      .catch((error: Error) => {
-        if (!running) return;
-        updateItem(active.id, { status: "decode-error", error: error.message });
-        setGlobalError(error.message);
+    const publish = (result: PreviewResult) => {
+      const displayed = mergePreview(undefined, result);
+      rememberPreviewCacheEntry(previewCache.current, active.id, {
+        recipe: decodeRecipe,
+        preview: displayed,
       });
+      decodedFileId.current = active.id;
+      settledBaseRecipe.current = basePreviewRecipeKey(active.id, ev);
+      if (pendingExposure.current === ev)
+        exposureHasPendingRecipe.current = false;
+      setRenderedRecipe(decodeRecipe);
+      setPreview(displayed);
+      setCameraPreview(undefined);
+      setSourceTick((tick) => tick + 1);
+      updateItem(active.id, {
+        status: "ready",
+        camera: result.metadata.camera || "Unknown camera",
+        dimensions: `${result.metadata.width} × ${result.metadata.height}`,
+      });
+    };
+
+    const decode = async () => {
+      updateItem(active.id, { status: "decoding", error: undefined });
+      const fileReadStartedAt = performance.now();
+      const buffer = await active.file.arrayBuffer();
+      performance.mark("raw-alchemy:file-read", {
+        detail: { durationMs: performance.now() - fileReadStartedAt },
+      });
+      return client.decode(active.id, buffer, ev, activeLut);
+    };
+
+    const prepare = async () => {
+      const retained =
+        active.status !== "queued" && (await client.activate(active.id));
+      if (!running) return;
+      if (!retained) {
+        const result = await decode();
+        if (running) publish(result);
+        return;
+      }
+
+      decodedFileId.current = active.id;
+      setSourceTick((tick) => tick + 1);
+      if (cachedDisplay?.recipe === decodeRecipe) {
+        settledBaseRecipe.current = basePreviewRecipeKey(active.id, ev);
+        return;
+      }
+      const result = await client.render(active.id, ev, activeLut, {
+        maxEdge: SETTLED_PREVIEW_MAX_EDGE,
+        includeBase: true,
+      });
+      if (!("lut" in result)) {
+        throw new Error("The settled Preview returned an interaction bitmap.");
+      }
+      if (running) publish(result);
+    };
+
+    void prepare().catch((error: unknown) => {
+      if (!running) return;
+      const message = error instanceof Error ? error.message : String(error);
+      updateItem(active.id, { status: "decode-error", error: message });
+      setGlobalError(message);
+    });
     return () => {
       running = false;
     };
@@ -560,11 +794,19 @@ export default function App() {
     };
     const baseRecipe = basePreviewRecipeKey(active.id, ev);
     const includeBase = settledBaseRecipe.current !== baseRecipe;
+    const lookInteracting = interactionLookRecipe === recipe;
+    const maxEdge =
+      exposureInteracting || lookInteracting
+        ? INTERACTION_PREVIEW_MAX_EDGE
+        : SETTLED_PREVIEW_MAX_EDGE;
+    const settlesRecipe = maxEdge === SETTLED_PREVIEW_MAX_EDGE;
     let running = true;
     const render = async () => {
+      previewRendersInFlight.current += 1;
+      exposureRenderBusy.current = true;
       try {
         const frame = await client.render(active.id, ev, activeLut, {
-          maxEdge: SETTLED_PREVIEW_MAX_EDGE,
+          maxEdge,
           includeBase,
         });
         const desired = desiredPreview.current;
@@ -574,9 +816,26 @@ export default function App() {
           generation > lastPaintedGeneration.current
         ) {
           lastPaintedGeneration.current = generation;
-          setPreview((current) => mergePreview(current, frame));
+          setPreview((current) => {
+            const displayed = mergePreview(current, frame);
+            if (settlesRecipe) {
+              rememberPreviewCacheEntry(previewCache.current, active.id, {
+                recipe,
+                preview: displayed,
+              });
+            }
+            return displayed;
+          });
         }
         if (!running) return;
+        if (!settlesRecipe) {
+          if (lookInteracting) {
+            setInteractionLookRecipe((current) =>
+              current === recipe ? undefined : current,
+            );
+          }
+          return;
+        }
         if (pendingExposure.current !== ev) return;
         settledBaseRecipe.current = baseRecipe;
         exposureHasPendingRecipe.current = false;
@@ -586,6 +845,12 @@ export default function App() {
           setGlobalError(
             error instanceof Error ? error.message : String(error),
           );
+      } finally {
+        previewRendersInFlight.current -= 1;
+        exposureRenderBusy.current = previewRendersInFlight.current > 0;
+        if (!exposureRenderBusy.current && pendingExposure.current !== ev) {
+          schedulePendingExposureRender();
+        }
       }
     };
     void render();
@@ -595,9 +860,23 @@ export default function App() {
         desiredPreview.current = undefined;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, ev, renderedRecipe, active?.id, active?.status, activeLut?.id]);
+  }, [
+    client,
+    ev,
+    renderedRecipe,
+    active?.id,
+    active?.status,
+    activeLut?.id,
+    sourceTick,
+    exposureInteracting,
+    interactionLookRecipe,
+    schedulePendingExposureRender,
+  ]);
 
-  // Progressive look thumbnails for the active photo's Looks panel.
+  // Render every Look in one interruptible Worker batch. Each completed tile
+  // is published immediately; main Preview commands still preempt the batch
+  // between LUTs, so thumbnail work never delays an EV interaction by more
+  // than one 132px render.
   useEffect(() => {
     if (
       !active ||
@@ -610,55 +889,52 @@ export default function App() {
       !hasUsablePreview(active)
     )
       return;
-    const next = manifest.luts.find(
-      (lut) => !thumbs.has(lut.id) && !failedThumbs.current.has(lut.id),
-    );
-    if (!next) return;
+    const renderedThumbs = lookThumbCache.current.get(active.id);
+    const completed =
+      renderedThumbs?.ev === ev
+        ? renderedThumbs.images
+        : new Map<string, LookThumbImage>();
+    if (completed.size === manifest.luts.length) return;
     const fileId = active.id;
+    const recipe = `${fileId}\n${ev}`;
+    if (failedThumbRecipe.current === recipe) return;
+    const missingLuts = manifest.luts.filter(({ id }) => !completed.has(id));
+    const luts = [
+      ...missingLuts.filter(({ id }) => id === activeLut.id),
+      ...missingLuts.filter(({ id }) => id !== activeLut.id),
+    ];
     thumbBusy.current = true;
-    let running = true;
-    client
-      .render(fileId, active.ev, next, {
-        maxEdge: THUMB_MAX_EDGE,
-        includeBase: false,
-      })
-      .then((result) => {
-        if (!running || decodedFileId.current !== fileId) return;
-        setThumbs((current) => {
-          const map = new Map(current);
-          map.set(next.id, {
-            pixels: result.lut,
-            width: result.width,
-            height: result.height,
-          });
-          return map;
-        });
-      })
+    void client
+      .renderLooks(fileId, ev, luts, THUMB_MAX_EDGE)
       .catch(() => {
-        failedThumbs.current.add(next.id);
-        if (running) setThumbTick((tick) => tick + 1);
+        failedThumbRecipe.current = recipe;
       })
       .finally(() => {
         thumbBusy.current = false;
+        setThumbBatchTick((tick) => tick + 1);
       });
-    return () => {
-      running = false;
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     client,
     manifest,
     active,
     activeLut,
+    ev,
     exporting,
     isPreviewProcessing,
     thumbs,
-    thumbTick,
+    thumbBatchTick,
   ]);
 
   // Build a filmstrip thumbnail once the active photo's base preview lands.
   useEffect(() => {
-    if (!active || active.thumbUrl || !preview?.base) return;
+    if (
+      !active ||
+      active.thumbUrl ||
+      !preview?.base ||
+      !("pixels" in preview.base)
+    )
+      return;
     if (preview.fileId !== active.id) return;
     const url = makeThumbUrl(preview.base);
     if (url) updateItem(active.id, { thumbUrl: url });
@@ -687,6 +963,8 @@ export default function App() {
     () => () => {
       if (exposureCommitTimer.current !== undefined)
         window.clearTimeout(exposureCommitTimer.current);
+      if (exposureSettleTimer.current !== undefined)
+        window.clearTimeout(exposureSettleTimer.current);
     },
     [],
   );
@@ -723,6 +1001,8 @@ export default function App() {
     });
   }, []);
 
+  const openFilePicker = useCallback(() => fileInput.current?.click(), []);
+
   const onFileInput = (event: ChangeEvent<HTMLInputElement>) => {
     addFiles(Array.from(event.target.files ?? []));
     event.target.value = "";
@@ -738,41 +1018,39 @@ export default function App() {
     if (!exporting) setDragOver(true);
   };
 
-  const removeItem = (id: string) => {
-    const item = items.find((candidate) => candidate.id === id);
-    if (!item) return;
-    setQueueUndo({
-      items: [item],
-      activeId: activeId === id ? id : undefined,
-      message: `Removed ${item.file.name}`,
-    });
-    const remaining = items.filter((candidate) => candidate.id !== id);
-    setItems(remaining);
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      if (next.size === 0 && remaining[0]) next.add(remaining[0].id);
-      return next;
-    });
-    if (activeId === id) {
-      const next = remaining[0];
-      setActiveId(next?.id);
-      releasePreview();
-    }
-  };
-
-  const clearQueue = () => {
-    setQueueUndo({
-      items,
-      activeId,
-      message: `Cleared ${items.length} photo${items.length === 1 ? "" : "s"}`,
-    });
-    setItems([]);
-    setActiveId(undefined);
-    setSelectedIds(new Set());
-    setExportSummary(undefined);
-    releasePreview();
-  };
+  const removeItem = useCallback(
+    (id: string) => {
+      const item = items.find((candidate) => candidate.id === id);
+      if (!item) return;
+      setQueueUndo({
+        items: [item],
+        activeId: activeId === id ? id : undefined,
+        message: `Removed ${item.file.name}`,
+      });
+      const remaining = items.filter((candidate) => candidate.id !== id);
+      const cachedPreview = previewCache.current.get(id);
+      if (cachedPreview) releasePreviewBitmaps(cachedPreview.preview);
+      previewCache.current.delete(id);
+      lookThumbCache.current.delete(id);
+      setItems(remaining);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        if (next.size === 0 && remaining[0]) next.add(remaining[0].id);
+        return next;
+      });
+      if (activeId === id) {
+        const next = remaining[0];
+        setActiveId(next?.id);
+      }
+      if (remaining.length === 0) releasePreview();
+      else
+        void client
+          .release(id)
+          .catch((error: Error) => setGlobalError(error.message));
+    },
+    [activeId, client, items, releasePreview],
+  );
 
   const restoreQueue = () => {
     if (!queueUndo) return;
@@ -858,11 +1136,14 @@ export default function App() {
             detail: exported.timings,
           });
         } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
           failed.push(item.file.name);
           updateItem(item.id, {
             status: "export-error",
-            error: error instanceof Error ? error.message : String(error),
+            error: message,
           });
+          setGlobalError(message);
         }
 
         if (tiff) {
@@ -1040,8 +1321,13 @@ export default function App() {
           {active ? (
             <>
               <span className="header__name">{active.file.name}</span>
+              {active.camera && (
+                <span className="header__camera">{active.camera}</span>
+              )}
               {active.dimensions && (
-                <span className="header__dims">{active.dimensions}</span>
+                <span className="header__dims" aria-label="Photo dimensions">
+                  {active.dimensions}
+                </span>
               )}
               {selectedIds.size > 1 && (
                 <span className="header__count">
@@ -1056,6 +1342,16 @@ export default function App() {
           )}
         </div>
         <div className="header__actions">
+          {active && manifest?.contract.outputStatus === "unverified" && (
+            <span
+              className="header__warning"
+              aria-label="Unverified output color space. Check the exported TIFF before production use."
+              title="Built-in looks do not declare an output color space. Check the exported TIFF before production use."
+            >
+              <TriangleAlert size={13} aria-hidden="true" />
+              <span>Unverified output</span>
+            </span>
+          )}
           <span className="shield">
             <LockKeyhole size={13} aria-hidden="true" />
             <span>Files stay on this device</span>
@@ -1109,9 +1405,6 @@ export default function App() {
                   <SplitSquareHorizontal size={14} aria-hidden="true" /> Split
                 </button>
               </div>
-              {!isPreviewProcessing && (
-                <span className="viewer__status">Ready</span>
-              )}
             </div>
           )}
           {!hasPhotos ? (
@@ -1164,11 +1457,7 @@ export default function App() {
               />
               {active.status === "decoding" && preview && (
                 <div className="overlay-note" role="status">
-                  <LoaderCircle
-                    size={16}
-                    className="spin"
-                    aria-hidden="true"
-                  />
+                  <LoaderCircle size={16} className="spin" aria-hidden="true" />
                   Decoding preview…
                 </div>
               )}
@@ -1264,9 +1553,9 @@ export default function App() {
                     onInput={(event) =>
                       scheduleExposurePreview(event.currentTarget)
                     }
-                    onChange={(event) =>
-                      scheduleExposurePreview(event.currentTarget)
-                    }
+                    onPointerUp={finishExposureGesture}
+                    onPointerCancel={finishExposureGesture}
+                    onBlur={finishExposureGesture}
                   />
                   <div className="expo__ticks" aria-hidden="true">
                     {Array.from({ length: 9 }, (_, index) => (
@@ -1304,58 +1593,7 @@ export default function App() {
                 )}
               </div>
 
-              <div className="panel" aria-label="Output">
-                <div className="panel__head">
-                  <span className="panel__title">Output</span>
-                </div>
-                <dl className="spec">
-                  <div>
-                    <dt>Camera</dt>
-                    <dd>{active?.camera || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Size</dt>
-                    <dd>{active?.dimensions || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Format</dt>
-                    <dd>16-bit TIFF</dd>
-                  </div>
-                </dl>
-                <details className="disclose">
-                  <summary>
-                    <TriangleAlert size={14} aria-hidden="true" />
-                    Unverified color
-                  </summary>
-                  <div className="disclose__body">
-                    <p>
-                      Built-in looks do not declare an output color space, so
-                      another editor may interpret the TIFF differently. Check
-                      the result before production use.
-                    </p>
-                    <p>
-                      The preview shows the LUT values as sRGB. The exported
-                      TIFF intentionally carries no embedded profile rather than
-                      claiming one the source LUT does not provide.
-                    </p>
-                  </div>
-                </details>
-                <div className="export-note" aria-live="polite">
-                  {exportProgress ? (
-                    <>
-                      <strong>
-                        {exportProgress.current} / {exportProgress.total}
-                      </strong>{" "}
-                      {exportProgress.fileName}
-                    </>
-                  ) : exportSummary ? (
-                    exportSummary
-                  ) : active?.status === "export-error" ? (
-                    <span className="export-note--error">{active.error}</span>
-                  ) : (
-                    "Full-resolution processing starts on export."
-                  )}
-                </div>
+              <div className="panel panel--output" aria-label="Output">
                 {exporting && exportProgress && exportProgress.total > 1 ? (
                   <Button
                     size="block"
@@ -1370,19 +1608,34 @@ export default function App() {
                   >
                     {exportProgress.stopRequested
                       ? "Stopping…"
-                      : "Stop after current"}
+                      : `${exportProgress.current} / ${exportProgress.total} · Stop after current`}
                   </Button>
                 ) : (
                   <Button
                     size="block"
                     variant="primary"
+                    aria-label={
+                      eligibleSelected.length > 1
+                        ? `Export ${eligibleSelected.length} photos`
+                        : "Export selected"
+                    }
                     onClick={() => void exportSelected()}
                     disabled={!canExport}
                   >
-                    <ImageDown size={16} aria-hidden="true" />
-                    {eligibleSelected.length > 1
-                      ? `Export ${eligibleSelected.length} photos`
-                      : "Export photo"}
+                    {exporting ? (
+                      <LoaderCircle
+                        size={16}
+                        className="spin"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <ImageDown size={16} aria-hidden="true" />
+                    )}
+                    {exporting
+                      ? "Exporting…"
+                      : eligibleSelected.length > 1
+                        ? `Export ${eligibleSelected.length} photos`
+                        : "Export photo"}
                   </Button>
                 )}
               </div>
@@ -1412,7 +1665,7 @@ export default function App() {
           exporting={exporting}
           onSelect={selectPhoto}
           onRemove={removeItem}
-          onAdd={() => fileInput.current?.click()}
+          onAdd={openFilePicker}
         />
       </div>
 
@@ -1462,6 +1715,21 @@ export default function App() {
                 variant="quiet"
                 aria-label="Dismiss undo"
                 onClick={() => setQueueUndo(undefined)}
+              >
+                <X size={17} />
+              </Button>
+            </div>
+          </div>
+        )}
+        {exportSummary && (
+          <div className="toast" role="status">
+            <span className="toast__body">{exportSummary}</span>
+            <div className="toast__actions">
+              <Button
+                size="icon"
+                variant="quiet"
+                aria-label="Dismiss export summary"
+                onClick={() => setExportSummary(undefined)}
               >
                 <X size={17} />
               </Button>

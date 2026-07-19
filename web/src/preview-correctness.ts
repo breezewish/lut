@@ -1,7 +1,10 @@
 import reference from "../../tests/fixtures/corrected-v2-reference.json";
 
 import type { GpuLut } from "./lib/webgpu-color";
-import { WebGpuPreviewRenderer } from "./lib/webgpu-preview";
+import {
+  WebGpuPreviewRenderer,
+  WebGpuPreviewSource,
+} from "./lib/webgpu-preview";
 
 export function mountPreviewCorrectness(): void {
   document.body.dataset.benchmarkStatus = "running";
@@ -33,12 +36,12 @@ async function run() {
   };
   const results = [];
   for (const testCase of reference.cases) {
-    const renderer = await WebGpuPreviewRenderer.create(
+    const source = await WebGpuPreviewSource.create(
       new Uint16Array(testCase.pixels),
       testCase.width,
       testCase.height,
-      lut,
     );
+    const renderer = await WebGpuPreviewRenderer.create(source, lut);
     try {
       const preview = await renderer.render(
         testCase.ev,
@@ -55,6 +58,7 @@ async function run() {
       });
     } finally {
       renderer.free();
+      source.free();
     }
   }
   return results;

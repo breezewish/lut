@@ -338,6 +338,14 @@ ul {
   font-weight: 560;
   color: var(--ink);
 }
+.header__camera {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: var(--t-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .header__dims,
 .header__count {
   flex: 0 0 auto;
@@ -353,6 +361,15 @@ ul {
   display: flex;
   align-items: center;
   gap: var(--s3);
+}
+.header__warning {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--warning);
+  font-size: var(--t-2xs);
+  font-weight: 560;
+  white-space: nowrap;
 }
 .shield {
   display: inline-flex;
@@ -391,14 +408,6 @@ ul {
   align-items: center;
   gap: var(--s3);
 }
-.viewer__status {
-  min-width: 5rem;
-  text-align: right;
-  color: var(--ink-muted);
-  font-size: var(--t-xs);
-  font-variant-numeric: tabular-nums;
-}
-
 /* Segmented control (compare mode) */
 .seg {
   display: inline-flex;
@@ -947,6 +956,8 @@ input[type="range"]:disabled {
   outline: 2px solid transparent;
   outline-offset: 3px;
   transition: color var(--fast) var(--ease);
+  content-visibility: auto;
+  contain-intrinsic-size: 5rem 4.5rem;
 }
 .look:hover {
   color: var(--ink);
@@ -1015,69 +1026,8 @@ input[type="range"]:disabled {
 }
 
 /* ── Output panel ──────────────────────────────────────────────────────── */
-.spec {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s3);
-}
-.spec > div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--s4);
-}
-.spec dt,
-.spec dd {
-  font-size: var(--t-xs);
-}
-.spec dt {
-  flex: 0 0 auto;
-  color: var(--ink-muted);
-}
-.spec dd {
-  overflow: hidden;
-  color: var(--ink);
-  font-weight: 560;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.disclose {
-  border-radius: var(--r-md);
-  background: var(--warning-tint);
-  color: var(--warning);
-}
-.disclose > summary {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  padding: var(--s3) var(--s4);
-  cursor: pointer;
-  font-size: var(--t-xs);
-  font-weight: 600;
-  list-style: none;
-}
-.disclose > summary::-webkit-details-marker {
-  display: none;
-}
-.disclose > summary:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-  border-radius: var(--r-md);
-}
-.disclose__body {
-  padding: 0 var(--s4) var(--s4);
-  font-size: var(--t-xs);
-  line-height: 1.55;
-}
-.disclose__body p {
-  max-width: 60ch;
-  color: var(--ink);
-}
-.disclose__body p + p {
-  margin-top: var(--s3);
-  color: var(--ink-muted);
+.panel--output {
+  padding-top: var(--s3);
 }
 .export-note {
   min-height: 1rem;
@@ -1085,13 +1035,6 @@ input[type="range"]:disabled {
   font-size: var(--t-xs);
   line-height: 1.45;
   overflow-wrap: anywhere;
-}
-.export-note strong {
-  color: var(--ink);
-  font-weight: 600;
-}
-.export-note--error {
-  color: var(--danger);
 }
 
 /* ═══ Filmstrip (bottom photo picker) ══════════════════════════════════════ */
@@ -1105,20 +1048,6 @@ input[type="range"]:disabled {
   padding: var(--s3) var(--s4);
   background: var(--panel);
   overflow: hidden;
-}
-.filmstrip__head {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: var(--s2);
-  padding-right: var(--s3);
-}
-.filmstrip__count {
-  color: var(--ink-muted);
-  font-size: var(--t-xs);
-  font-weight: 600;
-  white-space: nowrap;
 }
 .filmstrip__scroll {
   min-width: 0;
@@ -1269,7 +1198,7 @@ input[type="range"]:disabled {
   opacity: 0;
   transition: opacity var(--fast) var(--ease);
 }
-.photo:hover .photo__remove,
+.photo-wrap:hover .photo__remove,
 .photo__remove:focus-visible {
   opacity: 1;
 }
@@ -1426,7 +1355,7 @@ input[type="range"]:disabled {
 
 /* ═══ Responsive ═══════════════════════════════════════════════════════════ */
 
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 34rem) {
   .btn[data-size="default"],
   .btn[data-size="block"],
   .btn[data-size="compact"],
@@ -1470,8 +1399,12 @@ input[type="range"]:disabled {
   .panels {
     flex: 0 0 auto;
     max-height: 45vh;
+    overflow: hidden;
     /* On narrow screens the panels sit below the canvas at a natural width. */
     width: auto !important;
+  }
+  .filmstrip-wrap {
+    flex-basis: 4.75rem;
   }
   .viewer {
     min-height: 16rem;
@@ -1486,6 +1419,9 @@ input[type="range"]:disabled {
     display: none;
   }
   .header__dims {
+    display: none;
+  }
+  .header__camera {
     display: none;
   }
   .shield span {

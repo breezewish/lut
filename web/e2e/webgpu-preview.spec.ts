@@ -93,10 +93,7 @@ test("renders full-detail interaction with every built-in LUT on WebGPU", async 
     await page.evaluate(() =>
       performance.clearMarks("raw-alchemy:preview-render"),
     );
-    const browseLooks = page.getByRole("button", { name: /Browse all/ });
-    if (await browseLooks.isVisible()) await browseLooks.click();
-    await page.getByRole("combobox", { name: "Built-in V-Log look" }).click();
-    await page.getByRole("option", { name: lut.name, exact: true }).click();
+    await page.getByRole("button", { name: lut.name, exact: true }).click();
     await expect
       .poll(() => latestTiming(page, lut.id))
       .toMatchObject({ lutId: lut.id, previewBackend: "webgpu" });

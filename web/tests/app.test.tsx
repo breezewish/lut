@@ -23,6 +23,10 @@ const MANIFEST = {
   ],
 };
 
+function bitmap(value: number): ImageBitmap {
+  return { width: 1, height: 1, value } as unknown as ImageBitmap;
+}
+
 afterEach(() => {
   cleanup();
   localStorage.clear();
@@ -63,18 +67,6 @@ test("switches and persists the workspace theme", () => {
   expect(localStorage.getItem("raw-alchemy-theme")).toBe("light");
 });
 
-test("ignores malformed recent-look preferences", async () => {
-  localStorage.setItem("raw-alchemy-recent-luts", JSON.stringify({}));
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(JSON.stringify(MANIFEST), { status: 200 }),
-  );
-
-  render(<App />);
-  expect(
-    await screen.findByRole("heading", { name: "Start with a camera RAW" }),
-  ).toBeVisible();
-});
-
 test("deduplicates one input batch and accepts drops after the queue is populated", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(
     () => new Promise<Response>(() => {}),
@@ -88,14 +80,27 @@ test("deduplicates one input batch and accepts drops after the queue is populate
 
   const first = new File(["first"], "first.dng", { lastModified: 1 });
   fireEvent.change(input!, { target: { files: [first, first] } });
-  expect(screen.getByText("1 photo")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^first\.dng/ })).toBeVisible();
 
   const second = new File(["second"], "second.dng", { lastModified: 2 });
   fireEvent.drop(app!, { dataTransfer: { files: [second] } });
-  expect(screen.getByText("2 photos")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^second\.dng/ })).toBeVisible();
 });
 
 test("renders the main preview only after the exposure recipe changes", async () => {
+  const manifest = {
+    ...MANIFEST,
+    luts: [
+      ...MANIFEST.luts,
+      {
+        id: "second-look",
+        group: "Test",
+        name: "Second Look",
+        file: "second.cube",
+        sha256: "11",
+      },
+    ],
+  };
   type Command = {
     requestId: number;
     type: "clear" | "decode" | "render" | "export";
@@ -103,6 +108,7 @@ test("renders the main preview only after the exposure recipe changes", async ()
     ev?: number;
     maxEdge?: number;
     includeBase?: boolean;
+    lut?: { id: string };
   };
 
   class RecipeWorker {
@@ -119,12 +125,19 @@ test("renders the main preview only after the exposure recipe changes", async ()
       this.commands.push(command);
       if (command.type !== "decode" && command.type !== "render") return;
       if (command.type === "decode") return;
-      this.replyPreview(command);
     }
 
     replyToDecode() {
       const command = this.commands.find(({ type }) => type === "decode");
       if (!command) throw new Error("No decode command is waiting");
+      this.replyPreview(command);
+    }
+
+    replyToRender(index: number) {
+      const command = this.commands.filter(({ type }) => type === "render")[
+        index
+      ];
+      if (!command) throw new Error(`Render ${index} is not waiting`);
       this.replyPreview(command);
     }
 
@@ -185,15 +198,13 @@ test("renders the main preview only after the exposure recipe changes", async ()
   );
   vi.stubGlobal("Worker", RecipeWorker);
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(JSON.stringify(MANIFEST), { status: 200 }),
+    new Response(JSON.stringify(manifest), { status: 200 }),
   );
 
-  // Only the settled full-detail comparison uses maxEdge 1024; the look
-  // filmstrip renders separate small thumbnails, which we exclude here.
+  // Look thumbnails use a separate batch command, so every ordinary render is
+  // part of the main progressive comparison.
   const mainRenders = () =>
-    RecipeWorker.instance.commands.filter(
-      ({ type, maxEdge }) => type === "render" && maxEdge === 1024,
-    );
+    RecipeWorker.instance.commands.filter(({ type }) => type === "render");
 
   const { container } = render(<App />);
   const raw = new File(["raw"], "photo.dng");
@@ -204,7 +215,7 @@ test("renders the main preview only after the exposure recipe changes", async ()
     target: { files: [raw] },
   });
   const exportButton = await screen.findByRole("button", {
-    name: "Export photo",
+    name: "Export selected",
   });
   expect(exportButton).toBeDisabled();
   await waitFor(() =>
@@ -221,20 +232,395 @@ test("renders the main preview only after the exposure recipe changes", async ()
   await new Promise((resolve) => window.setTimeout(resolve, 260));
   expect(mainRenders()).toEqual([]);
 
-  fireEvent.change(screen.getByRole("slider", { name: "Exposure" }), {
+  const exposure = screen.getByRole("slider", { name: "Exposure" });
+  fireEvent.pointerDown(exposure);
+  await new Promise((resolve) => window.setTimeout(resolve, 100));
+  expect(mainRenders()).toEqual([]);
+  fireEvent.input(exposure, {
     target: { value: "1" },
   });
   expect(exportButton).toBeDisabled();
   await waitFor(() =>
-    expect(mainRenders()).toEqual([
+    expect(mainRenders()[0]).toEqual(
       expect.objectContaining({
         type: "render",
         ev: 1,
+        maxEdge: 256,
+        includeBase: true,
+      }),
+    ),
+  );
+  fireEvent.input(exposure, { target: { value: "2" } });
+  expect(mainRenders()).toHaveLength(1);
+  RecipeWorker.instance.replyToRender(0);
+  await waitFor(() =>
+    expect(mainRenders()[1]).toEqual(
+      expect.objectContaining({
+        type: "render",
+        ev: 2,
+        maxEdge: 256,
+        includeBase: true,
+      }),
+    ),
+  );
+  RecipeWorker.instance.replyToRender(1);
+  fireEvent.pointerUp(exposure);
+  expect(exportButton).toBeDisabled();
+  await waitFor(() =>
+    expect(mainRenders()[2]).toEqual(
+      expect.objectContaining({
+        type: "render",
+        ev: 2,
         maxEdge: 1024,
         includeBase: true,
       }),
-    ]),
+    ),
   );
-  await waitFor(() => expect(paintedRedValues.slice(-2)).toEqual([101, 102]));
+  RecipeWorker.instance.replyToRender(2);
+  await waitFor(() => expect(paintedRedValues.slice(-2)).toEqual([102, 103]));
   expect(exportButton).toBeEnabled();
+
+  fireEvent.pointerDown(exposure);
+  fireEvent.input(exposure, { target: { value: "1" } });
+  await waitFor(() =>
+    expect(mainRenders()[3]).toEqual(
+      expect.objectContaining({ ev: 1, maxEdge: 256 }),
+    ),
+  );
+  fireEvent.input(exposure, { target: { value: "2" } });
+  fireEvent.pointerUp(exposure);
+  RecipeWorker.instance.replyToRender(3);
+  await waitFor(() =>
+    expect(mainRenders()[4]).toEqual(
+      expect.objectContaining({ ev: 2, maxEdge: 1024 }),
+    ),
+  );
+  RecipeWorker.instance.replyToRender(4);
+  await waitFor(() => expect(exportButton).toBeEnabled());
+
+  fireEvent.pointerDown(exposure);
+  fireEvent.input(exposure, { target: { value: "1" } });
+  await waitFor(() =>
+    expect(mainRenders()[5]).toEqual(
+      expect.objectContaining({ ev: 1, maxEdge: 256 }),
+    ),
+  );
+  RecipeWorker.instance.replyToRender(5);
+  await waitFor(() =>
+    expect(mainRenders()[6]).toEqual(
+      expect.objectContaining({ ev: 1, maxEdge: 1024 }),
+    ),
+  );
+  RecipeWorker.instance.replyToRender(6);
+  fireEvent.pointerUp(exposure);
+  await waitFor(() => expect(exportButton).toBeEnabled());
+
+  fireEvent.click(screen.getByRole("button", { name: "Second Look" }));
+  await waitFor(() =>
+    expect(mainRenders()[7]).toEqual(
+      expect.objectContaining({
+        lut: expect.objectContaining({ id: "second-look" }),
+        maxEdge: 256,
+        includeBase: false,
+      }),
+    ),
+  );
+  RecipeWorker.instance.replyToRender(7);
+  await waitFor(() =>
+    expect(mainRenders()[8]).toEqual(
+      expect.objectContaining({
+        lut: expect.objectContaining({ id: "second-look" }),
+        maxEdge: 1024,
+        includeBase: false,
+      }),
+    ),
+  );
+  RecipeWorker.instance.replyToRender(8);
+  await waitFor(() => expect(exportButton).toBeEnabled());
+});
+
+test("reuses a decoded photo when switching back to it", async () => {
+  type Command = {
+    requestId: number;
+    type: "activate" | "clear" | "decode" | "render" | "export";
+    fileId?: string;
+    ev?: number;
+    maxEdge?: number;
+    includeBase?: boolean;
+  };
+
+  class CachedPhotoWorker {
+    static instance: CachedPhotoWorker;
+    readonly commands: Command[] = [];
+    readonly decoded = new Set<string>();
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: ((event: ErrorEvent) => void) | null = null;
+
+    constructor() {
+      CachedPhotoWorker.instance = this;
+    }
+
+    postMessage(command: Command) {
+      this.commands.push(command);
+      if (command.type === "activate") {
+        this.reply(command, {
+          requestId: command.requestId,
+          ok: true,
+          type: "activated",
+          cached: this.decoded.has(command.fileId!),
+        });
+        return;
+      }
+      if (command.type === "decode") this.decoded.add(command.fileId!);
+      if (command.type === "decode" || command.type === "render") {
+        this.reply(command, {
+          requestId: command.requestId,
+          ok: true,
+          type: "preview",
+          result: {
+            fileId: command.fileId,
+            width: 1,
+            height: 1,
+            base:
+              command.includeBase === false
+                ? undefined
+                : new Uint8Array([20, 0, 0, 255]),
+            lut: new Uint8Array([21, 0, 0, 255]),
+            metadata: { camera: "Test Camera", width: 1, height: 1 },
+            decodeCount: this.decoded.size,
+            timings: {
+              previewBackend: "webgpu",
+              libraw: {},
+              previewSourceMs: 0,
+              lutLoadMs: 0,
+              previewColorMs: 0,
+              workerTotalMs: 0,
+            },
+          },
+        });
+      }
+    }
+
+    private reply(command: Command, data: object) {
+      queueMicrotask(() =>
+        this.onmessage?.(new MessageEvent("message", { data })),
+      );
+    }
+
+    terminate() {}
+  }
+
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    putImageData: () => {},
+    drawImage: () => {},
+  } as unknown as GPUCanvasContext);
+  vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:,");
+  vi.stubGlobal("ImageData", class {});
+  vi.stubGlobal("Worker", CachedPhotoWorker);
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify(MANIFEST), { status: 200 }),
+  );
+
+  const { container } = render(<App />);
+  const first = new File(["first"], "first.dng", { lastModified: 1 });
+  const second = new File(["second"], "second.dng", { lastModified: 2 });
+  for (const file of [first, second]) {
+    Object.defineProperty(file, "arrayBuffer", {
+      value: async () => new ArrayBuffer(3),
+    });
+  }
+  fireEvent.change(container.querySelector('input[type="file"]')!, {
+    target: { files: [first, second] },
+  });
+  await screen.findByRole("button", { name: /first\.dng — Ready/ });
+  expect(screen.getByLabelText("Current document")).toHaveTextContent(
+    "first.dngTest Camera1 × 1",
+  );
+  expect(screen.getByLabelText("Output")).toHaveTextContent("Export photo");
+  expect(screen.getByLabelText("Output")).not.toHaveTextContent("Camera");
+  expect(screen.queryByText("2 photos")).toBeNull();
+
+  fireEvent.pointerDown(screen.getByRole("button", { name: /^second\.dng/ }));
+  await screen.findByRole("button", { name: /second\.dng — Ready/ });
+  fireEvent.pointerDown(screen.getByRole("button", { name: /^first\.dng/ }));
+  await screen.findByRole("button", { name: /first\.dng — Ready/ });
+
+  expect(
+    CachedPhotoWorker.instance.commands.filter(({ type }) => type === "decode"),
+  ).toHaveLength(2);
+  expect(
+    CachedPhotoWorker.instance.commands.filter(
+      ({ type }) => type === "activate",
+    ),
+  ).toHaveLength(1);
+  expect(screen.queryByText("Decoding preview…")).toBeNull();
+});
+
+test("rerenders every look thumbnail after exposure changes", async () => {
+  const manifest = {
+    ...MANIFEST,
+    luts: [
+      {
+        id: "second-look",
+        group: "Test",
+        name: "Second Look",
+        file: "second.cube",
+        sha256: "11",
+      },
+      ...MANIFEST.luts,
+    ],
+  };
+  type Command = {
+    requestId: number;
+    type:
+      | "activate"
+      | "clear"
+      | "decode"
+      | "prepare-luts"
+      | "render"
+      | "render-looks"
+      | "export";
+    fileId?: string;
+    ev?: number;
+    maxEdge?: number;
+    includeBase?: boolean;
+    lut?: { id: string };
+    luts?: { id: string }[];
+  };
+
+  class ThumbnailWorker {
+    static instance: ThumbnailWorker;
+    readonly commands: Command[] = [];
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: ((event: ErrorEvent) => void) | null = null;
+
+    constructor() {
+      ThumbnailWorker.instance = this;
+    }
+
+    postMessage(command: Command) {
+      this.commands.push(command);
+      if (command.type === "render-looks") {
+        if (command.ev !== 0) return;
+        queueMicrotask(() => this.replyLookBatch(command, command.luts!));
+        return;
+      }
+      if (command.type !== "decode" && command.type !== "render") return;
+      queueMicrotask(() =>
+        this.onmessage?.(
+          new MessageEvent("message", {
+            data: {
+              requestId: command.requestId,
+              ok: true,
+              type: "preview",
+              result: {
+                fileId: command.fileId,
+                width: 1,
+                height: 1,
+                base:
+                  command.includeBase === false
+                    ? undefined
+                    : new Uint8Array([20, 0, 0, 255]),
+                lut: new Uint8Array([21, 0, 0, 255]),
+                metadata: { camera: "Test Camera", width: 1, height: 1 },
+                decodeCount: 1,
+                timings: {
+                  previewBackend: "webgpu",
+                  libraw: {},
+                  previewSourceMs: 0,
+                  lutLoadMs: 0,
+                  previewColorMs: 0,
+                  workerTotalMs: 0,
+                },
+              },
+            },
+          }),
+        ),
+      );
+    }
+
+    replyLookBatch(command: Command, luts: { id: string }[]) {
+      for (const lut of luts) {
+        this.onmessage?.(
+          new MessageEvent("message", {
+            data: {
+              requestId: command.requestId,
+              ok: true,
+              type: "look-preview",
+              result: {
+                fileId: command.fileId,
+                ev: command.ev,
+                lutId: lut.id,
+                width: 1,
+                height: 1,
+                bitmap: bitmap(21),
+              },
+            },
+          }),
+        );
+      }
+      this.onmessage?.(
+        new MessageEvent("message", {
+          data: {
+            requestId: command.requestId,
+            ok: true,
+            type: "look-previews",
+            fileId: command.fileId,
+            completed: luts.length,
+          },
+        }),
+      );
+    }
+
+    terminate() {}
+  }
+
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    putImageData: () => {},
+    drawImage: () => {},
+  } as unknown as GPUCanvasContext);
+  vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:,");
+  vi.stubGlobal("ImageData", class {});
+  vi.stubGlobal("Worker", ThumbnailWorker);
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify(manifest), { status: 200 }),
+  );
+
+  const { container } = render(<App />);
+  const raw = new File(["raw"], "photo.dng");
+  Object.defineProperty(raw, "arrayBuffer", {
+    value: async () => new ArrayBuffer(3),
+  });
+  fireEvent.change(container.querySelector('input[type="file"]')!, {
+    target: { files: [raw] },
+  });
+
+  const thumbnailBatches = (ev: number) =>
+    ThumbnailWorker.instance.commands.filter(
+      (command) =>
+        command.type === "render-looks" &&
+        command.maxEdge === 132 &&
+        command.ev === ev,
+    );
+  await waitFor(() => expect(thumbnailBatches(0)).toHaveLength(1));
+  expect(thumbnailBatches(0)[0].luts?.map(({ id }) => id)).toEqual([
+    "fuji-classic-negative",
+    "second-look",
+  ]);
+  await waitFor(() =>
+    expect(container.querySelectorAll(".look__thumb canvas")).toHaveLength(2),
+  );
+
+  fireEvent.input(screen.getByRole("slider", { name: "Exposure" }), {
+    target: { value: "1" },
+  });
+  await waitFor(() => expect(thumbnailBatches(1)).toHaveLength(1));
+  expect(container.querySelectorAll(".look__thumb canvas")).toHaveLength(2);
+  ThumbnailWorker.instance.replyLookBatch(thumbnailBatches(1)[0], [
+    { id: "fuji-classic-negative" },
+  ]);
+  await waitFor(() => expect(thumbnailBatches(1)).toHaveLength(2));
+  expect(thumbnailBatches(1)[1].luts?.map(({ id }) => id)).toEqual([
+    "second-look",
+  ]);
 });

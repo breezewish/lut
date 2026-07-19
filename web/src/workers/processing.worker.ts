@@ -7,13 +7,14 @@ import initAlchemy, {
   WasmLut,
 } from "../wasm/alchemy_core.js";
 import { describeProcessingError } from "../lib/errors";
-import { sha256Hex } from "../lib/hash";
+import { loadLutBytes } from "../lib/lut-cache";
 import { RenderedTiffStream, renderTiffInGpuStrips } from "../lib/tiff-export";
 import { demosaicLibRawAahdTiledWithWgsl } from "../lib/libraw-aahd";
 import { WebGpuColorRenderer } from "../lib/webgpu-color";
 import {
   prepareWebGpuPreview,
   WebGpuPreviewRenderer,
+  WebGpuPreviewSource,
 } from "../lib/webgpu-preview";
 import type {
   ExportTimings,
@@ -34,14 +35,20 @@ void previewGpuPreparation.catch(() => undefined);
 
 type CachedPreview = {
   fileId: string;
-  lutId: string;
   metadata: PreviewResult["metadata"];
   timings: PreviewResult["timings"];
-  renderer: WebGpuPreviewRenderer;
+  source: WebGpuPreviewSource;
 };
 
-let cached: CachedPreview | undefined;
+// Cache entries own only display-sized RGB16 sources. One renderer shares the
+// LUT, output, and readback buffers across every entry because Worker commands
+// are serialized and previews never execute concurrently.
+const PREVIEW_CACHE_LIMIT = 6;
+const previewCache = new Map<string, CachedPreview>();
 const cachedLuts = new Map<string, WasmLut>();
+const lutBytePromises = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
+let previewRenderer: WebGpuPreviewRenderer | undefined;
+let previewLutId: string | undefined;
 let decodeCount = 0;
 
 // The comparison panes are display previews, not export surfaces. A 1024px
@@ -50,21 +57,38 @@ let decodeCount = 0;
 const PREVIEW_MAX_EDGE = 1_024;
 
 let tail = Promise.resolve();
+let previewPriority = 0;
 
 context.onmessage = ({ data }: MessageEvent<WorkerCommand>) => {
+  const priority =
+    data.type === "render-looks" || data.type === "prepare-luts"
+      ? previewPriority
+      : ++previewPriority;
   tail = tail.then(
-    () => handleCommand(data),
-    () => handleCommand(data),
+    () => handleCommand(data, priority),
+    () => handleCommand(data, priority),
   );
 };
 
-async function handleCommand(data: WorkerCommand): Promise<void> {
+async function handleCommand(
+  data: WorkerCommand,
+  priority: number,
+): Promise<void> {
   let module: Awaited<ReturnType<typeof createLibRaw>> | undefined;
   try {
+    if (data.type === "prepare-luts") {
+      for (const lut of data.luts) {
+        void prepareLutBytes(lut).catch(() => undefined);
+      }
+      return;
+    }
     module = (await runtime).module;
     if (data.type === "clear") {
-      cached?.renderer.free();
-      cached = undefined;
+      previewRenderer?.free();
+      previewRenderer = undefined;
+      previewLutId = undefined;
+      for (const preview of previewCache.values()) preview.source.free();
+      previewCache.clear();
       const reply: WorkerReply = {
         requestId: data.requestId,
         ok: true,
@@ -73,10 +97,30 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
       context.postMessage(reply);
       return;
     }
+    if (data.type === "activate") {
+      const reply: WorkerReply = {
+        requestId: data.requestId,
+        ok: true,
+        type: "activated",
+        cached: Boolean(touchPreview(data.fileId)),
+      };
+      context.postMessage(reply);
+      return;
+    }
+    if (data.type === "release") {
+      const preview = previewCache.get(data.fileId);
+      preview?.source.free();
+      previewCache.delete(data.fileId);
+      const reply: WorkerReply = {
+        requestId: data.requestId,
+        ok: true,
+        type: "released",
+      };
+      context.postMessage(reply);
+      return;
+    }
     if (data.type === "decode") {
       const workerStartedAt = performance.now();
-      cached?.renderer.free();
-      cached = undefined;
       const previewRaw = new module.LibRaw();
       try {
         // Preview has its own display-sized decode contract. LibRaw keeps RAW
@@ -99,18 +143,16 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
         const image = previewRaw.imageInfo();
         const libraw = previewRaw.timings();
         decodeCount += 1;
-        const lut = await loadLut(data.lut);
+        await loadLut(data.lut);
         const previewSourceStartedAt = performance.now();
-        const renderer = await createCachedPreviewRenderer(
+        const source = await createCachedPreviewSource(
           previewRaw,
           image.width,
           image.height,
-          lut,
         );
-        cached = {
+        const cached: CachedPreview = {
           fileId: data.fileId,
-          renderer,
-          lutId: data.lut.id,
+          source,
           metadata: {
             camera: [metadata.camera_make, metadata.camera_model]
               .filter(Boolean)
@@ -127,12 +169,13 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
             workerTotalMs: 0,
           },
         };
+        cachePreview(cached);
         cached.timings.previewSourceMs =
           performance.now() - previewSourceStartedAt;
       } finally {
-        // The persistent Rust renderer now owns only the display-sized RGB16
-        // samples. Release LibRaw's larger half-size image and processing state
-        // before rerenders or a full-resolution export add memory pressure.
+        // The GPU source now owns the display-sized RGB16 samples. Release
+        // LibRaw's larger half-size image and processing state before rerenders
+        // or a full-resolution export add memory pressure.
         previewRaw.delete();
       }
       const interactive = await renderCached(
@@ -157,16 +200,75 @@ async function handleCommand(data: WorkerCommand): Promise<void> {
     }
 
     if (data.type === "render") {
-      postPreview(
-        data.requestId,
-        await renderCached(
+      const result = await renderCached(
+        data.fileId,
+        data.ev,
+        data.lut,
+        data.maxEdge,
+        data.includeBase,
+      );
+      // Interaction frames and LUT-only refinements stay as ImageBitmap all
+      // the way to Canvas. The latter avoids a 1024px RGBA allocation on the
+      // UI thread while the unchanged Base pane remains mounted.
+      if (data.maxEdge <= 256 || !data.includeBase)
+        await postBitmapPreview(data.requestId, result);
+      else postPreview(data.requestId, result);
+      return;
+    }
+
+    if (data.type === "render-looks") {
+      const pending = [...data.luts];
+      let completed = 0;
+      while (pending.length > 0) {
+        if (priority !== previewPriority) break;
+        const lut =
+          completed === 0
+            ? pending[0]
+            : await Promise.race(
+                pending.map((candidate) =>
+                  prepareLutBytes(candidate).then(() => candidate),
+                ),
+              );
+        pending.splice(
+          pending.findIndex(({ id }) => id === lut.id),
+          1,
+        );
+        const result = await renderCached(
           data.fileId,
           data.ev,
-          data.lut,
+          lut,
           data.maxEdge,
-          data.includeBase,
-        ),
-      );
+          false,
+        );
+        completed += 1;
+        const bitmap = await rgbaBitmap(
+          result.lut,
+          result.width,
+          result.height,
+        );
+        const reply: WorkerReply = {
+          requestId: data.requestId,
+          ok: true,
+          type: "look-preview",
+          result: {
+            fileId: data.fileId,
+            ev: data.ev,
+            lutId: lut.id,
+            width: result.width,
+            height: result.height,
+            bitmap,
+          },
+        };
+        context.postMessage(reply, [bitmap]);
+      }
+      const reply: WorkerReply = {
+        requestId: data.requestId,
+        ok: true,
+        type: "look-previews",
+        fileId: data.fileId,
+        completed,
+      };
+      context.postMessage(reply);
       return;
     }
 
@@ -303,12 +405,11 @@ function createPreviewRenderer(
   }
 }
 
-async function createCachedPreviewRenderer(
+async function createCachedPreviewSource(
   raw: InstanceType<Awaited<ReturnType<typeof createLibRaw>>["LibRaw"]>,
   width: number,
   height: number,
-  lut: WasmLut,
-): Promise<WebGpuPreviewRenderer> {
+): Promise<WebGpuPreviewSource> {
   const source = createPreviewRenderer(raw, width, height);
   try {
     await previewGpuPreparation;
@@ -325,7 +426,7 @@ async function createCachedPreviewRenderer(
   } finally {
     source.free();
   }
-  return WebGpuPreviewRenderer.create(pixels, sourceWidth, sourceHeight, lut);
+  return WebGpuPreviewSource.create(pixels, sourceWidth, sourceHeight);
 }
 
 function describeRuntimeError(
@@ -353,7 +454,8 @@ async function renderCached(
   includeBase: boolean,
 ): Promise<PreviewResult> {
   const workerStartedAt = performance.now();
-  if (!cached || cached.fileId !== fileId) {
+  const cached = touchPreview(fileId);
+  if (!cached) {
     throw new Error(
       "The selected RAW is not decoded. Select it again to retry.",
     );
@@ -361,12 +463,21 @@ async function renderCached(
   const lutStartedAt = performance.now();
   const parsedLut = await loadLut(lut);
   const lutLoadMs = performance.now() - lutStartedAt;
-  if (cached.lutId !== lut.id) {
-    cached.renderer.setLut(parsedLut);
-    cached.lutId = lut.id;
+  if (!previewRenderer) {
+    previewRenderer = await WebGpuPreviewRenderer.create(
+      cached.source,
+      parsedLut,
+    );
+    previewLutId = lut.id;
+  } else {
+    previewRenderer.setSource(cached.source);
+  }
+  if (previewLutId !== lut.id) {
+    previewRenderer.setLut(parsedLut);
+    previewLutId = lut.id;
   }
   const startedAt = performance.now();
-  const preview = await cached.renderer.render(ev, maxEdge, includeBase);
+  const preview = await previewRenderer.render(ev, maxEdge, includeBase);
   const previewColorMs = performance.now() - startedAt;
   return {
     fileId,
@@ -386,18 +497,49 @@ async function renderCached(
   };
 }
 
+function touchPreview(fileId: string): CachedPreview | undefined {
+  const preview = previewCache.get(fileId);
+  if (!preview) return undefined;
+  previewCache.delete(fileId);
+  previewCache.set(fileId, preview);
+  return preview;
+}
+
+function cachePreview(preview: CachedPreview): void {
+  const previous = previewCache.get(preview.fileId);
+  previous?.source.free();
+  previewCache.delete(preview.fileId);
+  previewCache.set(preview.fileId, preview);
+  while (previewCache.size > PREVIEW_CACHE_LIMIT) {
+    const oldestId = previewCache.keys().next().value;
+    if (oldestId === undefined) return;
+    previewCache.get(oldestId)?.source.free();
+    previewCache.delete(oldestId);
+  }
+}
+
 async function loadLut(lut: LutDefinition): Promise<WasmLut> {
-  const cachedLut = cachedLuts.get(lut.id);
+  const key = lutCacheKey(lut);
+  const cachedLut = cachedLuts.get(key);
   if (cachedLut) return cachedLut;
-  const response = await fetch(`${import.meta.env.BASE_URL}luts/${lut.file}`);
-  if (!response.ok) throw new Error(`Could not load LUT ${lut.name}.`);
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  const actual = sha256Hex(bytes);
-  if (actual !== lut.sha256)
-    throw new Error(`LUT integrity check failed for ${lut.name}.`);
+  const bytes = await prepareLutBytes(lut);
   const parsed = new WasmLut(bytes);
-  cachedLuts.set(lut.id, parsed);
+  cachedLuts.set(key, parsed);
   return parsed;
+}
+
+function prepareLutBytes(lut: LutDefinition): Promise<Uint8Array<ArrayBuffer>> {
+  const key = lutCacheKey(lut);
+  let pending = lutBytePromises.get(key);
+  if (!pending) {
+    pending = loadLutBytes(lut);
+    lutBytePromises.set(key, pending);
+  }
+  return pending;
+}
+
+function lutCacheKey(lut: LutDefinition): string {
+  return `${lut.id}\n${lut.sha256}`;
 }
 
 function postPreview(requestId: number, result: PreviewResult): void {
@@ -406,6 +548,37 @@ function postPreview(requestId: number, result: PreviewResult): void {
     ? [result.base.buffer, result.lut.buffer]
     : [result.lut.buffer];
   context.postMessage(reply, transfer);
+}
+
+async function postBitmapPreview(
+  requestId: number,
+  result: PreviewResult,
+): Promise<void> {
+  const [baseBitmap, lutBitmap] = await Promise.all([
+    result.base
+      ? rgbaBitmap(result.base, result.width, result.height)
+      : undefined,
+    rgbaBitmap(result.lut, result.width, result.height),
+  ]);
+  const reply: WorkerReply = {
+    requestId,
+    ok: true,
+    type: "preview",
+    result: {
+      fileId: result.fileId,
+      width: result.width,
+      height: result.height,
+      baseBitmap,
+      lutBitmap,
+      metadata: result.metadata,
+      decodeCount: result.decodeCount,
+      timings: result.timings,
+    },
+  };
+  context.postMessage(
+    reply,
+    baseBitmap ? [baseBitmap, lutBitmap] : [lutBitmap],
+  );
 }
 
 function postPreviewFrame(requestId: number, result: PreviewResult): void {
@@ -419,4 +592,17 @@ function postPreviewFrame(requestId: number, result: PreviewResult): void {
     ? [result.base.buffer, result.lut.buffer]
     : [result.lut.buffer];
   context.postMessage(reply, transfer);
+}
+
+function rgbaBitmap(
+  pixels: Uint8Array<ArrayBuffer>,
+  width: number,
+  height: number,
+): Promise<ImageBitmap> {
+  const clamped = new Uint8ClampedArray(
+    pixels.buffer,
+    pixels.byteOffset,
+    pixels.byteLength,
+  );
+  return createImageBitmap(new ImageData(clamped, width, height));
 }

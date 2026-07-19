@@ -12,11 +12,10 @@ The application supports persistent Light and Dark modes. Light mode uses a brig
 
 Desktop uses a stable editing shell:
 
-- The top toolbar owns app identity, the active document, local-privacy status, theme, import, and batch export.
-- The left queue owns local source files and their processing state.
+- The top toolbar owns app identity, active document and camera metadata, output-color status, local-privacy status, theme, and import.
 - The center canvas owns Base and LUT comparison and remains the largest surface.
 - The right inspector owns adjustments first and output second.
-- A compact status bar discloses processing assumptions without competing with the images.
+- The bottom filmstrip owns local source files and their processing state.
 
 The task order is adjust, compare, then export in visual flow; the canvas stays the dominant surface regardless of DOM position. Adjust and export controls form one contiguous inspector landmark ahead of the canvas in DOM order, so keyboard and screen-reader users traverse them as a single group. Empty state keeps one primary import action in the canvas and a secondary queue drop target.
 
@@ -32,11 +31,13 @@ Use one Inter-compatible system sans family. Meaningful UI labels and metadata u
 
 Buttons use a consistent 6 px radius and 32–36 px desktop body; coarse-pointer targets expand to 44 px. Inputs use a compact 30–34 px body inside clear labeled groups. Search, selection, numeric entry, and range controls share dedicated control tokens and authored hover, focus, active, and disabled states instead of browser defaults. Menus render through a portal. A visible spinner in the adjustment header communicates whenever the displayed recipe is still processing. Surfaces use fill changes instead of borders or shadows. Queue status is conveyed per-item by an icon and row fill, not a colored accent stripe.
 
-Look discovery shows the current transform and at most four recent working choices before progressively revealing the searchable full catalog. Inline explanations translate the V-Log pipeline and unverified output color space into task guidance.
+Look discovery uses a stable searchable thumbnail catalog. Every tile is rendered from a dedicated 132px preview at the active EV. The unverified output color space remains visible as compact toolbar status, while Output itself contains only the export action.
 
-Progressive preview buffers never define layout size. Every preview Canvas fills a stable image well, so 256 px edit frames, 384 px initial frames, and 1024 px settled frames change clarity without changing geometry. Native exposure input paints independently while interruptible React transitions submit the latest preview recipe at a bounded rate.
+The six most recently used photos retain decoded WebGPU preview sources, while the three most recent retain their latest comparison and Look thumbnails in UI memory. One serialized renderer shares its LUT, output, and readback workspace across those sources. Returning to a retained source never reads or decodes the RAW again; a UI-retained photo restores its exact visible recipe immediately. Full-resolution export remains uncached and sequential.
 
-Fit and 1:1-preview inspection reuse the existing Canvas buffers without starting image processing. Both panes share one normalized focal point for synchronized pointer panning. `F` and `1` provide view shortcuts outside form controls.
+Progressive preview buffers never define layout size. Every preview Canvas fills a stable image well, so 384px initial frames, 256px interaction frames, and 1024px settled frames change clarity without changing geometry. Native exposure input paints independently while render completion applies latest-only backpressure; pointer release or an 80ms idle period requests one settled frame even while the pointer remains down. LUT selection likewise paints a 256px Look before its 1024px refinement while retaining the Base pane.
+
+Wipe and Split comparison reuse the existing Canvas buffers without starting image processing. Wipe changes one CSS clipping variable through pointer or keyboard input; Split places both complete frames side by side.
 
 ## Motion
 
@@ -44,4 +45,4 @@ State transitions complete within 160–220 ms using ease-out curves. Motion com
 
 ## Responsive Behavior
 
-At medium widths, the queue becomes a horizontal source strip while comparison remains side by side and the inspector remains visible. Below 700 px, the layout becomes a vertical workflow: queue, adjustments, comparison, and output. Below 560 px, one image well switches explicitly between Base and Look so Output stays close to the comparison. Mobile retains 44 px action targets while keeping inputs visually compact.
+At medium widths, comparison remains dominant and the inspector stacks below it while the source filmstrip stays horizontal. The filmstrip becomes shorter on narrow screens so the compact export action remains reachable. Mobile retains 44 px action targets while keeping inputs visually compact.
