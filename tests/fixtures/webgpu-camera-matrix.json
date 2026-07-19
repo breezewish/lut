@@ -65,6 +65,32 @@
       "height": 3296,
       "rawBackend": "webgpu-xtrans",
       "sensorCache": false
+    },
+    {
+      "id": "canon-5d3-lossless-dng",
+      "file": "canon-5d3-lossless.dng",
+      "source": "https://raw.pixls.us/data/Adobe%20DNG%20Converter/Canon%20EOS%205D%20Mark%20III/5G4A9394-compressed-lossless.DNG",
+      "sha256": "3118116735d4f6dd01fd9d6a80ee9aac52a2c2debdc6dcd112bd5e3059044a55",
+      "bytes": 23206642,
+      "license": "CC0-1.0",
+      "camera": "Canon EOS 5D Mark III lossless DNG",
+      "mode": "14-bit lossless JPEG DNG",
+      "width": 5796,
+      "height": 3870
+    },
+    {
+      "id": "canon-5d3-lossy-dng",
+      "file": "canon-5d3-lossy.dng",
+      "source": "https://raw.pixls.us/data/Adobe%20DNG%20Converter/Canon%20EOS%205D%20Mark%20III/5G4A9394-compressed-lossy.DNG",
+      "sha256": "159326856c29073e845c3c5a9ecf98c6474f43ca15798a88ad5e2baecd0664b7",
+      "bytes": 6193902,
+      "license": "CC0-1.0",
+      "camera": "Canon EOS 5D Mark III lossy DNG",
+      "mode": "lossy JPEG DNG",
+      "width": 5760,
+      "height": 3840,
+      "rawBackend": "libraw",
+      "sensorCache": false
     }
   ]
 }

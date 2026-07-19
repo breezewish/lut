@@ -1,9 +1,15 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
+import createRegularLibRaw from "../web/src/libraw/libraw.js";
 import createLibRaw from "./libraw-node-runtime.mjs";
 
 const root = resolve(import.meta.dirname, "..");
+await promisify(execFile)("python3", [
+  resolve(root, "tests/fixtures/make_packed_dng.py"),
+]);
 const fixtures = [
   {
     name: "Sony ILME-FX30 ARW",
@@ -29,6 +35,7 @@ const fixtures = [
     samples: [702, 940, 622, 1036, 642, 518],
     webGpuAahd: true,
     webGpuXtrans: false,
+    parallelUnpack: true,
   },
   {
     name: "Leica M8 DNG",
@@ -54,6 +61,28 @@ const fixtures = [
     samples: [3080, 6806, 3306, 6806, 441, 812],
     webGpuAahd: true,
     webGpuXtrans: false,
+    parallelUnpack: true,
+  },
+  {
+    name: "Synthetic 12-bit packed DNG",
+    path: "tests/fixtures/packed-12.dng",
+    width: 1024,
+    height: 1024,
+    sensorType: "bayer",
+    cfaSize: 2,
+    cfa: [0, 1, 3, 2],
+    blackLevels: [0, 0, 0, 0],
+    whiteLevel: 4095,
+    demosaicScaleRange: 4095,
+    orientation: 0,
+    whiteBalance: [1, 1, 1, 0],
+    demosaicPreMultipliers: [1, 1, 1, 1],
+    xyzToCamera: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    sum: 2_148_237_312,
+    samples: [0, 268, 34, 302, 3584, 705],
+    webGpuAahd: true,
+    webGpuXtrans: false,
+    parallelUnpack: true,
   },
 ];
 if (process.env.XTRANS_FIXTURE) {
@@ -81,12 +110,19 @@ if (process.env.XTRANS_FIXTURE) {
     samples: [2653, 4891, 5299, 4840, 1893, 7488],
     webGpuAahd: false,
     webGpuXtrans: true,
+    parallelUnpack: true,
   });
 }
 
 const wasmBytes = await readFile(
   resolve(root, "web/src/libraw/threaded/libraw.wasm"),
 );
+const regularWasmBytes = await readFile(
+  resolve(root, "web/src/libraw/libraw.wasm"),
+);
+const regularModule = await createRegularLibRaw({
+  wasmBinary: regularWasmBytes,
+});
 const module = await createLibRaw({ wasmBinary: wasmBytes });
 
 for (const fixture of fixtures) {
@@ -95,6 +131,11 @@ for (const fixture of fixtures) {
   const raw = new module.LibRaw();
   try {
     raw.open(rawBytes, false);
+    assertEqual(
+      raw.usesParallelUnpack(),
+      fixture.parallelUnpack,
+      `${fixture.name} parallel unpack route`,
+    );
     assertEqual(
       raw.supportsWebGpuAahd(),
       fixture.webGpuAahd,
@@ -181,6 +222,26 @@ for (const fixture of fixtures) {
     let sum = 0;
     for (const sample of mosaic) sum += sample;
     assertEqual(sum, fixture.sum, `${fixture.name} mosaic checksum`);
+    const regularRaw = new regularModule.LibRaw();
+    try {
+      regularRaw.open(rawBytes, false);
+      const regularInfo = regularRaw.sensorInfo();
+      assertEqual(
+        JSON.stringify(regularInfo),
+        directInfoJson,
+        `${fixture.name} regular/threaded metadata parity`,
+      );
+      const regularMosaic = regularRaw.sensorView(0, regularInfo.sampleCount);
+      for (let index = 0; index < mosaic.length; index += 1) {
+        if (mosaic[index] !== regularMosaic[index]) {
+          throw new Error(
+            `${fixture.name} regular/threaded mosaic differs at ${index}: ${regularMosaic[index]} != ${mosaic[index]}`,
+          );
+        }
+      }
+    } finally {
+      regularRaw.delete();
+    }
     if (raw.sensorView(0, 1).buffer !== mosaic.buffer) {
       throw new Error(
         `${fixture.name} sensor slices are copies instead of WASM views`,
@@ -201,7 +262,7 @@ for (const fixture of fixtures) {
       }
     }
     console.log(
-      `${fixture.name} sensor mosaic and metadata match rawpy exactly`,
+      `${fixture.name} regular and threaded sensor mosaics match exactly`,
     );
   } finally {
     raw.delete();

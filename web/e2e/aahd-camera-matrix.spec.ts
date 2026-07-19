@@ -48,6 +48,14 @@ for (const fixture of manifest.fixtures) {
       "never",
     ]);
     const webGpuOutput = await exportSelected(page, path);
+    const previewTimings = await page.evaluate(
+      () =>
+        (
+          performance
+            .getEntriesByName("raw-alchemy:preview-worker")
+            .at(-1) as PerformanceMark
+        ).detail,
+    );
     const timings = await page.evaluate(
       () =>
         (
@@ -56,15 +64,6 @@ for (const fixture of manifest.fixtures) {
             .at(-1) as PerformanceMark
         ).detail,
     );
-    expect(timings.rawBackend).toBe(fixture.rawBackend ?? "webgpu-aahd");
-    expect(timings.colorBackend).toBe("webgpu");
-    if (fixture.sensorCache ?? timings.rawBackend !== "libraw") {
-      expect(timings.sensorCacheHit).toBe(true);
-      expect(timings.sensorCacheBytes).toBe(fixture.width * fixture.height * 2);
-      expect(timings.libraw.totalMs).toBe(0);
-    } else {
-      expect(timings.sensorCacheHit).not.toBe(true);
-    }
     const adapterInfo = await page.evaluate(async () => {
       const adapter = await navigator.gpu.requestAdapter({
         powerPreference: "high-performance",
@@ -79,11 +78,6 @@ for (const fixture of manifest.fixtures) {
           }
         : undefined;
     });
-    expect(adapterInfo).toBeDefined();
-    if (process.env.WEBGPU_HARDWARE === "1") {
-      expect(adapterInfo?.isFallbackAdapter).toBe(false);
-    }
-
     const webGpuBytes = await readFile(webGpuOutput);
     const retainedOutput = testInfo.outputPath(`${fixture.id}-webgpu.tif`);
     await writeFile(retainedOutput, webGpuBytes);
@@ -94,12 +88,29 @@ for (const fixture of manifest.fixtures) {
     const reportPath = testInfo.outputPath(`${fixture.id}-comparison.json`);
     await writeFile(
       reportPath,
-      JSON.stringify({ fixture, adapterInfo, comparison, timings }, null, 2),
+      JSON.stringify(
+        { fixture, adapterInfo, comparison, previewTimings, timings },
+        null,
+        2,
+      ),
     );
     await testInfo.attach(`${fixture.id}-comparison.json`, {
       path: reportPath,
       contentType: "application/json",
     });
+    expect(timings.rawBackend).toBe(fixture.rawBackend ?? "webgpu-aahd");
+    expect(timings.colorBackend).toBe("webgpu");
+    if (fixture.sensorCache ?? timings.rawBackend !== "libraw") {
+      expect(timings.sensorCacheHit).toBe(true);
+      expect(timings.sensorCacheBytes).toBe(fixture.width * fixture.height * 2);
+      expect(timings.libraw.totalMs).toBe(0);
+    } else {
+      expect(timings.sensorCacheHit).not.toBe(true);
+    }
+    expect(adapterInfo).toBeDefined();
+    if (process.env.WEBGPU_HARDWARE === "1") {
+      expect(adapterInfo?.isFallbackAdapter).toBe(false);
+    }
     expect([comparison.width, comparison.height]).toEqual([
       fixture.width,
       fixture.height,

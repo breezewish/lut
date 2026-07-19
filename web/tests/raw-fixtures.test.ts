@@ -79,13 +79,21 @@ test("downloadable WebGPU camera fixtures remain a pinned sensor matrix", async 
       camera: "Fujifilm X-T1",
       mode: "14-bit uncompressed X-Trans",
     },
+    {
+      camera: "Canon EOS 5D Mark III lossless DNG",
+      mode: "14-bit lossless JPEG DNG",
+    },
+    {
+      camera: "Canon EOS 5D Mark III lossy DNG",
+      mode: "lossy JPEG DNG",
+    },
   ]);
   for (const fixture of manifest.fixtures) {
     expect(new URL(fixture.source).origin, fixture.id).toBe(
       "https://raw.pixls.us",
     );
     expect(fixture.sha256, fixture.id).toMatch(/^[0-9a-f]{64}$/);
-    expect(fixture.bytes, fixture.id).toBeGreaterThan(20_000_000);
+    expect(fixture.bytes, fixture.id).toBeGreaterThan(5_000_000);
     expect(fixture.license, fixture.id).toBe("CC0-1.0");
     expect(fixture.width * fixture.height, fixture.id).toBeGreaterThan(
       15_000_000,

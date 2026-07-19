@@ -38,13 +38,18 @@
   LibRaw demosaic for unsupported Panasonic geometry,
   and compares every browser TIFF channel with an independent native export.
 - The hardware camera matrix reuses the Preview-unpacked mosaic for compressed
-  Nikon Z 6 and Fujifilm X-T2 export, reports zero second-decode time, skips the
-  cache for uncompressed X-A5 and X-T1 input, and stays within one RGB16 code of
-  the native oracle on all five cameras.
+  Nikon Z 6, Fujifilm X-T2, and lossless Canon DNG export, reports zero
+  second-decode time, skips the cache for uncompressed X-A5 and X-T1 input, and
+  stays within one RGB16 code of the native oracle on all seven fixtures.
 - A T4 production benchmark compares the same single-thread and selective
-  pthread bundles. Fujifilm compressed-block unpack improves materially, while
-  Nikon sequential unpack and uncompressed Bayer Preview remain aligned with
-  the single-thread baseline.
+  pthread bundles. Sony ARW2 unpack improves from 186.16 ms to 80.62 ms, and
+  Leica packed DNG improves from 436.98 ms to 16.03 ms, while every sensor
+  sample remains exact. Nikon sequential unpack and uncompressed Bayer Preview
+  remain aligned with the single-thread baseline.
+- The downloadable hardware matrix includes matched full-resolution lossless
+  JPEG and lossy JPEG DNG files. Both compare every browser TIFF channel with
+  the native LibRaw oracle, and the report records their Preview and Export
+  decoder timings and selected backend.
 - A test-only hardware entry compares GPU X-Trans camera RGB with a captured
   LibRaw result before highlights and color. X-T1 and X-T2 must match every
   RGB16 sample exactly; X-T1 also supplies nonempty Blend-highlight coverage to

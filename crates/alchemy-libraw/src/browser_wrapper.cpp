@@ -86,6 +86,13 @@ public:
     return libraw_internal_data.internal_output_params.fuji_width != 0;
   }
 
+  bool has_parallel_packed_dng() const {
+    const unsigned bits = libraw_internal_data.unpacker_data.tiff_bps;
+    return imgdata.idata.filters != 0 &&
+           libraw_internal_data.unpacker_data.tiff_samples == 1 && bits >= 8 &&
+           bits <= 15;
+  }
+
   bool has_standard_aahd_geometry() {
     const auto &sizes = imgdata.sizes;
     const auto &identity = imgdata.idata;
@@ -424,6 +431,7 @@ public:
     clear_image();
     sensor_.clear();
     sensor_metadata_ = val::undefined();
+    sensor_black_captured_ = false;
     processor_.recycle();
     timings_ = {};
     sensor_timings_ = {};
@@ -533,9 +541,21 @@ public:
     libraw_decoder_info_t decoder{};
     processor_.get_decoder_info(&decoder);
     if (decoder.decoder_name == nullptr) return false;
-    return std::strcmp(decoder.decoder_name, "fuji_compressed_load_raw()") == 0 ||
-           std::strcmp(decoder.decoder_name, "panasonicC8_load_raw()") == 0 ||
-           std::strcmp(decoder.decoder_name, "crxLoadRaw()") == 0;
+    if (std::strcmp(decoder.decoder_name, "fuji_compressed_load_raw()") == 0 ||
+        std::strcmp(decoder.decoder_name, "panasonicC8_load_raw()") == 0 ||
+        std::strcmp(decoder.decoder_name, "crxLoadRaw()") == 0 ||
+        std::strcmp(decoder.decoder_name, "sony_arw2_load_raw()") == 0) {
+      return true;
+    }
+
+    // Packed DNG is only expensive when LibRaw's generic getbits() extraction
+    // is required. Tiny generated fixtures must not pay the lazy pthread
+    // runtime startup cost.
+    const auto pixels =
+        static_cast<std::size_t>(processor_.imgdata.sizes.raw_width) *
+        processor_.imgdata.sizes.raw_height;
+    return std::strcmp(decoder.decoder_name, "packed_dng_load_raw()") == 0 &&
+           pixels >= 1'000'000 && processor_.has_parallel_packed_dng();
   }
 
   val image_info() { return prepare_image_info(true); }
@@ -668,7 +688,12 @@ public:
     capture_sensor_mosaic();
     if (sensor_metadata_.isUndefined()) {
       const auto &color = processor_.imgdata.rawdata.color;
-      const auto black = adjusted_black_levels();
+      if (!sensor_black_captured_) {
+        throw std::runtime_error(
+            "LibRaw sensor black levels were not captured before processing");
+      }
+      const AdjustedBlackLevels black{sensor_black_channels_,
+                                      sensor_black_common_};
       unsigned data_maximum = 0;
       for (unsigned row = 0; row < sensor_height_; ++row) {
         const auto *source =
@@ -820,7 +845,10 @@ public:
       release_decoder_state();
       throw std::runtime_error("LibRaw returned invalid sensor geometry");
     }
-    adjusted_black_levels();
+    const auto black = adjusted_black_levels();
+    sensor_black_channels_ = black.channels;
+    sensor_black_common_ = black.common;
+    sensor_black_captured_ = true;
     sensor_width_ = sizes.width;
     sensor_height_ = sizes.height;
     sensor_orientation_ = sizes.flip;
@@ -906,11 +934,14 @@ private:
   std::vector<std::uint8_t> input_;
   std::vector<std::uint16_t> sensor_;
   std::array<unsigned, 36> sensor_cfa_{};
+  std::array<unsigned, 4> sensor_black_channels_{};
   libraw_processed_image_t *image_ = nullptr;
   unsigned sensor_width_ = 0;
   unsigned sensor_height_ = 0;
   unsigned sensor_orientation_ = 0;
   unsigned sensor_cfa_size_ = 0;
+  unsigned sensor_black_common_ = 0;
+  bool sensor_black_captured_ = false;
   bool opened_ = false;
   bool unpacked_ = false;
   bool half_size_ = false;
