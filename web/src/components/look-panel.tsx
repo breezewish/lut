@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useId, useRef } from "react";
 import { Check, Search } from "lucide-react";
 
 import type { LutDefinition } from "../types";
@@ -17,8 +17,11 @@ function LookThumb({ image, alt }: { image: LookThumbImage; alt: string }) {
     if (!canvas) return;
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) return;
-    canvas.width = image.width;
-    canvas.height = image.height;
+    // Assigning either dimension destroys the backing store even when the
+    // value is unchanged. Avoid rebuilding every LUT canvas in one commit
+    // when a warm photo cache is restored.
+    if (canvas.width !== image.width) canvas.width = image.width;
+    if (canvas.height !== image.height) canvas.height = image.height;
     context.drawImage(image.bitmap, 0, 0);
   }, [image]);
   return <canvas ref={ref} role="img" aria-label={alt} />;
@@ -47,6 +50,7 @@ export const LookPanel = memo(function LookPanel({
   disabled?: boolean;
 }) {
   const activeRef = useRef<HTMLButtonElement>(null);
+  const groupLabelId = useId();
   // Keep the selected look scrolled into view (e.g. after switching photos)
   // without ever reordering the grid.
   useEffect(() => {
@@ -56,10 +60,15 @@ export const LookPanel = memo(function LookPanel({
   const normalized = query.trim().toLocaleLowerCase();
   const visible = looks.filter(
     (lut) =>
-      lut.id === activeId ||
       normalized.length === 0 ||
       `${lut.group} ${lut.name}`.toLocaleLowerCase().includes(normalized),
   );
+  const groups = new Map<string, LutDefinition[]>();
+  for (const lut of visible) {
+    const group = groups.get(lut.group);
+    if (group) group.push(lut);
+    else groups.set(lut.group, [lut]);
+  }
 
   return (
     <>
@@ -74,37 +83,54 @@ export const LookPanel = memo(function LookPanel({
           onChange={(event) => onQuery(event.target.value)}
         />
       </label>
-      <div className="looks__grid" role="group" aria-label="Built-in looks">
+      <div className="looks__catalog" role="group" aria-label="Built-in looks">
         {visible.length === 0 ? (
           <p className="looks__empty" role="status">
             No looks match “{query}”.
           </p>
         ) : (
-          visible.map((lut) => {
-            const image = thumbs.get(lut.id);
-            const active = lut.id === activeId;
+          [...groups].map(([group, groupedLooks], groupIndex) => {
+            const headingId = `${groupLabelId}-${groupIndex}`;
             return (
-              <button
-                key={lut.id}
-                ref={active ? activeRef : undefined}
-                type="button"
-                aria-label={lut.name}
-                aria-pressed={active}
-                className={`look ${active ? "is-active" : ""} ${image ? "" : "is-loading"}`}
-                title={`${lut.group} · ${lut.name}`}
-                disabled={disabled}
-                onClick={() => onChoose(lut.id)}
+              <div
+                key={group}
+                className="look-group"
+                role="group"
+                aria-labelledby={headingId}
               >
-                <span className="look__thumb">
-                  {image && (
-                    <LookThumb image={image} alt={`${lut.name} look`} />
-                  )}
-                  <span className="look__check" aria-hidden="true">
-                    <Check size={12} />
-                  </span>
-                </span>
-                <span className="look__name">{lut.name}</span>
-              </button>
+                <h3 id={headingId} className="look-group__title">
+                  {group}
+                </h3>
+                <div className="looks__grid">
+                  {groupedLooks.map((lut) => {
+                    const image = thumbs.get(lut.id);
+                    const active = lut.id === activeId;
+                    return (
+                      <button
+                        key={lut.id}
+                        ref={active ? activeRef : undefined}
+                        type="button"
+                        aria-label={lut.name}
+                        aria-pressed={active}
+                        className={`look ${active ? "is-active" : ""} ${image ? "" : "is-loading"}`}
+                        title={`${lut.group} · ${lut.name}`}
+                        disabled={disabled}
+                        onClick={() => onChoose(lut.id)}
+                      >
+                        <span className="look__thumb">
+                          {image && (
+                            <LookThumb image={image} alt={`${lut.name} look`} />
+                          )}
+                          <span className="look__check" aria-hidden="true">
+                            <Check size={12} />
+                          </span>
+                        </span>
+                        <span className="look__name">{lut.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             );
           })
         )}

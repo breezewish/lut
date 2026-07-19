@@ -36,11 +36,11 @@
     { "id": "hasselblad-standard-65", "group": "Hasselblad", "name": "Standard · 65", "file": "Hasselblad/Hasselblad_Standard_Phocus_X2D_VLog_65.cube", "sha256": "51607eb09961b06aed78b01cd4c437719251ec4ad2b92099c1808c0af73732dc" },
     { "id": "leica-classic", "group": "Leica", "name": "Classic", "file": "Leica/L-Log_to_Classic_VLog.cube", "sha256": "efca5805c90e317b99d921d2fd2f12b226a9ddc726565471df2b4fa8e26d13b4" },
     { "id": "leica-natural", "group": "Leica", "name": "Natural", "file": "Leica/L-Log_to_Natural_VLog.cube", "sha256": "4c6eafdb214f24240df34f5f37a859b1a629fba3f7527db5088920c5b44b486c" },
-    { "id": "nikon-nlog-709", "group": "Nikon / RED", "name": "N-Log BT.1886", "file": "Nikon/N-Log_BT2020_to_REC709_BT1886_VLog.cube", "sha256": "8eb89df233570f1a3aabd175e24b4e172d36556ea772a0a94826c2489d53018a" },
-    { "id": "red-achromic", "group": "Nikon / RED", "name": "RED Achromic", "file": "Nikon/RED_Achromic_Rec2020_N-Log_to_Rec709_VLog.cube", "sha256": "59b717b82aad69480d313384e66d87241840186d03823f523274f3a1ca62c28a" },
-    { "id": "red-film-bias-bleach", "group": "Nikon / RED", "name": "RED Film Bias Bleach", "file": "Nikon/RED_FilmBiasBleachBypass_Rec2020_N-Log_to_Rec709_BT1886_VLog.cube", "sha256": "8f18390f3ccccc67a8041d13778a4985b34669955aa6ec4a61ca032a9fc2da6e" },
-    { "id": "red-film-bias-offset", "group": "Nikon / RED", "name": "RED Film Bias Offset", "file": "Nikon/RED_FilmBiasOffset_Rec2020_N-Log_to_Rec709_BT1886_VLog.cube", "sha256": "f229323cf39959d6978ea88e9e93bda98b94f4e1571a849358c69babd5b7ead9" },
-    { "id": "red-film-bias", "group": "Nikon / RED", "name": "RED Film Bias", "file": "Nikon/RED_FilmBias_Rec2020_N-Log_to_Rec709_BT1886_VLog.cube", "sha256": "be6b84aebcdc026dfbc1250748ac70c4baa00dd47c3656b5ccac4f4a541d3ace" },
+    { "id": "nikon-nlog-709", "group": "Nikon", "name": "N-Log BT.1886", "file": "Nikon/N-Log_BT2020_to_REC709_BT1886_VLog.cube", "sha256": "8eb89df233570f1a3aabd175e24b4e172d36556ea772a0a94826c2489d53018a" },
+    { "id": "red-achromic", "group": "Nikon", "name": "RED Achromic", "file": "Nikon/RED_Achromic_Rec2020_N-Log_to_Rec709_VLog.cube", "sha256": "59b717b82aad69480d313384e66d87241840186d03823f523274f3a1ca62c28a" },
+    { "id": "red-film-bias-bleach", "group": "Nikon", "name": "RED Film Bias Bleach", "file": "Nikon/RED_FilmBiasBleachBypass_Rec2020_N-Log_to_Rec709_BT1886_VLog.cube", "sha256": "8f18390f3ccccc67a8041d13778a4985b34669955aa6ec4a61ca032a9fc2da6e" },
+    { "id": "red-film-bias-offset", "group": "Nikon", "name": "RED Film Bias Offset", "file": "Nikon/RED_FilmBiasOffset_Rec2020_N-Log_to_Rec709_BT1886_VLog.cube", "sha256": "f229323cf39959d6978ea88e9e93bda98b94f4e1571a849358c69babd5b7ead9" },
+    { "id": "red-film-bias", "group": "Nikon", "name": "RED Film Bias", "file": "Nikon/RED_FilmBias_Rec2020_N-Log_to_Rec709_BT1886_VLog.cube", "sha256": "be6b84aebcdc026dfbc1250748ac70c4baa00dd47c3656b5ccac4f4a541d3ace" },
     { "id": "red-medium-contrast", "group": "RED", "name": "Medium Contrast Soft", "file": "RED/REC709_MEDIUM_CONTRAST_Soft_VLog.cube", "sha256": "7a1949b7725d372a46bd03e13bc8c8e27c6a75fa451cc22af978dec8d998d1f5" }
   ]
 }

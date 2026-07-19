@@ -143,7 +143,7 @@ export class ProcessingClient {
     buffer: ArrayBuffer,
     ev: number,
     lut: LutDefinition,
-  ): Promise<PreviewResult> {
+  ): Promise<DisplayPreviewResult> {
     this.rejectQueuedRender(
       new Error("Preview render was superseded by a new RAW decode."),
     );
@@ -157,7 +157,7 @@ export class ProcessingClient {
       },
       [buffer],
     );
-    if (reply.ok && reply.type === "preview" && "lut" in reply.result) {
+    if (reply.ok && reply.type === "preview") {
       performance.mark("raw-alchemy:preview-worker", {
         detail: reply.result.timings,
       });

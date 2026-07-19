@@ -30,7 +30,6 @@
   },
   "dependencies": {
     "@noble/hashes": "2.2.0",
-    "@radix-ui/react-select": "2.2.6",
     "fflate": "0.8.2",
     "lucide-react": "0.468.0",
     "react": "19.2.0",

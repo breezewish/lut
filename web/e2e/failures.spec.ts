@@ -14,7 +14,7 @@ test("export waits until the selected preview matches the visible recipe", async
   const lutGate = new Promise<void>((resolveGate) => {
     releaseLut = resolveGate;
   });
-  await page.route("**/*.ralut", async (route) => {
+  await page.route("**/*.ralut*", async (route) => {
     await lutGate;
     await route.continue();
   });
@@ -27,22 +27,19 @@ test("export waits until the selected preview matches the visible recipe", async
   const exportSelected = page.getByRole("button", {
     name: "Export selected",
   });
-  const exportAll = page.getByRole("button", { name: "Export all" });
   await expect(exportSelected).toBeDisabled();
-  await expect(exportAll).toBeDisabled();
 
   releaseLut();
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 20_000,
   });
   await expect(exportSelected).toBeEnabled();
-  await expect(exportAll).toBeEnabled();
 });
 
 test("a mismatched LUT fails explicitly and the RAW can be retried", async ({
   page,
 }) => {
-  await page.route("**/*.ralut", (route) =>
+  await page.route("**/*.ralut*", (route) =>
     route.fulfill({ contentType: "text/plain", body: "tampered LUT" }),
   );
   await page.goto("/");
@@ -56,7 +53,7 @@ test("a mismatched LUT fails explicitly and the RAW can be retried", async ({
   ).toBeDisabled();
   await expect(page.getByText("Decoding preview…")).toHaveCount(0);
 
-  await page.unroute("**/*.ralut");
+  await page.unroute("**/*.ralut*");
   await page.getByRole("button", { name: "Remove file" }).click();
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
   await expect(page.getByLabel("Base preview")).toBeVisible({
@@ -67,7 +64,7 @@ test("a mismatched LUT fails explicitly and the RAW can be retried", async ({
 test("a missing LUT fails without leaving the RAW in decoding", async ({
   page,
 }) => {
-  await page.route("**/*.ralut", (route) => route.fulfill({ status: 404 }));
+  await page.route("**/*.ralut*", (route) => route.fulfill({ status: 404 }));
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
 
@@ -99,7 +96,7 @@ test("a hash-valid malformed compact LUT reports its parser error", async ({
   await page.route("**/luts/manifest.json", (route) =>
     route.fulfill({ contentType: "application/json", json: manifest }),
   );
-  await page.route("**/*.ralut", (route) =>
+  await page.route("**/*.ralut*", (route) =>
     route.fulfill({ contentType: "application/octet-stream", body: malformed }),
   );
   await page.goto("/");
@@ -128,9 +125,9 @@ test("an invalid manifest keeps an imported RAW out of the fake preview state", 
   await expect(
     page.getByRole("region", { name: "Processing controls" }),
   ).toHaveCount(0);
-  await expect(
-    page.getByRole("heading", { name: "Built-in looks unavailable" }),
-  ).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(
+    "Built-in looks unavailable. Reload to retry.",
+  );
   await expect(page.getByLabel("Base preview")).toHaveCount(0);
   await expect(page.getByLabel("LUT preview")).toHaveCount(0);
   await expect(

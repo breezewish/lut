@@ -691,13 +691,13 @@ ul {
   gap: var(--s4);
   padding: var(--s5);
 }
-/* The Looks panel takes the remaining height and scrolls its grid internally,
+/* The Looks panel takes the remaining height and scrolls its catalog internally,
    so Exposure stays pinned above and Output/Export stay reachable below. */
 .panel--looks {
   flex: 1 1 auto;
   min-height: 9rem;
 }
-.panel--looks .looks__grid {
+.panel--looks .looks__catalog {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -937,6 +937,28 @@ input[type="range"]:disabled {
   color: var(--ink-muted);
   opacity: 1;
 }
+.looks__catalog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s6);
+}
+.look-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.look-group__title {
+  position: sticky;
+  z-index: var(--z-sticky);
+  top: 0;
+  margin: 0;
+  padding: var(--s1) 0 var(--s2);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--t-xs);
+  font-weight: 640;
+  line-height: 1.25;
+}
 .looks__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(5rem, 1fr));
@@ -1018,7 +1040,6 @@ input[type="range"]:disabled {
   font-weight: 560;
 }
 .looks__empty {
-  grid-column: 1 / -1;
   padding: var(--s5) 0;
   color: var(--ink-muted);
   font-size: var(--t-sm);
@@ -1398,7 +1419,9 @@ input[type="range"]:disabled {
   }
   .panels {
     flex: 0 0 auto;
-    max-height: 45vh;
+    /* Give the visual Look catalog useful room on tall narrow screens while
+       reserving the header, filmstrip, and 16rem comparison minimum. */
+    max-height: min(55vh, calc(100dvh - 23.75rem));
     overflow: hidden;
     /* On narrow screens the panels sit below the canvas at a natural width. */
     width: auto !important;

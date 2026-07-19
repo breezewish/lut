@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { writeFile } from "node:fs/promises";
+import { copyFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const enabled = process.env.RAW_PERF === "1";
@@ -264,6 +264,215 @@ test("keeps painting fresh frames during continuous EV input", async ({
   expect(settled!.at - burst.endedAt).toBeLessThan(
     hardwarePerformance ? 500 : 700,
   );
+});
+
+test("switches back to a warm RAW without blocking the interface", async ({
+  context,
+  page,
+}, testInfo) => {
+  test.skip(
+    !enabled,
+    "Set RAW_PERF=1 to run the formal performance benchmark.",
+  );
+  test.setTimeout(3 * 60_000);
+
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+  await page.addInitScript(() => {
+    const state = window as Window & {
+      rawSwitchStartedAt?: number;
+      rawSwitchDraws?: Array<{
+        at: number;
+        duration: number;
+        width: number;
+        label: string | null;
+        kind: "bitmap" | "pixels";
+      }>;
+      rawSwitchResizes?: Array<{ at: number; dimension: "width" | "height" }>;
+      rawSwitchFrames?: number[];
+      rawSwitchLongTasks?: Array<{ at: number; duration: number }>;
+    };
+    state.rawSwitchDraws = [];
+    state.rawSwitchFrames = [];
+    state.rawSwitchLongTasks = [];
+    state.rawSwitchResizes = [];
+    addEventListener(
+      "pointerdown",
+      (event) => {
+        if ((event.target as HTMLElement).closest(".photo")) {
+          state.rawSwitchStartedAt = performance.now();
+        }
+      },
+      true,
+    );
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        state.rawSwitchLongTasks?.push({
+          at: entry.startTime,
+          duration: entry.duration,
+        });
+      }
+    }).observe({ type: "longtask" });
+    const record = (
+      canvas: HTMLCanvasElement,
+      startedAt: number,
+      kind: "bitmap" | "pixels",
+    ) => {
+      state.rawSwitchDraws?.push({
+        at: startedAt,
+        duration: performance.now() - startedAt,
+        width: canvas.width,
+        label: canvas.getAttribute("aria-label"),
+        kind,
+      });
+    };
+    for (const dimension of ["width", "height"] as const) {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        HTMLCanvasElement.prototype,
+        dimension,
+      )!;
+      Object.defineProperty(HTMLCanvasElement.prototype, dimension, {
+        ...descriptor,
+        set(value: number) {
+          if (state.rawSwitchStartedAt !== undefined) {
+            state.rawSwitchResizes?.push({ at: performance.now(), dimension });
+          }
+          descriptor.set!.call(this, value);
+        },
+      });
+    }
+    const putImageData = CanvasRenderingContext2D.prototype.putImageData;
+    CanvasRenderingContext2D.prototype.putImageData = function (
+      this: CanvasRenderingContext2D,
+      ...args
+    ) {
+      const startedAt = performance.now();
+      Reflect.apply(putImageData, this, args);
+      record(this.canvas, startedAt, "pixels");
+    } as typeof CanvasRenderingContext2D.prototype.putImageData;
+    const drawImage = CanvasRenderingContext2D.prototype.drawImage;
+    CanvasRenderingContext2D.prototype.drawImage = function (
+      this: CanvasRenderingContext2D,
+      ...args
+    ) {
+      const startedAt = performance.now();
+      Reflect.apply(drawImage, this, args);
+      record(this.canvas, startedAt, "bitmap");
+    } as typeof CanvasRenderingContext2D.prototype.drawImage;
+    const recordFrame = (at: number) => {
+      state.rawSwitchFrames?.push(at);
+      requestAnimationFrame(recordFrame);
+    };
+    requestAnimationFrame(recordFrame);
+  });
+
+  const secondFixture = testInfo.outputPath("second.ARW");
+  await copyFile(fixture, secondFixture);
+  await page.goto("/");
+  await page
+    .locator('input[type="file"]')
+    .setInputFiles([fixture, secondFixture]);
+  await expect(page.getByLabel("Base preview")).toHaveAttribute(
+    "width",
+    "1024",
+    { timeout: 60_000 },
+  );
+  await expect(page.getByRole("img", { name: / look$/ })).toHaveCount(27, {
+    timeout: 60_000,
+  });
+  await page.getByRole("button", { name: /^second\.ARW/ }).click();
+  await expect(
+    page.getByRole("button", { name: /second\.ARW — Ready/ }),
+  ).toHaveAttribute("aria-current", "true", { timeout: 60_000 });
+  await expect(page.getByLabel("Base preview")).toHaveAttribute(
+    "width",
+    "1024",
+    { timeout: 60_000 },
+  );
+  await expect(page.getByRole("img", { name: / look$/ })).toHaveCount(27, {
+    timeout: 60_000,
+  });
+
+  const before = await page.evaluate(() => ({
+    at: performance.now(),
+    decodeCount: performance.getEntriesByName("raw-alchemy:preview-worker")
+      .length,
+    fileReadCount: performance.getEntriesByName("raw-alchemy:file-read").length,
+  }));
+  await page
+    .getByRole("button", { name: new RegExp(`^${fixture.split("/").at(-1)}`) })
+    .click();
+  await expect(
+    page.getByRole("button", {
+      name: new RegExp(`${fixture.split("/").at(-1)} — Ready`),
+    }),
+  ).toHaveAttribute("aria-current", "true");
+  await page.waitForTimeout(250);
+  const measurement = await page.evaluate(
+    ({ fallbackStartedAt }) => {
+      const state = window as Window & {
+        rawSwitchStartedAt?: number;
+        rawSwitchDraws?: Array<{
+          at: number;
+          duration: number;
+          width: number;
+          label: string | null;
+          kind: "bitmap" | "pixels";
+        }>;
+        rawSwitchResizes?: Array<{ at: number; dimension: "width" | "height" }>;
+        rawSwitchFrames?: number[];
+        rawSwitchLongTasks?: Array<{ at: number; duration: number }>;
+      };
+      const startedAt = state.rawSwitchStartedAt ?? fallbackStartedAt;
+      const endedAt = performance.now();
+      const frames = (state.rawSwitchFrames ?? []).filter(
+        (at) => at >= startedAt && at <= endedAt,
+      );
+      const draws = (state.rawSwitchDraws ?? []).filter(
+        ({ at }) => at >= startedAt,
+      );
+      const firstPreviewDraw = draws.find(({ width }) => width === 1_024);
+      return {
+        durationMs: endedAt - startedAt,
+        firstPreviewDrawMs: firstPreviewDraw
+          ? firstPreviewDraw.at - startedAt
+          : undefined,
+        draws,
+        resizes: (state.rawSwitchResizes ?? []).filter(
+          ({ at }) => at >= startedAt,
+        ),
+        frameGaps: frames.slice(1).map((at, index) => at - frames[index]),
+        longTasks: (state.rawSwitchLongTasks ?? []).filter(
+          ({ at, duration }) => at <= endedAt && at + duration >= startedAt,
+        ),
+        decodeCount: performance.getEntriesByName("raw-alchemy:preview-worker")
+          .length,
+        fileReadCount: performance.getEntriesByName("raw-alchemy:file-read")
+          .length,
+      };
+    },
+    { fallbackStartedAt: before.at },
+  );
+  const reportPath = testInfo.outputPath("warm-raw-switch-performance.json");
+  await writeFile(reportPath, `${JSON.stringify(measurement, null, 2)}\n`);
+  await testInfo.attach("warm-raw-switch-performance.json", {
+    path: reportPath,
+    contentType: "application/json",
+  });
+
+  expect(measurement.decodeCount).toBe(before.decodeCount);
+  expect(measurement.fileReadCount).toBe(before.fileReadCount);
+  expect(measurement.firstPreviewDrawMs).toBeDefined();
+  expect(measurement.firstPreviewDrawMs!).toBeLessThanOrEqual(150);
+  expect(measurement.resizes).toHaveLength(0);
+  expect(
+    measurement.draws
+      .filter(({ width }) => width === 1_024)
+      .map(({ kind }) => kind),
+  ).toEqual(["bitmap", "bitmap"]);
+  expect(measurement.longTasks).toHaveLength(0);
+  expect(measurement.frameGaps.length).toBeGreaterThan(0);
+  expect(Math.max(...measurement.frameGaps)).toBeLessThanOrEqual(150);
 });
 
 test("progressively paints a LUT change without blocking the interface", async ({

@@ -143,13 +143,24 @@ test("a dropped RAW is decoded and a removed selection can be restored", async (
   });
 });
 
-test("look selection keeps the catalog stable", async ({ page }) => {
+test("the Look catalog groups camera families and keeps selection stable", async ({
+  page,
+}) => {
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
   await expect(page.getByLabel("Base preview")).toBeVisible({
     timeout: 20_000,
   });
   const catalog = page.getByRole("group", { name: "Built-in looks" });
+  await expect(catalog.getByRole("group", { name: "Fujifilm" })).toContainText(
+    "Classic Negative",
+  );
+  await expect(catalog.getByRole("group", { name: "Nikon" })).toContainText(
+    "RED Film Bias",
+  );
+  await expect(catalog.getByRole("group", { name: "RED" })).toContainText(
+    "Medium Contrast Soft",
+  );
   const firstLook = await catalog
     .getByRole("button")
     .first()

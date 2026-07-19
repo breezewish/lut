@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 
 import { LookPanel } from "../src/components/look-panel";
@@ -12,7 +12,7 @@ test("composites worker-created thumbnails without synchronous pixel painting", 
     putImageData,
   } as unknown as GPUCanvasContext);
 
-  render(
+  const { unmount } = render(
     <LookPanel
       looks={[
         {
@@ -33,4 +33,105 @@ test("composites worker-created thumbnails without synchronous pixel painting", 
 
   await waitFor(() => expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0));
   expect(putImageData).not.toHaveBeenCalled();
+  unmount();
+});
+
+test("groups interleaved looks by camera family without changing their order", () => {
+  const { unmount } = render(
+    <LookPanel
+      looks={[
+        {
+          id: "fuji-classic-negative",
+          group: "Fujifilm",
+          name: "Classic Negative",
+          file: "classic-negative.ralut",
+          sha256: "00",
+        },
+        {
+          id: "leica-natural",
+          group: "Leica",
+          name: "Natural",
+          file: "natural.ralut",
+          sha256: "00",
+        },
+        {
+          id: "fuji-provia",
+          group: "Fujifilm",
+          name: "PROVIA",
+          file: "provia.ralut",
+          sha256: "00",
+        },
+      ]}
+      activeId="fuji-classic-negative"
+      onChoose={() => {}}
+      thumbs={new Map()}
+      query=""
+      onQuery={() => {}}
+    />,
+  );
+
+  const fujifilm = screen.getByRole("group", { name: "Fujifilm" });
+  const leica = screen.getByRole("group", { name: "Leica" });
+  expect(
+    fujifilm.compareDocumentPosition(leica) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    within(fujifilm)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["Classic Negative", "PROVIA"]);
+  expect(
+    within(leica).getByRole("button", { name: "Natural" }),
+  ).toBeInTheDocument();
+  unmount();
+});
+
+test("filters strictly by camera family or Look name", () => {
+  const looks = [
+    {
+      id: "fuji-classic-negative",
+      group: "Fujifilm",
+      name: "Classic Negative",
+      file: "classic-negative.ralut",
+      sha256: "00",
+    },
+    {
+      id: "nikon-nlog",
+      group: "Nikon",
+      name: "N-Log BT.1886",
+      file: "nlog.ralut",
+      sha256: "00",
+    },
+  ];
+  const { container, rerender } = render(
+    <LookPanel
+      looks={looks}
+      activeId="fuji-classic-negative"
+      onChoose={() => {}}
+      thumbs={new Map()}
+      query="Nikon"
+      onQuery={() => {}}
+    />,
+  );
+
+  expect(
+    within(container).getByRole("group", { name: "Nikon" }),
+  ).toBeInTheDocument();
+  expect(
+    within(container).queryByRole("group", { name: "Fujifilm" }),
+  ).not.toBeInTheDocument();
+
+  rerender(
+    <LookPanel
+      looks={looks}
+      activeId="fuji-classic-negative"
+      onChoose={() => {}}
+      thumbs={new Map()}
+      query="missing"
+      onQuery={() => {}}
+    />,
+  );
+  expect(within(container).getByRole("status")).toHaveTextContent(
+    "No looks match “missing”.",
+  );
 });

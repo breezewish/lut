@@ -246,7 +246,7 @@ async function handleCommand(
           true,
         );
         result.timings.workerTotalMs = performance.now() - workerStartedAt;
-        postPreview(data.requestId, result);
+        await postBitmapPreview(data.requestId, result);
         if (sensorCache) {
           cacheSensor(preview!, {
             module,
@@ -680,7 +680,13 @@ function prepareLutBytes(lut: LutDefinition): Promise<Uint8Array<ArrayBuffer>> {
   const key = lutCacheKey(lut);
   let pending = lutBytePromises.get(key);
   if (!pending) {
-    pending = loadLutBytes(lut);
+    pending = loadLutBytes(lut).catch((error: unknown) => {
+      // A failed startup prefetch must not poison this hash for the complete
+      // session. The next explicit photo attempt may run after connectivity or
+      // server content has been repaired.
+      lutBytePromises.delete(key);
+      throw error;
+    });
     lutBytePromises.set(key, pending);
   }
   return pending;

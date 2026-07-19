@@ -117,6 +117,8 @@ interface CachedLookThumbs {
   images: Map<string, LookThumbImage>;
 }
 
+const EMPTY_LOOK_THUMBS = new Map<string, LookThumbImage>();
+
 function isDecodeFailure(item: QueueItem): boolean {
   return item.status === "decode-error";
 }
@@ -705,7 +707,7 @@ export default function App() {
     setCameraPreview(undefined);
     setGlobalError(undefined);
 
-    const publish = (result: PreviewResult) => {
+    const publish = (result: DisplayPreviewResult) => {
       const displayed = mergePreview(undefined, result);
       rememberPreviewCacheEntry(previewCache.current, active.id, {
         recipe: decodeRecipe,
@@ -1273,9 +1275,24 @@ export default function App() {
   };
 
   const hasPhotos = items.length > 0;
+  // Refs are the synchronous source of truth for warm presentation caches.
+  // Reading them during the active-photo render avoids one stale paint before
+  // the restoration effects update their state mirrors.
+  const visiblePreview = active
+    ? preview?.fileId === active.id
+      ? preview
+      : previewCache.current.get(active.id)?.preview
+    : undefined;
+  const visibleThumbs =
+    active && displayedThumbFileId.current !== active.id
+      ? (lookThumbCache.current.get(active.id)?.images ?? EMPTY_LOOK_THUMBS)
+      : thumbs;
   const showCompare = Boolean(active && activeLut && !isDecodeFailure(active));
   const showCamera = Boolean(
-    !preview && cameraPreview && active && cameraPreview.fileId === active.id,
+    !visiblePreview &&
+      cameraPreview &&
+      active &&
+      cameraPreview.fileId === active.id,
   );
 
   return (
@@ -1385,7 +1402,7 @@ export default function App() {
           className="viewer"
           aria-label="Base and LUT comparison"
           aria-busy={active ? isPreviewProcessing : undefined}
-          data-decode-count={preview?.decodeCount}
+          data-decode-count={visiblePreview?.decodeCount}
         >
           {showCompare && (
             <div className="viewer__tools">
@@ -1448,14 +1465,14 @@ export default function App() {
           ) : (
             <>
               <CompareStage
-                base={preview?.base}
-                look={preview?.lut}
+                base={visiblePreview?.base}
+                look={visiblePreview?.lut}
                 lookLabel={activeLut.name}
                 mode={compareMode}
                 resetKey={active.id}
                 isLoading={active.status === "decoding"}
               />
-              {active.status === "decoding" && preview && (
+              {active.status === "decoding" && visiblePreview && (
                 <div className="overlay-note" role="status">
                   <LoaderCircle size={16} className="spin" aria-hidden="true" />
                   Decoding preview…
@@ -1581,7 +1598,7 @@ export default function App() {
                     looks={stripLooks}
                     activeId={lutId}
                     onChoose={chooseLut}
-                    thumbs={thumbs}
+                    thumbs={visibleThumbs}
                     query={lookQuery}
                     onQuery={setLookQuery}
                     disabled={exporting || !active}
