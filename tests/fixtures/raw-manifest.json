@@ -36,6 +36,18 @@
       "camera": "SONY ILME-FX30",
       "width": 6240,
       "height": 4168
+    },
+    {
+      "id": "nikon-z8-high-efficiency-low-nef",
+      "path": "tests/fixtures/nikon-z8-high-efficiency-low.NEF",
+      "kind": "real-camera-nef",
+      "sha256": "82df041542b8d328738443bb5ff3373b396e406ecc8cbe7dc3b35252790c53e7",
+      "source": "https://raw.pixls.us/getfile.php/6616/nice/Nikon%20-%20Z%208%20-%208bit%208bit%20compressed%20%283%3A2%29.NEF",
+      "license": "CC0-1.0",
+      "camera": "Nikon Z 8",
+      "rawCompression": "High Efficiency",
+      "width": 8256,
+      "height": 5504
     }
   ]
 }

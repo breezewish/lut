@@ -1,3 +1,11 @@
+const NIKON_HIGH_EFFICIENCY_RAW_ERROR =
+  "LUTIFY_UNSUPPORTED_NIKON_HIGH_EFFICIENCY_RAW";
+
+export function isNikonHighEfficiencyRawError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes(NIKON_HIGH_EFFICIENCY_RAW_ERROR);
+}
+
 export function describeProcessingError(error: unknown): string {
   if (error instanceof Error && error.message)
     return describeMessage(error.message);

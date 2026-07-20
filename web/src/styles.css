@@ -88,6 +88,7 @@
   --z-splitter: 15;
   --z-sticky: 20;
   --z-popover: 40;
+  --z-modal: 50;
   --z-toast: 60;
 
   /* Resizable dimensions (overridden inline from React state) */
@@ -233,10 +234,108 @@ ul {
   font-size: var(--t-sm);
   font-weight: 560;
   line-height: 1;
+  text-decoration: none;
   transition:
     color var(--fast) var(--ease),
     background var(--fast) var(--ease),
     opacity var(--fast) var(--ease);
+}
+
+/* ═══ Unsupported RAW dialog ══════════════════════════════════════════════════════ */
+
+.raw-format-dialog {
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: var(--s8);
+  overflow: auto;
+  border: 0;
+  border-radius: var(--r-lg);
+  color: var(--ink);
+  background: var(--raised);
+  z-index: var(--z-modal);
+  animation: dialog-in var(--base) var(--ease);
+}
+.raw-format-dialog::backdrop {
+  background: oklch(0.06 0.003 265 / 0.76);
+  animation: backdrop-in var(--base) var(--ease);
+}
+.raw-format-dialog__heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--s5);
+}
+.raw-format-dialog__icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-full);
+  color: var(--danger);
+  background: var(--danger-tint);
+}
+.raw-format-dialog h2 {
+  font-size: var(--t-xl);
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+.raw-format-dialog__heading p,
+.raw-format-dialog__solutions p {
+  max-width: 68ch;
+  color: var(--ink-muted);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+.raw-format-dialog__heading p {
+  margin-top: var(--s3);
+}
+.raw-format-dialog__solutions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s7);
+  margin: var(--s8) 0 0;
+  padding: var(--s7) 0 0;
+  border-top: 1px solid var(--hairline);
+  list-style: none;
+}
+.raw-format-dialog__solutions li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--s5);
+}
+.raw-format-dialog__step {
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-full);
+  color: var(--tint-ink);
+  background: var(--tint);
+  font-size: var(--t-xs);
+  font-weight: 650;
+}
+.raw-format-dialog h3 {
+  font-size: var(--t-base);
+  line-height: 1.4;
+}
+.raw-format-dialog__solutions p {
+  margin-top: var(--s2);
+}
+.raw-format-dialog strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.raw-format-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s3);
+  margin-top: var(--s8);
 }
 .btn:focus-visible {
   outline-color: var(--focus);
@@ -1373,6 +1472,17 @@ input[type="range"]:disabled {
     transform: translateY(0.6rem);
   }
 }
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.4rem) scale(0.985);
+  }
+}
+@keyframes backdrop-in {
+  from {
+    background: transparent;
+  }
+}
 
 /* ═══ Responsive ═══════════════════════════════════════════════════════════ */
 
@@ -1435,6 +1545,19 @@ input[type="range"]:disabled {
 }
 
 @media (max-width: 34rem) {
+  .raw-format-dialog {
+    padding: var(--s7);
+  }
+  .raw-format-dialog__heading,
+  .raw-format-dialog__solutions li {
+    gap: var(--s4);
+  }
+  .raw-format-dialog__actions {
+    flex-direction: column-reverse;
+  }
+  .raw-format-dialog__actions .btn {
+    width: 100%;
+  }
   .brand__name {
     display: none;
   }

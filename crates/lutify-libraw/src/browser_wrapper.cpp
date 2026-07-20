@@ -21,6 +21,9 @@ namespace {
 using emscripten::typed_memory_view;
 using emscripten::val;
 
+constexpr char NIKON_HIGH_EFFICIENCY_RAW_ERROR[] =
+    "LUTIFY_UNSUPPORTED_NIKON_HIGH_EFFICIENCY_RAW";
+
 struct DecodeTimings {
   double input_copy_ms = 0;
   double open_ms = 0;
@@ -471,6 +474,10 @@ public:
       fail("open", status);
     }
     opened_ = true;
+    if (is_nikon_high_efficiency_raw()) {
+      release_decoder_state();
+      throw std::runtime_error(NIKON_HIGH_EFFICIENCY_RAW_ERROR);
+    }
     if (preview_max_edge != 0 && processor_.has_legacy_fuji_geometry()) {
       release_decoder_state();
       throw std::runtime_error(
@@ -980,6 +987,15 @@ private:
     processor_.recycle();
     std::vector<std::uint8_t>().swap(input_);
     opened_ = false;
+  }
+
+  bool is_nikon_high_efficiency_raw() {
+    libraw_decoder_info_t decoder{};
+    processor_.get_decoder_info(&decoder);
+    if (decoder.decoder_name == nullptr) return false;
+    return std::strcmp(decoder.decoder_name, "nikon_he_load_raw()") == 0 ||
+           std::strcmp(decoder.decoder_name,
+                       "nikon_he_load_raw_placeholder()") == 0;
   }
 
   int ensure_unpacked() {

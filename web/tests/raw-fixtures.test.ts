@@ -24,12 +24,21 @@ test("RAW fixtures retain their declared provenance and decoder roles", async ()
     "synthetic-lossy-linear-dng",
     "real-camera-cfa-dng",
     "real-camera-arw",
+    "real-camera-nef",
   ]);
   const realDng = manifest.fixtures.find(
     (fixture) => fixture.id === "leica-m8-cfa-dng",
   );
   expect(realDng).toMatchObject({
     source: "https://raw.pixls.us/data/Leica/M8/L1030132.DNG",
+    license: "CC0-1.0",
+  });
+  const nikonHighEfficiencyRaw = manifest.fixtures.find(
+    (fixture) => fixture.id === "nikon-z8-high-efficiency-low-nef",
+  );
+  expect(nikonHighEfficiencyRaw).toMatchObject({
+    source:
+      "https://raw.pixls.us/getfile.php/6616/nice/Nikon%20-%20Z%208%20-%208bit%208bit%20compressed%20%283%3A2%29.NEF",
     license: "CC0-1.0",
   });
 

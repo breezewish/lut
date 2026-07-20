@@ -1,6 +1,22 @@
 import { expect, test } from "vitest";
 
-import { describeProcessingError } from "../src/lib/errors";
+import {
+  describeProcessingError,
+  isNikonHighEfficiencyRawError,
+} from "../src/lib/errors";
+
+test("identifies Nikon High Efficiency RAW without classifying generic decode errors", () => {
+  expect(
+    isNikonHighEfficiencyRawError(
+      new Error("LUTIFY_UNSUPPORTED_NIKON_HIGH_EFFICIENCY_RAW"),
+    ),
+  ).toBe(true);
+  expect(
+    isNikonHighEfficiencyRawError(
+      new Error("LibRaw could not decode: Unsupported file format"),
+    ),
+  ).toBe(false);
+});
 
 test("turns opaque Embind exceptions into an actionable RAW error", () => {
   expect(describeProcessingError({ excPtr: 1_536_184 })).toBe(

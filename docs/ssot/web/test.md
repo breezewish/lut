@@ -79,6 +79,7 @@
 - A checksum-verified 9568 × 6376 Sony ILCE-7RM4 RAW under 4× CPU throttling accepts at least 45 exposure input events while decode is active, keeps animation-frame gap p95 below 25 ms and every gap below 100 ms, then publishes the exact settled frame.
 - A 6240 × 4168 Sony ARW produces a nontrivial full-resolution TIFF in under 30 seconds for the export operation, and a later EV preview rerender reuses the existing preview source without another RAW decode.
 - A corrupt DNG reports a product-language decode error with recovery actions and cannot be exported as a successful file.
+- An unchanged CC0 Nikon Z8 High Efficiency RAW opens a concise English modal that explains TicoRAW's commercial-license limitation, lists Lightroom, Photoshop, and the free Adobe DNG Converter, documents the Lossless Compression camera setting, and leaves the file visibly failed after dismissal.
 - Blocking WASM startup requests produces a visible reload instruction and clears the indefinite decoding state.
 - A worker error rejects every pending processing command instead of leaving unresolved promises.
 - A LUT hash mismatch, missing LUT, and hash-valid malformed compact LUT each show a specific error, stop the decoding state, disable export, and allow a later valid import.

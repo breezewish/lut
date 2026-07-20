@@ -54,6 +54,59 @@ test("teaches the private local workflow before files are selected", async () =>
   expect(screen.queryByRole("button", { name: "Export photo" })).toBeNull();
 });
 
+test("explains how to recover from Nikon High Efficiency RAW", async () => {
+  class NikonHighEfficiencyWorker {
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: ((event: ErrorEvent) => void) | null = null;
+
+    postMessage(command: { requestId: number; type: string }) {
+      if (command.type !== "decode") return;
+      queueMicrotask(() =>
+        this.onmessage?.(
+          new MessageEvent("message", {
+            data: {
+              requestId: command.requestId,
+              ok: false,
+              error: "LUTIFY_UNSUPPORTED_NIKON_HIGH_EFFICIENCY_RAW",
+            },
+          }),
+        ),
+      );
+    }
+
+    terminate() {}
+  }
+
+  vi.stubGlobal("Worker", NikonHighEfficiencyWorker);
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify(MANIFEST), { status: 200 }),
+  );
+
+  const { container } = render(<App />);
+  const file = new File(["high efficiency raw"], "DSC_4089.NEF");
+  Object.defineProperty(file, "arrayBuffer", {
+    value: async () => new ArrayBuffer(3),
+  });
+  fireEvent.change(container.querySelector('input[type="file"]')!, {
+    target: { files: [file] },
+  });
+
+  const dialog = await screen.findByRole("dialog", {
+    name: "Nikon High Efficiency RAW is not supported",
+  });
+  expect(dialog).toHaveTextContent("This NEF uses TicoRAW");
+  expect(dialog).toHaveTextContent("Adobe Lightroom / Photoshop");
+  expect(dialog).toHaveTextContent("Adobe DNG Converter");
+  expect(dialog).toHaveTextContent("Lossless Compression");
+  expect(
+    screen.getByRole("link", { name: "Get Adobe DNG Converter" }),
+  ).toHaveAttribute(
+    "href",
+    "https://helpx.adobe.com/camera-raw/digital-negative.html",
+  );
+  expect(screen.queryByText("The file may be damaged")).toBeNull();
+});
+
 test("switches and persists the workspace theme", () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(
     () => new Promise<Response>(() => {}),

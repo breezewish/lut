@@ -10,6 +10,9 @@ import { decodeRgb16Tiff } from "./tiff";
 const linearFixture = resolve("tests/fixtures/linear.dng");
 const lossyFixture = resolve("vendor/LibRaw-Wasm/test/integration/lossy.dng");
 const sonyFixture = resolve("vendor/LibRaw-Wasm/example-sony.ARW");
+const nikonHighEfficiencyFixture = resolve(
+  "tests/fixtures/nikon-z8-high-efficiency-low.NEF",
+);
 const classicNegative = resolve(
   "vendor/V-Log-Alchemy/Luts/Fujifilm/FLog2C_to_CLASSIC-Neg_VLog.cube",
 );
@@ -751,6 +754,36 @@ test("reports a recoverable error when the local processing engine cannot start"
     "The local processing engine could not start. Reload the page to retry.",
   );
   await expect(page.getByText("Decoding preview…")).toHaveCount(0);
+});
+
+test("explains Nikon High Efficiency RAW recovery options", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .locator('input[type="file"]')
+    .setInputFiles(nikonHighEfficiencyFixture);
+
+  const dialog = page.getByRole("dialog", {
+    name: "Nikon High Efficiency RAW is not supported",
+  });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Adobe Lightroom / Photoshop");
+  await expect(dialog).toContainText("Lossless Compression");
+  await expect(
+    dialog.getByRole("link", { name: "Get Adobe DNG Converter" }),
+  ).toHaveAttribute(
+    "href",
+    "https://helpx.adobe.com/camera-raw/digital-negative.html",
+  );
+
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(
+    page.getByRole("button", {
+      name: /nikon-z8-high-efficiency-low\.NEF.*Failed/,
+    }),
+  ).toBeVisible();
 });
 
 test("export failures retain the preview, allow retry, and release it on removal", async ({

@@ -16,6 +16,8 @@ Preview and export have different image contracts. Preview may construct and sam
 
 Legacy diagonal Fujifilm Super CCD layouts fail explicitly at selection because the pinned full-resolution LibRaw path does not provide a reliable color reference for them. They are never shown with a processed Preview that materially disagrees with export. Modern Fujifilm X-Trans RAF is supported.
 
+Nikon High Efficiency RAW is identified from LibRaw's selected TicoRAW decoder rather than from the filename or camera model. It fails at selection with a concise English dialog explaining the commercial-license limitation. The dialog lists Lightroom, Photoshop, and the free Adobe DNG Converter as DNG conversion options, and explains how Lossless Compression avoids the unsupported format for future photos.
+
 ## Preview performance
 
 The acceptance fixture is the 6240 × 4168 Sony RAW in the repository, rendered by the production Chromium bundle. When available, its embedded JPEG must appear within 0.3 seconds. A cold selection must draw the first longest-edge-384 processed comparison within 1.2 seconds and the longest-edge-1024 settled comparison within 1.5 seconds. Warm selections must draw their first processed comparison with p95 below 0.6 seconds and their settled comparison with p95 below 0.8 seconds. These boundaries begin in the file-selection handler and include file reading, Worker/WASM work, transfer, and Canvas drawing.

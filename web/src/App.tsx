@@ -34,7 +34,9 @@ import {
 } from "./components/compare-stage";
 import { Filmstrip, type PhotoSelect } from "./components/filmstrip";
 import { LookPanel, type LookThumbImage } from "./components/look-panel";
+import { UnsupportedNikonRawDialog } from "./components/unsupported-nikon-raw-dialog";
 import { Button } from "./components/ui/button";
+import { isNikonHighEfficiencyRawError } from "./lib/errors";
 import { ProcessingClient } from "./lib/processing-client";
 import type {
   DisplayPreviewResult,
@@ -259,6 +261,7 @@ export default function App() {
     url: string;
   }>();
   const [globalError, setGlobalError] = useState<string>();
+  const [unsupportedNikonRaw, setUnsupportedNikonRaw] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<ExportProgress>();
   const [exportSummary, setExportSummary] = useState<string>();
@@ -706,6 +709,7 @@ export default function App() {
     }
     setCameraPreview(undefined);
     setGlobalError(undefined);
+    setUnsupportedNikonRaw(false);
 
     const publish = (result: DisplayPreviewResult) => {
       const displayed = mergePreview(undefined, result);
@@ -766,6 +770,14 @@ export default function App() {
 
     void prepare().catch((error: unknown) => {
       if (!running) return;
+      if (isNikonHighEfficiencyRawError(error)) {
+        const message =
+          "Nikon High Efficiency RAW must be converted to DNG before LUTify can open it.";
+        updateItem(active.id, { status: "decode-error", error: message });
+        setGlobalError(undefined);
+        setUnsupportedNikonRaw(true);
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       updateItem(active.id, { status: "decode-error", error: message });
       setGlobalError(message);
@@ -1677,6 +1689,12 @@ export default function App() {
           onAdd={openFilePicker}
         />
       </div>
+
+      {unsupportedNikonRaw && (
+        <UnsupportedNikonRawDialog
+          onClose={() => setUnsupportedNikonRaw(false)}
+        />
+      )}
 
       <div className="toasts">
         {manifestError && (
