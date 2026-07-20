@@ -43,6 +43,8 @@ EV values without importing production code.
 
 `aahd-tiled-reference.json` freezes exact RGB16 hashes from the established
 LibRaw-parity tiled AAHD implementation. It covers every Bayer phase, both
-1024px tile seams, small-image geometry, unequal black levels, and the graded
-output path. Keeping fixed results avoids shipping a second full-frame GPU
-implementation solely as a self-comparison oracle.
+1024px tile seams, small-image geometry, and unequal black levels. Keeping fixed
+results avoids shipping a second full-frame GPU implementation solely as a
+self-comparison oracle. Color grading is covered separately by the independent
+corrected-v2 pixel oracle and production export comparison because portable GPU
+floating-point output is not bit-exact.

@@ -1,12 +1,8 @@
 import reference from "../../tests/fixtures/aahd-tiled-reference.json";
 
-import {
-  demosaicLibRawAahdTiledWithWgsl,
-  type TiledAahdColor,
-} from "./lib/libraw-aahd";
+import { demosaicLibRawAahdTiledWithWgsl } from "./lib/libraw-aahd";
 import type { SensorImageInfo } from "./lib/sensor-image";
 import { sha256Hex } from "./lib/hash";
-import { WebGpuColorRenderer } from "./lib/webgpu-color";
 
 /** Runs portable WebGPU seam fixtures without loading the product UI. */
 export function mountAahdTileBenchmark(): void {
@@ -40,40 +36,22 @@ async function renderFixture(testCase: (typeof reference.cases)[number]) {
   );
   const mosaic = createDependencyFixture(testCase.width, testCase.height);
   const rendered = await renderHash(mosaic, info);
-  let gradedHash;
-  if ("graded_rgb16_sha256" in testCase) {
-    const renderer = await WebGpuColorRenderer.create(createIdentityLut());
-    try {
-      gradedHash = (await renderHash(mosaic, info, { renderer, ev: 0 })).hash;
-    } finally {
-      renderer.destroy();
-    }
-  }
   return {
     name: testCase.name,
     hash: rendered.hash,
     expectedHash: testCase.rgb16_sha256,
-    gradedHash,
-    expectedGradedHash:
-      "graded_rgb16_sha256" in testCase
-        ? testCase.graded_rgb16_sha256
-        : undefined,
     blackLevels: testCase.black_levels,
     resources: rendered.resources,
   };
 }
 
-async function renderHash(
-  mosaic: Uint16Array,
-  info: SensorImageInfo,
-  color?: TiledAahdColor,
-) {
+async function renderHash(mosaic: Uint16Array, info: SensorImageInfo) {
   const pixels = new Uint16Array(info.sampleCount * 3);
   let offset = 0;
   const result = await demosaicLibRawAahdTiledWithWgsl(
     mosaic,
     info,
-    color,
+    undefined,
     (band) => {
       pixels.set(band, offset);
       offset += band.length;
@@ -85,18 +63,6 @@ async function renderHash(
   return {
     hash: sha256Hex(new Uint8Array(pixels.buffer)),
     resources: result.resources,
-  };
-}
-
-function createIdentityLut() {
-  return {
-    size: () => 2,
-    domain_min: () => new Float32Array([0, 0, 0]),
-    domain_max: () => new Float32Array([1, 1, 1]),
-    samples: () =>
-      new Float32Array([
-        0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1,
-      ]),
   };
 }
 

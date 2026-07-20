@@ -27,9 +27,6 @@ test("tiled AAHD matches pinned parity outputs across seams and CFA phases", asy
   expect(report.results).toHaveLength(6);
   for (const result of report.results) {
     expect(result.hash, result.name).toBe(result.expectedHash);
-    if (result.expectedGradedHash) {
-      expect(result.gradedHash, result.name).toBe(result.expectedGradedHash);
-    }
     expect(result.resources.peakGpuBytes).toBeLessThanOrEqual(
       256 * 1024 * 1024,
     );

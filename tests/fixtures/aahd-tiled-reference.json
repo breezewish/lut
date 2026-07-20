@@ -8,8 +8,7 @@
       "height": 1042,
       "cfa_pattern": [0, 1, 1, 2],
       "black_levels": [0, 0, 0, 0],
-      "rgb16_sha256": "0db0b35b70693e719fc2259ca0fd2853bf8dd04a4027093203987214019d2a1f",
-      "graded_rgb16_sha256": "36f47494cd8fd4c085a44f2acacc9dc8e6ac283381d1f3565cfb81d478fd0398"
+      "rgb16_sha256": "0db0b35b70693e719fc2259ca0fd2853bf8dd04a4027093203987214019d2a1f"
     },
     {
       "name": "small-grbg",
