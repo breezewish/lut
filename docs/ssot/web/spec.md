@@ -16,7 +16,7 @@ Preview and export have different image contracts. Preview may construct and sam
 
 Legacy diagonal Fujifilm Super CCD layouts fail explicitly at selection because the pinned full-resolution LibRaw path does not provide a reliable color reference for them. They are never shown with a processed Preview that materially disagrees with export. Modern Fujifilm X-Trans RAF is supported.
 
-Nikon High Efficiency RAW is identified from LibRaw's selected TicoRAW decoder rather than from the filename or camera model. It fails at selection with a concise English dialog explaining the commercial-license limitation. The dialog lists Lightroom, Photoshop, and the free Adobe DNG Converter as DNG conversion options, and explains how Lossless Compression avoids the unsupported format for future photos.
+Unsupported compression is identified from LibRaw's selected decoder rather than from the filename or camera model. Nikon High Efficiency RAW, GoPro GPR, and JPEG XL-compressed DNG fail at selection with concise English dialogs that explain the exact limitation and a compatible DNG workflow. The Nikon dialog explains the Lossless Compression camera setting; the JPEG XL dialog explains the iPhone's JPEG Lossless (Most Compatible) setting. Sigma X3F is decoded locally.
 
 ## Preview performance
 

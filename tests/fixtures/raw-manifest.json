@@ -48,6 +48,28 @@
       "rawCompression": "High Efficiency",
       "width": 8256,
       "height": 5504
+    },
+    {
+      "id": "gopro-hero7-gpr",
+      "path": "tests/fixtures/gopro-hero7.gpr",
+      "kind": "real-camera-gpr",
+      "sha256": "f7d8a5b693bc173a777164dbad48921c8d145d602d5422925a13090404514b66",
+      "source": "https://raw.pixls.us/data/GoPro/HERO7%20Black/GOPR0055.GPR",
+      "license": "CC0-1.0",
+      "camera": "GoPro HERO7 Black",
+      "width": 4000,
+      "height": 3000
+    },
+    {
+      "id": "sigma-dp1-x3f",
+      "path": "tests/fixtures/sigma-dp1.X3F",
+      "kind": "real-camera-x3f",
+      "sha256": "44508f7df4191aacaecb6461e1841dae002e5b71a4f95a00aa3f52d1c6d6bc5f",
+      "source": "https://raw.pixls.us/data/Sigma/DP1/RAW_SIGMA_DP1.X3F",
+      "license": "CC0-1.0",
+      "camera": "SIGMA DP1",
+      "width": 2640,
+      "height": 1760
     }
   ]
 }

@@ -107,6 +107,96 @@ test("explains how to recover from Nikon High Efficiency RAW", async () => {
   expect(screen.queryByText("The file may be damaged")).toBeNull();
 });
 
+test("explains how to recover from GoPro GPR", async () => {
+  class UnsupportedGoProWorker {
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: ((event: ErrorEvent) => void) | null = null;
+
+    postMessage(command: { requestId: number; type: string }) {
+      if (command.type !== "decode") return;
+      queueMicrotask(() =>
+        this.onmessage?.(
+          new MessageEvent("message", {
+            data: {
+              requestId: command.requestId,
+              ok: false,
+              error: "LUTIFY_UNSUPPORTED_GOPRO_GPR",
+            },
+          }),
+        ),
+      );
+    }
+
+    terminate() {}
+  }
+
+  vi.stubGlobal("Worker", UnsupportedGoProWorker);
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify(MANIFEST), { status: 200 }),
+  );
+
+  const { container } = render(<App />);
+  const file = new File(["gpr"], "GOPR0055.GPR");
+  Object.defineProperty(file, "arrayBuffer", {
+    value: async () => new ArrayBuffer(3),
+  });
+  fireEvent.change(container.querySelector('input[type="file"]')!, {
+    target: { files: [file] },
+  });
+
+  const dialog = await screen.findByRole("dialog", {
+    name: "GoPro GPR is not supported",
+  });
+  expect(dialog).toHaveTextContent("VC-5 compression");
+  expect(dialog).toHaveTextContent("Adobe Lightroom / Photoshop");
+  expect(screen.queryByText("The file may be damaged")).toBeNull();
+});
+
+test("explains how to avoid JPEG XL compression in future ProRAW photos", async () => {
+  class UnsupportedJpegXlWorker {
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: ((event: ErrorEvent) => void) | null = null;
+
+    postMessage(command: { requestId: number; type: string }) {
+      if (command.type !== "decode") return;
+      queueMicrotask(() =>
+        this.onmessage?.(
+          new MessageEvent("message", {
+            data: {
+              requestId: command.requestId,
+              ok: false,
+              error: "LUTIFY_UNSUPPORTED_JPEG_XL_DNG",
+            },
+          }),
+        ),
+      );
+    }
+
+    terminate() {}
+  }
+
+  vi.stubGlobal("Worker", UnsupportedJpegXlWorker);
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify(MANIFEST), { status: 200 }),
+  );
+
+  const { container } = render(<App />);
+  const file = new File(["jpeg xl dng"], "IMG_7034.DNG");
+  Object.defineProperty(file, "arrayBuffer", {
+    value: async () => new ArrayBuffer(3),
+  });
+  fireEvent.change(container.querySelector('input[type="file"]')!, {
+    target: { files: [file] },
+  });
+
+  const dialog = await screen.findByRole("dialog", {
+    name: "JPEG XL–compressed DNG is not supported",
+  });
+  expect(dialog).toHaveTextContent("stores its RAW image with JPEG XL");
+  expect(dialog).toHaveTextContent("JPEG Lossless (Most Compatible)");
+  expect(screen.queryByText("The file may be damaged")).toBeNull();
+});
+
 test("switches and persists the workspace theme", () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(
     () => new Promise<Response>(() => {}),

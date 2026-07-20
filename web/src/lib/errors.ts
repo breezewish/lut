@@ -1,9 +1,23 @@
-const NIKON_HIGH_EFFICIENCY_RAW_ERROR =
-  "LUTIFY_UNSUPPORTED_NIKON_HIGH_EFFICIENCY_RAW";
+export type UnsupportedRawFormat =
+  | "nikon-high-efficiency"
+  | "gopro-gpr"
+  | "jpeg-xl-dng";
 
-export function isNikonHighEfficiencyRawError(error: unknown): boolean {
+const UNSUPPORTED_RAW_ERRORS: ReadonlyArray<
+  readonly [string, UnsupportedRawFormat]
+> = [
+  ["LUTIFY_UNSUPPORTED_NIKON_HIGH_EFFICIENCY_RAW", "nikon-high-efficiency"],
+  ["LUTIFY_UNSUPPORTED_GOPRO_GPR", "gopro-gpr"],
+  ["LUTIFY_UNSUPPORTED_JPEG_XL_DNG", "jpeg-xl-dng"],
+];
+
+export function getUnsupportedRawFormat(
+  error: unknown,
+): UnsupportedRawFormat | undefined {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes(NIKON_HIGH_EFFICIENCY_RAW_ERROR);
+  return UNSUPPORTED_RAW_ERRORS.find(([marker]) =>
+    message.includes(marker),
+  )?.[1];
 }
 
 export function describeProcessingError(error: unknown): string {

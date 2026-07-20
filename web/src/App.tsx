@@ -34,9 +34,12 @@ import {
 } from "./components/compare-stage";
 import { Filmstrip, type PhotoSelect } from "./components/filmstrip";
 import { LookPanel, type LookThumbImage } from "./components/look-panel";
-import { UnsupportedNikonRawDialog } from "./components/unsupported-nikon-raw-dialog";
+import { UnsupportedRawDialog } from "./components/unsupported-raw-dialog";
 import { Button } from "./components/ui/button";
-import { isNikonHighEfficiencyRawError } from "./lib/errors";
+import {
+  getUnsupportedRawFormat,
+  type UnsupportedRawFormat,
+} from "./lib/errors";
 import { ProcessingClient } from "./lib/processing-client";
 import type {
   DisplayPreviewResult,
@@ -46,7 +49,7 @@ import type {
 } from "./types";
 
 const RAW_ACCEPT =
-  ".3fr,.ari,.arw,.bay,.cap,.cr2,.cr3,.dcr,.dcs,.dng,.drf,.eip,.erf,.fff,.gpr,.iiq,.k25,.kdc,.mdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.pef,.ptx,.pxn,.r3d,.raf,.raw,.rwl,.rw2,.rwz,.sr2,.srf,.srw,.x3f";
+  ".3fr,.arq,.arw,.bay,.cap,.cr2,.cr3,.dcr,.dcs,.dng,.drf,.eip,.erf,.fff,.gpr,.iiq,.k25,.kdc,.mdc,.mef,.mos,.mrw,.nef,.nrw,.orf,.pef,.ptx,.pxn,.raf,.raw,.rwl,.rw2,.rwz,.sr2,.srf,.srw,.x3f";
 const DEFAULT_LUT_ID = "fuji-classic-negative";
 const SETTLED_PREVIEW_MAX_EDGE = 1_024;
 const INTERACTION_PREVIEW_MAX_EDGE = 256;
@@ -261,7 +264,7 @@ export default function App() {
     url: string;
   }>();
   const [globalError, setGlobalError] = useState<string>();
-  const [unsupportedNikonRaw, setUnsupportedNikonRaw] = useState(false);
+  const [unsupportedRaw, setUnsupportedRaw] = useState<UnsupportedRawFormat>();
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<ExportProgress>();
   const [exportSummary, setExportSummary] = useState<string>();
@@ -709,7 +712,7 @@ export default function App() {
     }
     setCameraPreview(undefined);
     setGlobalError(undefined);
-    setUnsupportedNikonRaw(false);
+    setUnsupportedRaw(undefined);
 
     const publish = (result: DisplayPreviewResult) => {
       const displayed = mergePreview(undefined, result);
@@ -771,12 +774,13 @@ export default function App() {
 
     void prepare().catch((error: unknown) => {
       if (!running) return;
-      if (isNikonHighEfficiencyRawError(error)) {
+      const unsupportedFormat = getUnsupportedRawFormat(error);
+      if (unsupportedFormat) {
         const message =
-          "Nikon High Efficiency RAW must be converted to DNG before LUTify can open it.";
+          "This RAW uses a compression format LUTify cannot decode.";
         updateItem(active.id, { status: "decode-error", error: message });
         setGlobalError(undefined);
-        setUnsupportedNikonRaw(true);
+        setUnsupportedRaw(unsupportedFormat);
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
@@ -1700,9 +1704,10 @@ export default function App() {
         />
       </div>
 
-      {unsupportedNikonRaw && (
-        <UnsupportedNikonRawDialog
-          onClose={() => setUnsupportedNikonRaw(false)}
+      {unsupportedRaw && (
+        <UnsupportedRawDialog
+          format={unsupportedRaw}
+          onClose={() => setUnsupportedRaw(undefined)}
         />
       )}
 

@@ -13,6 +13,8 @@ const sonyFixture = resolve("vendor/LibRaw-Wasm/example-sony.ARW");
 const nikonHighEfficiencyFixture = resolve(
   "tests/fixtures/nikon-z8-high-efficiency-low.NEF",
 );
+const goproFixture = resolve("tests/fixtures/gopro-hero7.gpr");
+const sigmaFixture = resolve("tests/fixtures/sigma-dp1.X3F");
 const classicNegative = resolve(
   "vendor/V-Log-Alchemy/Luts/Fujifilm/FLog2C_to_CLASSIC-Neg_VLog.cube",
 );
@@ -811,6 +813,69 @@ test("explains Nikon High Efficiency RAW recovery options", async ({
       name: /nikon-z8-high-efficiency-low\.NEF.*Failed/,
     }),
   ).toBeVisible();
+});
+
+test("decodes and exports a Sigma X3F photo", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(sigmaFixture);
+
+  await expect(page.getByLabel("Base preview")).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByText("SIGMA DP1")).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export selected" }).click();
+  const download = await downloadPromise;
+  const output = await download.path();
+  expect(output).not.toBeNull();
+  expect((await readFile(output!)).byteLength).toBeGreaterThan(1_000_000);
+});
+
+test("explains why GoPro GPR cannot be decoded", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(goproFixture);
+
+  const dialog = page.getByRole("dialog", {
+    name: "GoPro GPR is not supported",
+  });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("VC-5 compression");
+  await expect(dialog).toContainText("Adobe Lightroom / Photoshop");
+});
+
+test("explains how to avoid unsupported JPEG XL DNG compression", async ({
+  page,
+}) => {
+  const jpegXlDng = Buffer.from(await readFile(linearFixture));
+  const view = new DataView(
+    jpegXlDng.buffer,
+    jpegXlDng.byteOffset,
+    jpegXlDng.byteLength,
+  );
+  const firstIfd = view.getUint32(4, true);
+  const entryCount = view.getUint16(firstIfd, true);
+  let compressionEntry = 0;
+  for (let index = 0; index < entryCount; index += 1) {
+    const entry = firstIfd + 2 + index * 12;
+    if (view.getUint16(entry, true) === 259) compressionEntry = entry;
+  }
+  expect(compressionEntry).toBeGreaterThan(0);
+  view.setUint16(compressionEntry + 8, 52_546, true);
+
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "jpeg-xl.dng",
+    mimeType: "image/x-adobe-dng",
+    buffer: jpegXlDng,
+  });
+
+  const dialog = page.getByRole("dialog", {
+    name: "JPEG XL–compressed DNG is not supported",
+  });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("stores its RAW image with JPEG XL");
+  await expect(dialog).toContainText("JPEG Lossless (Most Compatible)");
 });
 
 test("export failures retain the preview, allow retry, and release it on removal", async ({

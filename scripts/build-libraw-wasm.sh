@@ -13,7 +13,7 @@ readonly AAHD_MATH_SHA256="6359763897e042c19daa8ec0f9a9f14c7b462332306b4cd9bd91b
 readonly PTHREAD_PATCH_SHA256="$(sha256sum "$ROOT/scripts/patch-libraw-pthreads.mjs" | cut -d ' ' -f 1)"
 readonly PARALLEL_FOR_SHA256="$(sha256sum "$ROOT/crates/lutify-libraw/src/parallel_for.h" | cut -d ' ' -f 1)"
 readonly BROWSER_WRAPPER_SHA256="$(sha256sum "$ROOT/crates/lutify-libraw/src/browser_wrapper.cpp" | cut -d ' ' -f 1)"
-readonly BUILD_ID="libraw-${LIBRAW_COMMIT}-wrapper-${BROWSER_WRAPPER_SHA256:0:12}-jpeg-${JPEG_COMMIT}-fma-${FMA_OVERRIDE_SHA256:0:12}-aahd-${AAHD_MATH_SHA256:0:12}-pthread-${PTHREAD_PATCH_SHA256:0:12}-${PARALLEL_FOR_SHA256:0:12}-emcc-5.0.7-signed-char-wrapv-no-contract"
+readonly BUILD_ID="libraw-${LIBRAW_COMMIT}-wrapper-${BROWSER_WRAPPER_SHA256:0:12}-jpeg-${JPEG_COMMIT}-x3f-fma-${FMA_OVERRIDE_SHA256:0:12}-aahd-${AAHD_MATH_SHA256:0:12}-pthread-${PTHREAD_PATCH_SHA256:0:12}-${PARALLEL_FOR_SHA256:0:12}-emcc-5.0.7-signed-char-wrapv-no-contract"
 readonly JPEG_BUILD_DIR="$OUTPUT_DIR/.libjpeg-build"
 readonly AAHD_OBJECT="$OUTPUT_DIR/.aahd_demosaic.o"
 readonly AAHD_PTHREAD_OBJECT="$OUTPUT_DIR/.aahd_demosaic_pthread.o"
@@ -103,6 +103,7 @@ mapfile -d '' PTHREAD_SOURCES < <(
     -DLIBRAW_NODLL \
     -DUSE_JPEG \
     -DUSE_JPEG8 \
+    -DUSE_X3FTOOLS \
     -Ivendor/LibRaw \
     -Ivendor/LibRaw/src/demosaic \
     -Ivendor/libjpeg-turbo/src \
@@ -122,6 +123,7 @@ mapfile -d '' PTHREAD_SOURCES < <(
     -DLIBRAW_NODLL \
     -DUSE_JPEG \
     -DUSE_JPEG8 \
+    -DUSE_X3FTOOLS \
     -Ivendor/LibRaw \
     -Ivendor/libjpeg-turbo/src \
     -Iweb/src/libraw/.libjpeg-build \
@@ -152,6 +154,7 @@ mapfile -d '' PTHREAD_SOURCES < <(
     -DLIBRAW_NODLL \
     -DUSE_JPEG \
     -DUSE_JPEG8 \
+    -DUSE_X3FTOOLS \
     -I"$PATCHED_SOURCE_DIR" \
     -Ivendor/libjpeg-turbo/src \
     -Iweb/src/libraw/.libjpeg-build \
@@ -172,6 +175,7 @@ mapfile -d '' PTHREAD_SOURCES < <(
     -DLIBRAW_NODLL \
     -DUSE_JPEG \
     -DUSE_JPEG8 \
+    -DUSE_X3FTOOLS \
     -I"$PATCHED_SOURCE_DIR" \
     -Ivendor/libjpeg-turbo/src \
     -Iweb/src/libraw/.libjpeg-build \

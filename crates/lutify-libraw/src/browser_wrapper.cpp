@@ -23,6 +23,8 @@ using emscripten::val;
 
 constexpr char NIKON_HIGH_EFFICIENCY_RAW_ERROR[] =
     "LUTIFY_UNSUPPORTED_NIKON_HIGH_EFFICIENCY_RAW";
+constexpr char GOPRO_GPR_ERROR[] = "LUTIFY_UNSUPPORTED_GOPRO_GPR";
+constexpr char JPEG_XL_DNG_ERROR[] = "LUTIFY_UNSUPPORTED_JPEG_XL_DNG";
 
 struct DecodeTimings {
   double input_copy_ms = 0;
@@ -474,9 +476,9 @@ public:
       fail("open", status);
     }
     opened_ = true;
-    if (is_nikon_high_efficiency_raw()) {
+    if (const char *unsupported = unsupported_decoder_error()) {
       release_decoder_state();
-      throw std::runtime_error(NIKON_HIGH_EFFICIENCY_RAW_ERROR);
+      throw std::runtime_error(unsupported);
     }
     if (preview_max_edge != 0 && processor_.has_legacy_fuji_geometry()) {
       release_decoder_state();
@@ -989,13 +991,27 @@ private:
     opened_ = false;
   }
 
-  bool is_nikon_high_efficiency_raw() {
+  const char *unsupported_decoder_error() {
     libraw_decoder_info_t decoder{};
     processor_.get_decoder_info(&decoder);
-    if (decoder.decoder_name == nullptr) return false;
-    return std::strcmp(decoder.decoder_name, "nikon_he_load_raw()") == 0 ||
-           std::strcmp(decoder.decoder_name,
-                       "nikon_he_load_raw_placeholder()") == 0;
+    if (decoder.decoder_name == nullptr ||
+        !(decoder.decoder_flags & LIBRAW_DECODER_UNSUPPORTED_FORMAT)) {
+      return nullptr;
+    }
+    if (std::strcmp(decoder.decoder_name, "nikon_he_load_raw()") == 0 ||
+        std::strcmp(decoder.decoder_name,
+                    "nikon_he_load_raw_placeholder()") == 0) {
+      return NIKON_HIGH_EFFICIENCY_RAW_ERROR;
+    }
+    if (std::strcmp(decoder.decoder_name,
+                    "vc5_dng_load_raw_placeholder()") == 0) {
+      return GOPRO_GPR_ERROR;
+    }
+    if (std::strcmp(decoder.decoder_name,
+                    "jxl_dng_load_raw_placeholder()") == 0) {
+      return JPEG_XL_DNG_ERROR;
+    }
+    return nullptr;
   }
 
   int ensure_unpacked() {

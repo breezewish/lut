@@ -25,6 +25,8 @@ test("RAW fixtures retain their declared provenance and decoder roles", async ()
     "real-camera-cfa-dng",
     "real-camera-arw",
     "real-camera-nef",
+    "real-camera-gpr",
+    "real-camera-x3f",
   ]);
   const realDng = manifest.fixtures.find(
     (fixture) => fixture.id === "leica-m8-cfa-dng",
@@ -39,6 +41,18 @@ test("RAW fixtures retain their declared provenance and decoder roles", async ()
   expect(nikonHighEfficiencyRaw).toMatchObject({
     source:
       "https://raw.pixls.us/getfile.php/6616/nice/Nikon%20-%20Z%208%20-%208bit%208bit%20compressed%20%283%3A2%29.NEF",
+    license: "CC0-1.0",
+  });
+  expect(
+    manifest.fixtures.find((fixture) => fixture.id === "gopro-hero7-gpr"),
+  ).toMatchObject({
+    source: "https://raw.pixls.us/data/GoPro/HERO7%20Black/GOPR0055.GPR",
+    license: "CC0-1.0",
+  });
+  expect(
+    manifest.fixtures.find((fixture) => fixture.id === "sigma-dp1-x3f"),
+  ).toMatchObject({
+    source: "https://raw.pixls.us/data/Sigma/DP1/RAW_SIGMA_DP1.X3F",
     license: "CC0-1.0",
   });
 

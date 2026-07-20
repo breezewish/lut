@@ -2,20 +2,26 @@ import { expect, test } from "vitest";
 
 import {
   describeProcessingError,
-  isNikonHighEfficiencyRawError,
+  getUnsupportedRawFormat,
 } from "../src/lib/errors";
 
-test("identifies Nikon High Efficiency RAW without classifying generic decode errors", () => {
+test("classifies known unsupported RAW decoders without guessing from generic errors", () => {
   expect(
-    isNikonHighEfficiencyRawError(
+    getUnsupportedRawFormat(
       new Error("LUTIFY_UNSUPPORTED_NIKON_HIGH_EFFICIENCY_RAW"),
     ),
-  ).toBe(true);
+  ).toBe("nikon-high-efficiency");
   expect(
-    isNikonHighEfficiencyRawError(
+    getUnsupportedRawFormat(new Error("LUTIFY_UNSUPPORTED_GOPRO_GPR")),
+  ).toBe("gopro-gpr");
+  expect(
+    getUnsupportedRawFormat(new Error("LUTIFY_UNSUPPORTED_JPEG_XL_DNG")),
+  ).toBe("jpeg-xl-dng");
+  expect(
+    getUnsupportedRawFormat(
       new Error("LibRaw could not decode: Unsupported file format"),
     ),
-  ).toBe(false);
+  ).toBeUndefined();
 });
 
 test("turns opaque Embind exceptions into an actionable RAW error", () => {

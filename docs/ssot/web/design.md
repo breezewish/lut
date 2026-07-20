@@ -79,7 +79,7 @@ Successful preview and export replies carry monotonic diagnostic timings. The Li
 
 Queue removal sends a serialized release command for that photo and frees its GPU source plus any retained sensor mosaic; clearing the final item or the entire queue also frees the shared renderer workspace. Decode and export failures are separate queue states: only decode failure makes the RAW ineligible, while export failure retains the preview and allows another full-resolution attempt.
 
-The browser wrapper turns LibRaw's Nikon High Efficiency decoder identity into one stable internal error code before unpacking. The application maps only that code to a focused native modal dialog; generic unsupported or damaged RAW errors remain in the shared toast path. This keeps the recovery guidance specific without guessing from an NEF extension or Nikon camera name.
+The browser wrapper turns LibRaw decoder identities that are explicitly flagged unsupported into stable internal error codes before unpacking. The application maps Nikon High Efficiency, GoPro GPR, and JPEG XL-compressed DNG codes to focused native modal dialogs; generic unsupported or damaged RAW errors remain in the shared toast path. This keeps recovery guidance specific without guessing from extensions or camera names. The WASM build enables LibRaw's bundled X3F decoder so Sigma files stay in the normal local decode path.
 
 ## Presentation
 
