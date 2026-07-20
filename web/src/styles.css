@@ -806,8 +806,7 @@ ul {
 .looks__search {
   flex: 0 0 auto;
 }
-.panel--looks,
-.panel--output {
+.panel--looks {
   background: var(--bg);
 }
 .panel__head {
@@ -1274,20 +1273,50 @@ input.chromatic-range--tint::-moz-range-track {
 
 /* ── Output panel ──────────────────────────────────────────────────────── */
 .panel--output {
-  padding-top: var(--s3);
+  gap: var(--s4);
+  padding-block: var(--s3);
+  background: var(--panel);
+}
+.output-status {
+  min-width: 0;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--ink-muted);
+  font-size: var(--t-2xs);
+  font-weight: 560;
+  line-height: 1.25;
+}
+.output-status > span:not(.sr-only) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.output-status svg {
+  flex: 0 0 auto;
+}
+.output-status--warning {
+  color: var(--warning);
 }
 .output-format {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(8.5rem, 1.45fr);
   align-items: center;
   gap: var(--s4);
   color: var(--ink-muted);
   font-size: var(--t-xs);
   font-weight: 560;
 }
+.output-format__meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
 .output-format select {
   min-width: 0;
-  height: 2rem;
+  height: 2.125rem;
   padding: 0 var(--s4);
   border: 0;
   border-radius: var(--r-sm);
@@ -1301,6 +1330,9 @@ input.chromatic-range--tint::-moz-range-track {
 }
 .output-format select:hover:not(:disabled) {
   background: var(--control-hover);
+}
+.output-format select:active:not(:disabled) {
+  background: var(--control-active);
 }
 .output-format select:focus-visible {
   outline-color: var(--focus);
@@ -1699,11 +1731,13 @@ input.chromatic-range--tint::-moz-range-track {
     display: none;
   }
   .panels {
+    position: relative;
     flex: 0 0 auto;
     /* Give the visual Look catalog useful room on tall narrow screens while
        reserving the header, filmstrip, and 16rem comparison minimum. */
     max-height: min(55vh, calc(100dvh - 23.75rem));
-    overflow: hidden;
+    overflow-y: auto;
+    scrollbar-width: thin;
     /* On narrow screens the panels sit below the canvas at a natural width. */
     width: auto !important;
   }

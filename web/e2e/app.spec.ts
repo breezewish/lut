@@ -1184,7 +1184,41 @@ test("short desktop viewports keep export in view", async ({ page }) => {
   await expect(
     page.getByRole("slider", { name: "White balance tint" }),
   ).toBeVisible();
+  await expect(
+    page
+      .getByLabel("Output", { exact: true })
+      .getByText("Output", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Color unverified", { exact: true }),
+  ).toBeVisible();
   await expect(exportButton).toBeInViewport();
+});
+
+test("mobile output keeps its context and touch targets reachable", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(linearFixture);
+  await expect(page.getByLabel("Base preview")).toBeVisible({
+    timeout: 20_000,
+  });
+
+  const output = page.getByLabel("Output", { exact: true });
+  const format = page.getByLabel("Export format");
+  const exportButton = page.getByRole("button", {
+    name: "Export selected as TIFF",
+  });
+  await output.scrollIntoViewIfNeeded();
+  await expect(output.getByText("Output", { exact: true })).toBeVisible();
+  await expect(
+    output.getByText("Color unverified", { exact: true }),
+  ).toBeVisible();
+  await expect(format).toBeInViewport();
+  await expect(exportButton).toBeInViewport();
+  expect((await format.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  expect((await exportButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
 });
 
 test("mobile empty state keeps import primary and defers processing controls", async ({

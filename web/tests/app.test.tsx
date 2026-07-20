@@ -556,6 +556,10 @@ test("renders the main preview only after the adjustment recipe changes", async 
     name: "Export selected as TIFF",
   });
   expect(exportButton).toBeDisabled();
+  expect(screen.getByLabelText("Output")).toHaveTextContent("Output");
+  expect(screen.getByLabelText("Output")).toHaveTextContent(
+    /Loading output…|Finishing preview…/,
+  );
   await waitFor(() =>
     expect(
       RecipeWorker.instance.commands.some(({ type }) => type === "decode"),
@@ -566,6 +570,8 @@ test("renders the main preview only after the adjustment recipe changes", async 
     expect(screen.getByLabelText("Base preview")).toBeVisible(),
   );
   expect(exportButton).toBeEnabled();
+  expect(screen.getByText("Color unverified")).toBeVisible();
+  expect(exportButton).toHaveAttribute("aria-describedby", "output-status");
 
   await new Promise((resolve) => window.setTimeout(resolve, 260));
   expect(mainRenders()).toEqual([]);
@@ -810,6 +816,7 @@ test("reuses a decoded photo when switching back to it", async () => {
     "first.dngTest Camera1 × 1",
   );
   expect(screen.getByLabelText("Output")).toHaveTextContent("Export TIFF");
+  expect(screen.getByLabelText("Output")).toHaveTextContent("Color unverified");
   const format = screen.getByLabelText("Export format");
   expect(format).toHaveValue("tiff");
   fireEvent.change(format, { target: { value: "jpeg" } });

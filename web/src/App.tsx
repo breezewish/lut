@@ -397,6 +397,21 @@ export default function App() {
   const canExport = Boolean(
     !exporting && manifest && eligibleSelected.length > 0 && activeSettled,
   );
+  const exportUnavailableReason = exporting
+    ? undefined
+    : !manifest
+      ? manifestError
+        ? "Reload to enable output"
+        : "Loading output…"
+      : eligibleSelected.length === 0
+        ? "Select a ready photo"
+        : !activeSettled
+          ? isPreviewProcessing
+            ? "Finishing preview…"
+            : "Choose a ready photo"
+          : undefined;
+  const outputColorUnverified =
+    manifest?.contract.outputStatus === "unverified";
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -1980,7 +1995,42 @@ export default function App() {
 
               <div className="panel panel--output" aria-label="Output">
                 <label className="output-format">
-                  <span>Format</span>
+                  <span className="output-format__meta">
+                    <span className="panel__title">Output</span>
+                    {exportUnavailableReason ? (
+                      <span
+                        id="output-status"
+                        className="output-status"
+                        role="status"
+                        title={exportUnavailableReason}
+                      >
+                        {isPreviewProcessing && (
+                          <LoaderCircle
+                            size={12}
+                            className="spin"
+                            aria-hidden="true"
+                          />
+                        )}
+                        <span>{exportUnavailableReason}</span>
+                      </span>
+                    ) : (
+                      outputColorUnverified && (
+                        <span
+                          id="output-status"
+                          className="output-status output-status--warning"
+                          title="Built-in looks do not declare an output color space. Check the exported file before production use."
+                        >
+                          <TriangleAlert size={12} aria-hidden="true" />
+                          <span>Color unverified</span>
+                          <span className="sr-only">
+                            . Built-in looks do not declare an output color
+                            space. Check the exported file before production
+                            use.
+                          </span>
+                        </span>
+                      )
+                    )}
+                  </span>
                   <select
                     aria-label="Export format"
                     value={outputFormat}
@@ -1995,8 +2045,12 @@ export default function App() {
                 </label>
                 {exporting && exportProgress && exportProgress.total > 1 ? (
                   <Button
+                    className="output-action"
                     size="block"
                     variant="secondary"
+                    aria-describedby={
+                      outputColorUnverified ? "output-status" : undefined
+                    }
                     disabled={exportProgress.stopRequested}
                     onClick={() => {
                       stopAfterCurrent.current = true;
@@ -2011,8 +2065,14 @@ export default function App() {
                   </Button>
                 ) : (
                   <Button
+                    className="output-action"
                     size="block"
                     variant="primary"
+                    aria-describedby={
+                      exportUnavailableReason || outputColorUnverified
+                        ? "output-status"
+                        : undefined
+                    }
                     aria-label={
                       eligibleSelected.length > 1
                         ? `Export ${eligibleSelected.length} photos as ${OUTPUT_FORMATS[outputFormat].label}`
