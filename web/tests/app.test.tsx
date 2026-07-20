@@ -581,7 +581,7 @@ test("renders the main preview only after the adjustment recipe changes", async 
   expect(exportButton).toBeEnabled();
   expect(exportButton).not.toHaveAttribute("aria-describedby");
   expect(screen.queryByText("Color unverified")).not.toBeInTheDocument();
-  expect(screen.getByLabelText(/Unverified output color space/)).toBeVisible();
+  expect(screen.queryByText("Unverified output")).not.toBeInTheDocument();
 
   await new Promise((resolve) => window.setTimeout(resolve, 260));
   expect(mainRenders()).toEqual([]);
@@ -834,9 +834,21 @@ test("reuses a decoded photo when switching back to it", async () => {
     "first.dngTest Camera1 × 1",
   );
   expect(screen.getByLabelText("Output")).toHaveTextContent("Export TIFF");
-  const format = screen.getByLabelText("Export format");
-  expect(format).toHaveValue("tiff");
-  fireEvent.change(format, { target: { value: "jpeg" } });
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Choose export format, current TIFF",
+    }),
+  );
+  const tiffOption = screen.getByRole("menuitemradio", {
+    name: "TIFF · 16-bit",
+  });
+  const jpegOption = screen.getByRole("menuitemradio", {
+    name: "JPEG · Quality 95",
+  });
+  expect(tiffOption).toHaveFocus();
+  fireEvent.keyDown(tiffOption, { key: "ArrowDown" });
+  expect(jpegOption).toHaveFocus();
+  fireEvent.click(jpegOption);
   expect(
     screen.getByRole("button", { name: "Export selected as JPEG" }),
   ).toHaveTextContent("Export JPEG");

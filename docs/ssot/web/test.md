@@ -11,7 +11,7 @@
 - Changing EV keeps the previous Look canvases visible, regenerates every 132px thumbnail for the current photo in one interruptible selected-Look-first batch, replaces each tile in place as it completes, resumes only missing tiles after preemption, and restores the cached set when switching away and back to the same EV.
 - App startup conditionally revalidates the manifest and starts all hash-versioned LUT requests concurrently; unchanged hashes use the browser HTTP cache, changed hashes produce new request URLs, and thumbnails publish in LUT-readiness order without a fixed idle delay.
 - Returning to any of six recently decoded photos avoids another file read or RAW decode; the three most recent restore their EV, Look, comparison `ImageBitmap` objects, and thumbnails in the selection render without resizing unchanged Canvas backing stores.
-- Output is visibly named, explains why its action is unavailable, defaults to 16-bit TIFF, switches to Quality 95 JPEG through its labeled format selector, and keeps its single action disabled while the active RAW is decoding or its visible EV/white-balance/LUT recipe is waiting to render.
+- Output is visibly named, explains why its action is unavailable, defaults to 16-bit TIFF, switches to Quality 95 JPEG through the trailing menu of its split export button, and keeps export disabled while the active RAW is decoding or its visible EV/white-balance/LUT recipe is waiting to render.
 - A full-resolution JPEG download has the `.jpg` name, valid image dimensions, and quality-95 quantization tables.
 - A real camera RAW displays its labeled embedded JPEG before the processed preview replaces it.
 - Decode, rerender, and export issue only same-origin static GET requests; no photo data is uploaded.
@@ -101,7 +101,7 @@
 - A LUT hash mismatch, missing LUT, and hash-valid malformed compact LUT each show a specific error, stop the decoding state, disable export, and allow a later valid import.
 - Duplicate files in one chooser action are ignored, drag and drop decodes the file, remove plus undo restores it, and choosing a LUT keeps the stable catalog order.
 - At mobile width, the empty-state chooser and Add RAW action are visible before any processing controls or export action.
-- At mobile width with a processed RAW, the inspector scrolls without clipping adjustments or Looks, and Output keeps its title, format selector, and 44px export action together when reached.
+- At mobile width with a processed RAW, the inspector scrolls without clipping adjustments or Looks, and Output keeps its title and 44px split export button together when reached.
 - A processed RAW exposes Wipe and Split comparison controls; the Wipe divider supports pointer and keyboard adjustment without changing the preview recipe.
 - Look discovery uses a stable searchable thumbnail grid with visible source camera-family groups, shows in-camera short labels on camera-native Looks, strictly filters by family, short label, or Look name with an explicit empty state, and explains the V-Gamut/V-Log context inline.
 - Below 560px both comparison buffers remain available, and the comparison switch plus visible application actions have at least 44px hit targets.

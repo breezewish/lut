@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { unzipSync } from "fflate";
 
 import { decodeRgb16Tiff } from "./tiff";
@@ -20,6 +20,29 @@ const classicNegative = resolve(
   "vendor/V-Log-Alchemy/Luts/Fujifilm/FLog2C_to_CLASSIC-Neg_VLog.cube",
 );
 const execFileAsync = promisify(execFile);
+
+async function readSliderTrackEnds(
+  page: Page,
+  slider: Locator,
+): Promise<{ left: number[]; right: number[] }> {
+  const png = await slider.screenshot();
+  return page.evaluate(async (bytes) => {
+    const bitmap = await createImageBitmap(
+      new Blob([new Uint8Array(bytes)], { type: "image/png" }),
+    );
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Canvas 2D is unavailable");
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const y = Math.floor(canvas.height / 2);
+    const read = (x: number) =>
+      Array.from(context.getImageData(x, y, 1, 1).data.slice(0, 3));
+    return { left: read(8), right: read(canvas.width - 9) };
+  }, Array.from(png));
+}
 
 function firstJpegQuantizationTable(bytes: Uint8Array): Uint8Array {
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) {
@@ -520,7 +543,10 @@ test("exports a full-resolution Quality 95 JPEG", async ({ page }) => {
     .getByRole("slider", { name: "White balance temperature" })
     .fill("42");
   await page.getByRole("slider", { name: "White balance tint" }).fill("-58");
-  await page.getByLabel("Export format").selectOption("jpeg");
+  await page
+    .getByRole("button", { name: "Choose export format, current TIFF" })
+    .click();
+  await page.getByRole("menuitemradio", { name: "JPEG · Quality 95" }).click();
   const exportButton = page.getByRole("button", {
     name: "Export selected as JPEG",
   });
@@ -580,12 +606,19 @@ test("batch export applies JPEG to every ZIP entry", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: /lossy\.dng.*Ready/ }),
   ).toHaveAttribute("aria-current", "true", { timeout: 20_000 });
-  const format = page.getByLabel("Export format");
-  await format.selectOption("jpeg");
+  const format = page.getByRole("button", {
+    name: "Choose export format, current TIFF",
+  });
+  await format.click();
+  await page.getByRole("menuitemradio", { name: "JPEG · Quality 95" }).click();
 
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export 2 photos as JPEG" }).click();
-  await expect(format).toBeDisabled();
+  await expect(
+    page.getByRole("button", {
+      name: "Choose export format, current JPEG",
+    }),
+  ).toHaveCount(0);
   const download = await downloadPromise;
   const path = await download.path();
   expect(path).not.toBeNull();
@@ -1185,6 +1218,23 @@ test("short desktop viewports keep export in view", async ({ page }) => {
     page.getByRole("slider", { name: "White balance tint" }),
   ).toBeVisible();
   await expect(
+    page.getByText("Unverified output", { exact: true }),
+  ).toHaveCount(0);
+  const temperature = await readSliderTrackEnds(
+    page,
+    page.getByRole("slider", { name: "White balance temperature" }),
+  );
+  expect(temperature.left[2]).toBeGreaterThan(temperature.left[0]);
+  expect(temperature.right[0]).toBeGreaterThan(temperature.right[2]);
+  const tint = await readSliderTrackEnds(
+    page,
+    page.getByRole("slider", { name: "White balance tint" }),
+  );
+  expect(tint.left[1]).toBeGreaterThan(tint.left[0]);
+  expect(tint.left[1]).toBeGreaterThan(tint.left[2]);
+  expect(tint.right[0]).toBeGreaterThan(tint.right[1]);
+  expect(tint.right[2]).toBeGreaterThan(tint.right[1]);
+  await expect(
     page
       .getByLabel("Output", { exact: true })
       .getByText("Output", { exact: true }),
@@ -1203,7 +1253,9 @@ test("mobile output keeps its context and touch targets reachable", async ({
   });
 
   const output = page.getByLabel("Output", { exact: true });
-  const format = page.getByLabel("Export format");
+  const format = page.getByRole("button", {
+    name: "Choose export format, current TIFF",
+  });
   const exportButton = page.getByRole("button", {
     name: "Export selected as TIFF",
   });
@@ -1213,6 +1265,10 @@ test("mobile output keeps its context and touch targets reachable", async ({
   await expect(exportButton).toBeInViewport();
   expect((await format.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   expect((await exportButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  await format.click();
+  await expect(
+    page.getByRole("menuitemradio", { name: "JPEG · Quality 95" }),
+  ).toBeInViewport();
 });
 
 test("mobile empty state keeps import primary and defers processing controls", async ({

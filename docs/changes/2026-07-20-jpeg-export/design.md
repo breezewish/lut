@@ -26,7 +26,7 @@ The JPEG encoder uses the existing pinned libjpeg-turbo build instead of adding 
 
 ## Test Plan
 
-- Verify the format selector defaults to TIFF and changes the accessible export action to JPEG.
+- Verify the split button defaults to TIFF and its menu changes the accessible export action to JPEG.
 - Verify the Worker command carries the selected format.
 - Export a real full-resolution JPEG through the production page and validate its filename, markers, dimensions, quantization table, and completion message.
 - Keep the existing decoded TIFF parity and batch ZIP journeys passing.

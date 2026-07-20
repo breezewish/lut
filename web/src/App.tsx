@@ -33,6 +33,7 @@ import {
   type StageImage,
 } from "./components/compare-stage";
 import { Filmstrip } from "./components/filmstrip";
+import { ExportFormatMenu } from "./components/export-format-menu";
 import { LookPanel, type LookThumbImage } from "./components/look-panel";
 import { UnsupportedRawDialog } from "./components/unsupported-raw-dialog";
 import { Button } from "./components/ui/button";
@@ -1503,16 +1504,6 @@ export default function App() {
           )}
         </div>
         <div className="header__actions">
-          {active && manifest?.contract.outputStatus === "unverified" && (
-            <span
-              className="header__warning"
-              aria-label="Unverified output color space. Check the exported file before production use."
-              title="Built-in looks do not declare an output color space. Check the exported file before production use."
-            >
-              <TriangleAlert size={13} aria-hidden="true" />
-              <span>Unverified output</span>
-            </span>
-          )}
           <span className="shield">
             <LockKeyhole size={13} aria-hidden="true" />
             <span>Files stay on this device</span>
@@ -1808,7 +1799,7 @@ export default function App() {
               </div>
 
               <div className="panel panel--output" aria-label="Output">
-                <div className="output-format">
+                <div className="output-head">
                   <span className="output-format__meta">
                     <span className="panel__title">Output</span>
                     {exportUnavailableReason && (
@@ -1829,20 +1820,6 @@ export default function App() {
                       </span>
                     )}
                   </span>
-                  <select
-                    aria-label="Export format"
-                    value={outputFormat}
-                    disabled={exporting}
-                    onChange={(event) =>
-                      setOutputFormat(event.currentTarget.value as OutputFormat)
-                    }
-                  >
-                    {Object.entries(OUTPUT_FORMATS).map(([id, format]) => (
-                      <option key={id} value={id}>
-                        {format.optionLabel}
-                      </option>
-                    ))}
-                  </select>
                 </div>
                 {exporting && exportProgress && exportProgress.total > 1 ? (
                   <Button
@@ -1873,36 +1850,43 @@ export default function App() {
                     )}
                   </Button>
                 ) : (
-                  <Button
-                    className="output-action"
-                    size="block"
-                    variant="primary"
-                    aria-describedby={
-                      exportUnavailableReason ? "output-status" : undefined
-                    }
-                    aria-label={
-                      eligibleSelected.length > 1
-                        ? `Export ${eligibleSelected.length} photos as ${OUTPUT_FORMATS[outputFormat].label}`
-                        : `Export selected as ${OUTPUT_FORMATS[outputFormat].label}`
-                    }
-                    onClick={() => void exportSelected()}
-                    disabled={!canExport}
-                  >
-                    {exporting ? (
-                      <LoaderCircle
-                        size={16}
-                        className="spin"
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <ImageDown size={16} aria-hidden="true" />
-                    )}
-                    {exporting
-                      ? "Exporting…"
-                      : eligibleSelected.length > 1
-                        ? `Export ${eligibleSelected.length} ${OUTPUT_FORMATS[outputFormat].label} files`
-                        : `Export ${OUTPUT_FORMATS[outputFormat].label}`}
-                  </Button>
+                  <div className="output-split">
+                    <Button
+                      className="output-action output-split__action"
+                      size="block"
+                      variant="primary"
+                      aria-describedby={
+                        exportUnavailableReason ? "output-status" : undefined
+                      }
+                      aria-label={
+                        eligibleSelected.length > 1
+                          ? `Export ${eligibleSelected.length} photos as ${OUTPUT_FORMATS[outputFormat].label}`
+                          : `Export selected as ${OUTPUT_FORMATS[outputFormat].label}`
+                      }
+                      onClick={() => void exportSelected()}
+                      disabled={!canExport}
+                    >
+                      {exporting ? (
+                        <LoaderCircle
+                          size={16}
+                          className="spin"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <ImageDown size={16} aria-hidden="true" />
+                      )}
+                      {exporting
+                        ? "Exporting…"
+                        : eligibleSelected.length > 1
+                          ? `Export ${eligibleSelected.length} ${OUTPUT_FORMATS[outputFormat].label} files`
+                          : `Export ${OUTPUT_FORMATS[outputFormat].label}`}
+                    </Button>
+                    <ExportFormatMenu
+                      value={outputFormat}
+                      disabled={exporting}
+                      onChange={setOutputFormat}
+                    />
+                  </div>
                 )}
               </div>
             </aside>

@@ -23,6 +23,6 @@ Export previously produced only uncompressed RGB16 TIFF. That format preserves 1
 
 ## Product Behavior
 
-Output shows a labeled format selector with `TIFF · 16-bit` and `JPEG · Quality 95`. The primary action names the selected format. TIFF downloads use `.tif` and `image/tiff`; JPEG downloads use `.jpg` and `image/jpeg`. Batch ZIP entries use the selected extension. Format cannot change while export is active.
+Output uses one split export button. Its main segment names and exports the selected format; its trailing menu offers `TIFF · 16-bit` and `JPEG · Quality 95`. TIFF downloads use `.tif` and `image/tiff`; JPEG downloads use `.jpg` and `image/jpeg`. Batch ZIP entries use the selected extension. Format cannot change while export is active.
 
 JPEG contains the same full-resolution corrected-v2 recipe as TIFF, rounded from RGB16 to RGB8 before quality-95 JPEG compression. A JPEG failure is reported as an export failure and never produces a successful placeholder file.
