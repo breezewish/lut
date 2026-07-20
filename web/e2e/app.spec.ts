@@ -1189,9 +1189,6 @@ test("short desktop viewports keep export in view", async ({ page }) => {
       .getByLabel("Output", { exact: true })
       .getByText("Output", { exact: true }),
   ).toBeVisible();
-  await expect(
-    page.getByText("Color unverified", { exact: true }),
-  ).toBeVisible();
   await expect(exportButton).toBeInViewport();
 });
 
@@ -1212,9 +1209,6 @@ test("mobile output keeps its context and touch targets reachable", async ({
   });
   await output.scrollIntoViewIfNeeded();
   await expect(output.getByText("Output", { exact: true })).toBeVisible();
-  await expect(
-    output.getByText("Color unverified", { exact: true }),
-  ).toBeVisible();
   await expect(format).toBeInViewport();
   await expect(exportButton).toBeInViewport();
   expect((await format.boundingBox())?.height).toBeGreaterThanOrEqual(44);

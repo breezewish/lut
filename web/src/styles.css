@@ -1278,9 +1278,6 @@ input[type="range"]:disabled {
 .output-status svg {
   flex: 0 0 auto;
 }
-.output-status--warning {
-  color: var(--warning);
-}
 .output-format {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(8.5rem, 1.45fr);

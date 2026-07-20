@@ -544,9 +544,6 @@ export default function App() {
             ? "Finishing preview…"
             : "Choose a ready photo"
           : undefined;
-  const outputColorUnverified =
-    manifest?.contract.outputStatus === "unverified";
-
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
@@ -1811,10 +1808,10 @@ export default function App() {
               </div>
 
               <div className="panel panel--output" aria-label="Output">
-                <label className="output-format">
+                <div className="output-format">
                   <span className="output-format__meta">
                     <span className="panel__title">Output</span>
-                    {exportUnavailableReason ? (
+                    {exportUnavailableReason && (
                       <span
                         id="output-status"
                         className="output-status"
@@ -1830,22 +1827,6 @@ export default function App() {
                         )}
                         <span>{exportUnavailableReason}</span>
                       </span>
-                    ) : (
-                      outputColorUnverified && (
-                        <span
-                          id="output-status"
-                          className="output-status output-status--warning"
-                          title="Built-in looks do not declare an output color space. Check the exported file before production use."
-                        >
-                          <TriangleAlert size={12} aria-hidden="true" />
-                          <span>Color unverified</span>
-                          <span className="sr-only">
-                            . Built-in looks do not declare an output color
-                            space. Check the exported file before production
-                            use.
-                          </span>
-                        </span>
-                      )
                     )}
                   </span>
                   <select
@@ -1862,15 +1843,12 @@ export default function App() {
                       </option>
                     ))}
                   </select>
-                </label>
+                </div>
                 {exporting && exportProgress && exportProgress.total > 1 ? (
                   <Button
                     className="output-action export-progress"
                     size="block"
                     variant="secondary"
-                    aria-describedby={
-                      outputColorUnverified ? "output-status" : undefined
-                    }
                     aria-label={
                       exportProgress.stopRequested
                         ? "Stopping export after the current file"
@@ -1900,9 +1878,7 @@ export default function App() {
                     size="block"
                     variant="primary"
                     aria-describedby={
-                      exportUnavailableReason || outputColorUnverified
-                        ? "output-status"
-                        : undefined
+                      exportUnavailableReason ? "output-status" : undefined
                     }
                     aria-label={
                       eligibleSelected.length > 1
