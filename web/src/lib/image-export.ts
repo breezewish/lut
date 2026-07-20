@@ -18,6 +18,7 @@ export interface GpuStripRenderer {
   renderStrip(
     pixels: Uint16Array,
     ev: number,
+    whiteBalance: Float32Array,
   ): Promise<{
     pixels: Uint16Array<ArrayBuffer>;
     timings: {
@@ -117,6 +118,7 @@ export async function renderImageInGpuStrips(
   encoder: GpuStripImageEncoder,
   renderer: GpuStripRenderer,
   ev: number,
+  whiteBalance: Float32Array,
 ): Promise<GpuRenderedImage> {
   let offset = 0;
   let consumed = false;
@@ -142,7 +144,7 @@ export async function renderImageInGpuStrips(
       const batchSamples = Math.min(remaining, requested * batchMultiplier);
       const source = read(offset, batchSamples);
       const startedAt = performance.now();
-      const rendered = await renderer.renderStrip(source, ev);
+      const rendered = await renderer.renderStrip(source, ev, whiteBalance);
       colorProcessingMs += performance.now() - startedAt;
       gpuInputPreparationMs += rendered.timings.inputPreparationMs;
       gpuExecutionAndReadbackMs += rendered.timings.executionAndReadbackMs;

@@ -6,6 +6,8 @@
 - A strict CUBE parser validates axis order, domain, scientific notation, finite values, sample count, and a non-affine LUT's distinct outputs for all six tetrahedral branches and their shared boundaries.
 - The native TIFF recipe accepts both supported EV boundaries, while the independent browser oracle verifies production WebGPU Base and LUT pixels at representative negative, zero, and positive EV values.
 - An independent generated oracle drives the production WebGPU meter across uniform, center-weighted, p99-highlight, black, and non-divisible image cases without using production metering code to derive expected EV.
+- Frozen Raw Alchemy Studio matrices cover both white-balance axes, their corners, and mixed values; LUTify matches every coefficient within `1e-6`, and As Shot remains the exact identity.
+- Production WebGPU applies the relative white-balance matrix before Base and V-Log/LUT color, while the Rust implementation remains the independent native oracle.
 - The browser preview source requests only contributing decoded rows, retains exactly the pixels used at the requested display size, and rejects incomplete or inconsistent rows.
 - The completed browser preview source can move exactly once into WebGPU ownership, after which the Rust source reports its missing pixels instead of retaining a duplicate allocation.
 - TIFF export produces a readable uncompressed RGB16 image with the requested dimensions.

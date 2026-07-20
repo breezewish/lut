@@ -34,6 +34,13 @@ test("SwiftShader runs the production WebGPU AAHD export path", async ({
   await expect(
     page.getByRole("button", { name: /packed-12\.dng.*Ready/ }),
   ).toBeVisible({ timeout: 30_000 });
+  await page
+    .getByRole("slider", { name: "White balance temperature" })
+    .fill("42");
+  await page.getByRole("slider", { name: "White balance tint" }).fill("-58");
+  await expect(
+    page.getByRole("button", { name: "Export selected" }),
+  ).toBeEnabled();
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export selected as TIFF" }).click();
   const browserOutput = await (await downloadPromise).path();
@@ -58,6 +65,10 @@ test("SwiftShader runs the production WebGPU AAHD export path", async ({
     classicNegative,
     "--ev",
     String(timings.effectiveEv),
+    "--temperature",
+    "42",
+    "--tint",
+    "-58",
     "--color",
     "never",
   ]);

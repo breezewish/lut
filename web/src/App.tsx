@@ -127,7 +127,7 @@ interface CachedDisplayedPreview {
 }
 
 interface CachedLookThumbs {
-  ev: number;
+  recipe: string;
   images: Map<string, LookThumbImage>;
 }
 
@@ -143,11 +143,22 @@ function hasUsablePreview(item: QueueItem): boolean {
     item.status === "export-error"
   );
 }
-function previewRecipeKey(fileId: string, ev: number, lutId: string): string {
-  return `${fileId}\n${ev}\n${lutId}`;
+function previewRecipeKey(
+  fileId: string,
+  ev: number,
+  temperature: number,
+  tint: number,
+  lutId: string,
+): string {
+  return `${fileId}\n${ev}\n${temperature}\n${tint}\n${lutId}`;
 }
-function basePreviewRecipeKey(fileId: string, ev: number): string {
-  return `${fileId}\n${ev}`;
+function basePreviewRecipeKey(
+  fileId: string,
+  ev: number,
+  temperature: number,
+  tint: number,
+): string {
+  return `${fileId}\n${ev}\n${temperature}\n${tint}`;
 }
 
 function rememberCacheEntry<Key, Value>(
@@ -287,6 +298,7 @@ export default function App() {
   const [filmstripThumbTick, setFilmstripThumbTick] = useState(0);
   const [sourceTick, setSourceTick] = useState(0);
   const [exposureInteracting, setExposureInteracting] = useState(false);
+  const [whiteBalanceInteracting, setWhiteBalanceInteracting] = useState(false);
   const [interactionExposure, setInteractionExposure] = useState<{
     fileId: string;
     ev: number;
@@ -311,6 +323,11 @@ export default function App() {
   const fileInput = useRef<HTMLInputElement>(null);
   const exposureInput = useRef<HTMLInputElement>(null);
   const exposureRange = useRef<HTMLInputElement>(null);
+  const temperatureInput = useRef<HTMLInputElement>(null);
+  const temperatureRange = useRef<HTMLInputElement>(null);
+  const tintInput = useRef<HTMLInputElement>(null);
+  const tintRange = useRef<HTMLInputElement>(null);
+  const whiteBalanceSettleTimer = useRef<number | undefined>(undefined);
   const exposureCommitTimer = useRef<number | undefined>(undefined);
   const exposureSettleTimer = useRef<number | undefined>(undefined);
   const pendingExposure = useRef(0);
@@ -339,9 +356,12 @@ export default function App() {
       ? interactionExposure.ev
       : (active?.ev ?? 0);
   const lutId = active?.lutId ?? DEFAULT_LUT_ID;
+  const temperature = active?.temperature ?? 0;
+  const tint = active?.tint ?? 0;
+  const whiteBalance = { temperature, tint };
   const activeLut = manifest?.luts.find((lut) => lut.id === lutId);
   const currentRecipe = active
-    ? previewRecipeKey(active.id, ev, lutId)
+    ? previewRecipeKey(active.id, ev, temperature, tint, lutId)
     : undefined;
   const isPreviewProcessing = Boolean(
     active &&
@@ -356,6 +376,10 @@ export default function App() {
   const mixedEv =
     selectedList.length > 1 &&
     new Set(selectedList.map((item) => item.ev)).size > 1;
+  const mixedWhiteBalance =
+    selectedList.length > 1 &&
+    (new Set(selectedList.map((item) => item.temperature)).size > 1 ||
+      new Set(selectedList.map((item) => item.tint)).size > 1);
   // Export stays gated on the active photo's visible recipe being fully
   // rendered, so batch export can't ship a recipe the user hasn't seen settle.
   const activeSettled = Boolean(
@@ -403,7 +427,9 @@ export default function App() {
   }, []);
 
   const patchSelected = useCallback(
-    (patch: Partial<Pick<QueueItem, "ev" | "lutId">>) => {
+    (
+      patch: Partial<Pick<QueueItem, "ev" | "temperature" | "tint" | "lutId">>,
+    ) => {
       setItems((current) =>
         current.map((item) =>
           selectedIds.has(item.id) ? { ...item, ...patch } : item,
@@ -449,6 +475,7 @@ export default function App() {
   useEffect(() => {
     setInteractionExposure(undefined);
     setInteractionLookRecipe(undefined);
+    setWhiteBalanceInteracting(false);
     pendingExposure.current = active?.ev ?? 0;
     committedExposure.current = active?.ev ?? 0;
     persistedExposure.current = active?.ev ?? 0;
@@ -461,14 +488,17 @@ export default function App() {
   // results have arrived. Each tile is then replaced in place.
   useEffect(() => {
     const cached = active ? lookThumbCache.current.get(active.id) : undefined;
-    if (active && cached?.ev === ev) {
+    const recipe = active
+      ? basePreviewRecipeKey(active.id, ev, temperature, tint)
+      : undefined;
+    if (active && cached && cached.recipe === recipe) {
       rememberCacheEntry(lookThumbCache.current, active.id, cached);
       setThumbs(new Map(cached.images));
       displayedThumbFileId.current = active.id;
     } else {
       if (active) {
         rememberCacheEntry(lookThumbCache.current, active.id, {
-          ev,
+          recipe: recipe!,
           images: new Map(),
         });
       }
@@ -479,7 +509,7 @@ export default function App() {
     }
     failedThumbRecipe.current = undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, ev]);
+  }, [activeId, ev, temperature, tint]);
 
   // Arrow-key photo navigation (single-select), when focus is outside a text
   // field. Photo buttons are allowed so arrows keep working inside the strip.
@@ -605,11 +635,53 @@ export default function App() {
   const chooseLut = useCallback(
     (value: string) => {
       if (!active || value === active.lutId) return;
-      setInteractionLookRecipe(previewRecipeKey(active.id, ev, value));
+      setInteractionLookRecipe(
+        previewRecipeKey(active.id, ev, temperature, tint, value),
+      );
       patchSelected({ lutId: value });
     },
-    [active, ev, patchSelected],
+    [active, ev, temperature, tint, patchSelected],
   );
+
+  const setWhiteBalance = useCallback(
+    (next: Partial<Pick<QueueItem, "temperature" | "tint">>) => {
+      if (whiteBalanceSettleTimer.current !== undefined) {
+        window.clearTimeout(whiteBalanceSettleTimer.current);
+        whiteBalanceSettleTimer.current = undefined;
+      }
+      setWhiteBalanceInteracting(false);
+      setRenderedRecipe(undefined);
+      patchSelected(next);
+    },
+    [patchSelected],
+  );
+
+  const scheduleWhiteBalancePreview = useCallback(
+    (axis: "temperature" | "tint", input: HTMLInputElement) => {
+      const value = Number(input.value);
+      const output = axis === "temperature" ? temperatureInput : tintInput;
+      if (output.current) output.current.value = String(value);
+      setWhiteBalanceInteracting(true);
+      setRenderedRecipe(undefined);
+      patchSelected({ [axis]: value });
+      if (whiteBalanceSettleTimer.current !== undefined) {
+        window.clearTimeout(whiteBalanceSettleTimer.current);
+      }
+      whiteBalanceSettleTimer.current = window.setTimeout(() => {
+        whiteBalanceSettleTimer.current = undefined;
+        setWhiteBalanceInteracting(false);
+      }, EXPOSURE_SETTLE_DELAY_MS);
+    },
+    [patchSelected],
+  );
+
+  const finishWhiteBalanceGesture = useCallback(() => {
+    if (whiteBalanceSettleTimer.current !== undefined) {
+      window.clearTimeout(whiteBalanceSettleTimer.current);
+      whiteBalanceSettleTimer.current = undefined;
+    }
+    setWhiteBalanceInteracting(false);
+  }, []);
 
   const releasePreview = useCallback(() => {
     decodedFileId.current = undefined;
@@ -691,12 +763,22 @@ export default function App() {
       if (
         result.fileId !== activeId ||
         result.ev !== ev ||
+        result.whiteBalance.temperature !== temperature ||
+        result.whiteBalance.tint !== tint ||
         decodedFileId.current !== result.fileId
       )
         return;
       const cached = lookThumbCache.current.get(result.fileId);
       const rendered =
-        cached?.ev === result.ev ? new Map(cached.images) : new Map();
+        cached?.recipe ===
+        basePreviewRecipeKey(
+          result.fileId,
+          result.ev,
+          result.whiteBalance.temperature,
+          result.whiteBalance.tint,
+        )
+          ? new Map(cached.images)
+          : new Map();
       const image = {
         bitmap: result.bitmap,
         width: result.width,
@@ -704,7 +786,12 @@ export default function App() {
       };
       rendered.set(result.lutId, image);
       rememberCacheEntry(lookThumbCache.current, result.fileId, {
-        ev: result.ev,
+        recipe: basePreviewRecipeKey(
+          result.fileId,
+          result.ev,
+          result.whiteBalance.temperature,
+          result.whiteBalance.tint,
+        ),
         images: rendered,
       });
       startTransition(() => {
@@ -715,7 +802,7 @@ export default function App() {
         });
       });
     });
-  }, [client, activeId, ev]);
+  }, [client, activeId, ev, temperature, tint]);
 
   useEffect(
     () => () => {
@@ -730,7 +817,13 @@ export default function App() {
   useEffect(() => {
     if (!active || !activeLut) return;
     let running = true;
-    const decodeRecipe = previewRecipeKey(active.id, ev, activeLut.id);
+    const decodeRecipe = previewRecipeKey(
+      active.id,
+      ev,
+      temperature,
+      tint,
+      activeLut.id,
+    );
     const cachedDisplay = previewCache.current.get(active.id);
     if (cachedDisplay) {
       rememberPreviewCacheEntry(previewCache.current, active.id, cachedDisplay);
@@ -756,7 +849,12 @@ export default function App() {
         preview: displayed,
       });
       decodedFileId.current = active.id;
-      settledBaseRecipe.current = basePreviewRecipeKey(active.id, ev);
+      settledBaseRecipe.current = basePreviewRecipeKey(
+        active.id,
+        ev,
+        temperature,
+        tint,
+      );
       if (pendingExposure.current === ev)
         exposureHasPendingRecipe.current = false;
       setRenderedRecipe(decodeRecipe);
@@ -778,7 +876,7 @@ export default function App() {
       performance.mark("lutify:file-read", {
         detail: { durationMs: performance.now() - fileReadStartedAt },
       });
-      return client.decode(active.id, buffer, ev, activeLut);
+      return client.decode(active.id, buffer, ev, whiteBalance, activeLut);
     };
 
     const prepare = async () => {
@@ -794,13 +892,24 @@ export default function App() {
       decodedFileId.current = active.id;
       setSourceTick((tick) => tick + 1);
       if (cachedDisplay?.recipe === decodeRecipe) {
-        settledBaseRecipe.current = basePreviewRecipeKey(active.id, ev);
+        settledBaseRecipe.current = basePreviewRecipeKey(
+          active.id,
+          ev,
+          temperature,
+          tint,
+        );
         return;
       }
-      const result = await client.render(active.id, ev, activeLut, {
-        maxEdge: SETTLED_PREVIEW_MAX_EDGE,
-        includeBase: true,
-      });
+      const result = await client.render(
+        active.id,
+        ev,
+        whiteBalance,
+        activeLut,
+        {
+          maxEdge: SETTLED_PREVIEW_MAX_EDGE,
+          includeBase: true,
+        },
+      );
       if (!("lut" in result)) {
         throw new Error("The settled Preview returned an interaction bitmap.");
       }
@@ -868,7 +977,13 @@ export default function App() {
       (exposureHasPendingRecipe.current && pendingExposure.current !== ev)
     )
       return;
-    const recipe = previewRecipeKey(active.id, ev, activeLut.id);
+    const recipe = previewRecipeKey(
+      active.id,
+      ev,
+      temperature,
+      tint,
+      activeLut.id,
+    );
     if (renderedRecipe === recipe) return;
     const generation = ++nextPreviewGeneration.current;
     desiredPreview.current = {
@@ -876,11 +991,11 @@ export default function App() {
       fileId: active.id,
       lutId: activeLut.id,
     };
-    const baseRecipe = basePreviewRecipeKey(active.id, ev);
+    const baseRecipe = basePreviewRecipeKey(active.id, ev, temperature, tint);
     const includeBase = settledBaseRecipe.current !== baseRecipe;
     const lookInteracting = interactionLookRecipe === recipe;
     const maxEdge =
-      exposureInteracting || lookInteracting
+      exposureInteracting || whiteBalanceInteracting || lookInteracting
         ? INTERACTION_PREVIEW_MAX_EDGE
         : SETTLED_PREVIEW_MAX_EDGE;
     const settlesRecipe = maxEdge === SETTLED_PREVIEW_MAX_EDGE;
@@ -889,10 +1004,16 @@ export default function App() {
       previewRendersInFlight.current += 1;
       exposureRenderBusy.current = true;
       try {
-        const frame = await client.render(active.id, ev, activeLut, {
-          maxEdge,
-          includeBase,
-        });
+        const frame = await client.render(
+          active.id,
+          ev,
+          whiteBalance,
+          activeLut,
+          {
+            maxEdge,
+            includeBase,
+          },
+        );
         const desired = desiredPreview.current;
         if (
           desired?.fileId === active.id &&
@@ -947,12 +1068,15 @@ export default function App() {
   }, [
     client,
     ev,
+    temperature,
+    tint,
     renderedRecipe,
     active?.id,
     active?.status,
     activeLut?.id,
     sourceTick,
     exposureInteracting,
+    whiteBalanceInteracting,
     interactionLookRecipe,
     schedulePendingExposureRender,
   ]);
@@ -975,12 +1099,13 @@ export default function App() {
       return;
     const renderedThumbs = lookThumbCache.current.get(active.id);
     const completed =
-      renderedThumbs?.ev === ev
+      renderedThumbs?.recipe ===
+      basePreviewRecipeKey(active.id, ev, temperature, tint)
         ? renderedThumbs.images
         : new Map<string, LookThumbImage>();
     if (completed.size === manifest.luts.length) return;
     const fileId = active.id;
-    const recipe = `${fileId}\n${ev}`;
+    const recipe = basePreviewRecipeKey(fileId, ev, temperature, tint);
     if (failedThumbRecipe.current === recipe) return;
     const missingLuts = manifest.luts.filter(({ id }) => !completed.has(id));
     const luts = [
@@ -989,7 +1114,7 @@ export default function App() {
     ];
     thumbBusy.current = true;
     void client
-      .renderLooks(fileId, ev, luts, THUMB_MAX_EDGE)
+      .renderLooks(fileId, ev, whiteBalance, luts, THUMB_MAX_EDGE)
       .catch(() => {
         failedThumbRecipe.current = recipe;
       })
@@ -1004,6 +1129,8 @@ export default function App() {
     active,
     activeLut,
     ev,
+    temperature,
+    tint,
     exporting,
     isPreviewProcessing,
     thumbs,
@@ -1043,12 +1170,34 @@ export default function App() {
     }
   }, [ev]);
 
+  useEffect(() => {
+    if (
+      temperatureInput.current &&
+      document.activeElement !== temperatureInput.current
+    ) {
+      temperatureInput.current.value = String(temperature);
+    }
+    if (temperatureRange.current) {
+      temperatureRange.current.value = String(temperature);
+      temperatureRange.current.setAttribute("aria-valuetext", `${temperature}`);
+    }
+    if (tintInput.current && document.activeElement !== tintInput.current) {
+      tintInput.current.value = String(tint);
+    }
+    if (tintRange.current) {
+      tintRange.current.value = String(tint);
+      tintRange.current.setAttribute("aria-valuetext", `${tint}`);
+    }
+  }, [temperature, tint]);
+
   useEffect(
     () => () => {
       if (exposureCommitTimer.current !== undefined)
         window.clearTimeout(exposureCommitTimer.current);
       if (exposureSettleTimer.current !== undefined)
         window.clearTimeout(exposureSettleTimer.current);
+      if (whiteBalanceSettleTimer.current !== undefined)
+        window.clearTimeout(whiteBalanceSettleTimer.current);
     },
     [],
   );
@@ -1067,6 +1216,8 @@ export default function App() {
           file,
           status: "queued",
           ev: 0,
+          temperature: 0,
+          tint: 0,
           lutId: DEFAULT_LUT_ID,
           thumbUrl: filmstripThumbUrls.current.get(id),
         });
@@ -1212,6 +1363,7 @@ export default function App() {
             item.id,
             await item.file.arrayBuffer(),
             item.ev,
+            { temperature: item.temperature, tint: item.tint },
             item.baseEv,
             lut,
             outputFormat,
@@ -1226,6 +1378,8 @@ export default function App() {
               baseEv: exported.baseEv,
               userEv: item.ev,
               effectiveEv: exported.baseEv + item.ev,
+              temperature: item.temperature,
+              tint: item.tint,
             },
           });
         } catch (error) {
@@ -1665,6 +1819,124 @@ export default function App() {
                     <span>−4</span>
                     <span>0</span>
                     <span>+4</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="panel panel--white-balance">
+                <div className="panel__head">
+                  <div className="panel__heading">
+                    <span className="panel__title">White Balance</span>
+                    <span className="panel__status">
+                      As Shot
+                      {selectedIds.size > 1
+                        ? ` · ${selectedIds.size} photos${mixedWhiteBalance ? " · mixed" : ""}`
+                        : ""}
+                    </span>
+                  </div>
+                  <Button
+                    size="icon"
+                    variant="quiet"
+                    aria-label="Reset white balance"
+                    onClick={() => setWhiteBalance({ temperature: 0, tint: 0 })}
+                    disabled={
+                      exporting ||
+                      !active ||
+                      (!mixedWhiteBalance && temperature === 0 && tint === 0)
+                    }
+                  >
+                    <RotateCcw size={15} aria-hidden="true" />
+                  </Button>
+                </div>
+                <div className="white-balance">
+                  <div className="white-balance__row">
+                    <label htmlFor="temperature">Temp</label>
+                    <input
+                      ref={temperatureRange}
+                      id="temperature"
+                      className="chromatic-range chromatic-range--temperature"
+                      type="range"
+                      aria-label="White balance temperature"
+                      min="-100"
+                      max="100"
+                      step="1"
+                      defaultValue={temperature}
+                      aria-valuetext={`${temperature}`}
+                      disabled={exporting || !active}
+                      onInput={(event) =>
+                        scheduleWhiteBalancePreview(
+                          "temperature",
+                          event.currentTarget,
+                        )
+                      }
+                      onPointerUp={finishWhiteBalanceGesture}
+                      onPointerCancel={finishWhiteBalanceGesture}
+                      onBlur={finishWhiteBalanceGesture}
+                    />
+                    <input
+                      ref={temperatureInput}
+                      className="white-balance__value"
+                      aria-label="White balance temperature value"
+                      type="number"
+                      min="-100"
+                      max="100"
+                      step="1"
+                      defaultValue={temperature}
+                      disabled={exporting || !active}
+                      onChange={(event) => {
+                        const value = event.currentTarget.valueAsNumber;
+                        if (Number.isFinite(value)) {
+                          setWhiteBalance({
+                            temperature: clamp(value, -100, 100),
+                          });
+                        }
+                      }}
+                      onBlur={(event) => {
+                        event.currentTarget.value = String(temperature);
+                      }}
+                    />
+                  </div>
+                  <div className="white-balance__row">
+                    <label htmlFor="tint">Tint</label>
+                    <input
+                      ref={tintRange}
+                      id="tint"
+                      className="chromatic-range chromatic-range--tint"
+                      type="range"
+                      aria-label="White balance tint"
+                      min="-100"
+                      max="100"
+                      step="1"
+                      defaultValue={tint}
+                      aria-valuetext={`${tint}`}
+                      disabled={exporting || !active}
+                      onInput={(event) =>
+                        scheduleWhiteBalancePreview("tint", event.currentTarget)
+                      }
+                      onPointerUp={finishWhiteBalanceGesture}
+                      onPointerCancel={finishWhiteBalanceGesture}
+                      onBlur={finishWhiteBalanceGesture}
+                    />
+                    <input
+                      ref={tintInput}
+                      className="white-balance__value"
+                      aria-label="White balance tint value"
+                      type="number"
+                      min="-100"
+                      max="100"
+                      step="1"
+                      defaultValue={tint}
+                      disabled={exporting || !active}
+                      onChange={(event) => {
+                        const value = event.currentTarget.valueAsNumber;
+                        if (Number.isFinite(value)) {
+                          setWhiteBalance({ tint: clamp(value, -100, 100) });
+                        }
+                      }}
+                      onBlur={(event) => {
+                        event.currentTarget.value = String(tint);
+                      }}
+                    />
                   </div>
                 </div>
               </div>

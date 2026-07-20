@@ -13,6 +13,8 @@ mod image;
 #[cfg(not(target_arch = "wasm32"))]
 mod pipeline;
 mod tiff;
+#[cfg(not(target_arch = "wasm32"))]
+mod white_balance;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use c_api::{LutifyBuffer, LutifyRenderResult, LutifyStatus};
@@ -20,6 +22,8 @@ pub use cube::Lut3d;
 pub use error::{LutifyError, Result};
 #[cfg(not(target_arch = "wasm32"))]
 pub use pipeline::ColorPipeline;
+#[cfg(not(target_arch = "wasm32"))]
+pub use white_balance::WhiteBalance;
 
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 mod wasm;

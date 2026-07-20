@@ -130,6 +130,7 @@ interface Runtime {
 export interface TiledAahdColor {
   renderer: WebGpuColorRenderer;
   ev: number;
+  whiteBalance: Float32Array;
 }
 
 interface SparsePreprocessingResult {
@@ -361,6 +362,7 @@ export async function demosaicLibRawAahdTiledWithWgsl(
           workspace.resources[3],
           tile.coreWidth * tile.coreHeight,
           color.ev,
+          color.whiteBalance,
         );
         output = workspace.resources[3];
       }

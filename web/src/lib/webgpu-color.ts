@@ -10,6 +10,7 @@ import {
   type WebGpuRuntime,
   writePaddedBuffer,
 } from "./webgpu-runtime";
+import { writeWhiteBalanceUniform } from "./white-balance";
 
 export type { GpuLut } from "./webgpu-lut";
 
@@ -29,7 +30,7 @@ const pipelinePromises = new WeakMap<GPUDevice, Promise<GPUComputePipeline>>();
 /** Persistent WebGPU resources for the current parsed LUT. */
 export class WebGpuColorRenderer {
   readonly preferredBatchSamples = 4_000_000;
-  private readonly parameters = new ArrayBuffer(48);
+  private readonly parameters = new ArrayBuffer(96);
   private readonly parameterView = new DataView(this.parameters);
 
   private constructor(
@@ -72,7 +73,7 @@ export class WebGpuColorRenderer {
     try {
       lutLease = acquirePreparedGpuLut(device, lut);
       const parameterBuffer = device.createBuffer({
-        size: 48,
+        size: 96,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
       buffers.push(parameterBuffer);
@@ -94,7 +95,11 @@ export class WebGpuColorRenderer {
     }
   }
 
-  async renderStrip(source: Uint16Array, ev: number): Promise<WebGpuStrip> {
+  async renderStrip(
+    source: Uint16Array,
+    ev: number,
+    whiteBalance: Float32Array,
+  ): Promise<WebGpuStrip> {
     this.runtime.assertAvailable();
     if (source.length % 3 !== 0) {
       throw new Error("WebGPU color input must contain complete RGB pixels.");
@@ -122,7 +127,7 @@ export class WebGpuColorRenderer {
       buffers.push(readbackBuffer);
       const uploadStartedAt = performance.now();
       writePaddedBuffer(this.runtime.device, sourceBuffer, source, packedBytes);
-      this.writeParameters(pixelCount, ev);
+      this.writeParameters(pixelCount, ev, whiteBalance);
       const uploadMs = performance.now() - uploadStartedAt;
       const commands = this.runtime.device.createCommandEncoder();
       this.encode(commands, sourceBuffer, destinationBuffer, pixelCount);
@@ -162,20 +167,26 @@ export class WebGpuColorRenderer {
     destination: GPUBuffer,
     pixelCount: number,
     ev: number,
+    whiteBalance: Float32Array,
   ): void {
     this.runtime.assertAvailable();
     if (!Number.isInteger(pixelCount) || pixelCount <= 0) {
       throw new Error("WebGPU color requires a positive pixel count.");
     }
-    this.writeParameters(pixelCount, ev);
+    this.writeParameters(pixelCount, ev, whiteBalance);
     const commands = this.runtime.device.createCommandEncoder();
     this.encode(commands, source, destination, pixelCount);
     this.runtime.device.queue.submit([commands.finish()]);
   }
 
-  private writeParameters(pixelCount: number, ev: number): void {
+  private writeParameters(
+    pixelCount: number,
+    ev: number,
+    whiteBalance: Float32Array,
+  ): void {
     this.parameterView.setFloat32(0, 2 ** ev, true);
     this.parameterView.setUint32(8, pixelCount, true);
+    writeWhiteBalanceUniform(this.parameterView, 48, whiteBalance);
     this.runtime.device.queue.writeBuffer(
       this.parameterBuffer,
       0,

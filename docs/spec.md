@@ -8,7 +8,7 @@ LUTify is a static browser application for local camera RAW processing. It provi
 
 - Process one or many RAW files entirely on the user's device.
 - Compare a neutral base rendering with a selected built-in V-Log Alchemy look.
-- Establish a useful per-photo exposure automatically, preserve manual EV adjustment, and export full-resolution 16-bit TIFF or Quality 95 JPEG files.
+- Establish a useful per-photo exposure automatically, preserve manual EV and relative white-balance adjustments, and export full-resolution 16-bit TIFF or Quality 95 JPEG files.
 - Provide the same corrected color pipeline to browser WASM and a native CLI.
 - Make numerical assumptions, unsupported inputs, and failures explicit.
 
@@ -21,7 +21,7 @@ LUTify is a static browser application for local camera RAW processing. It provi
 
 ## User journey
 
-The user selects or drops RAW files, sees an embedded camera preview while the selected file decodes, receives a useful scene-metered rendering, searches or chooses a built-in look, adjusts EV, compares Base and LUT previews, and exports either the selected file or the queue. Batch export processes one eligible file at a time, reports progress, can stop after the current file, and downloads one ZIP with completed files.
+The user selects or drops RAW files, sees an embedded camera preview while the selected file decodes, receives a useful scene-metered rendering, searches or chooses a built-in look, adjusts EV and white balance, compares Base and LUT previews, and exports either the selected file or the queue. Batch export processes one eligible file at a time, reports progress, can stop after the current file, and downloads one ZIP with completed files.
 
 Invalid RAW files, malformed LUTs, hash mismatches, and encoding failures stop the affected operation with a visible error. They never produce a successful placeholder output.
 
@@ -29,8 +29,8 @@ Invalid RAW files, malformed LUTs, hash mismatches, and encoding failures stop t
 
 - The application is deployable as static files and does not make photo upload requests.
 - The browser computes and caches one matrix-metered automatic EV baseline per photo; the visible adjustment is relative to that baseline.
-- Base preview is `LibRaw ProPhoto D65 Linear → automatic baseline + relative EV → neutral Reinhard shoulder → sRGB display`.
-- LUT preview and export are `LibRaw ProPhoto D65 Linear → automatic baseline + relative EV → V-Gamut D65 → V-Log → LUT → display, RGB16 TIFF, or Quality 95 JPEG`.
+- Base preview is `LibRaw ProPhoto D65 Linear → automatic baseline + relative EV → relative Bradford white balance → neutral Reinhard shoulder → sRGB display`.
+- LUT preview and export are `LibRaw ProPhoto D65 Linear → automatic baseline + relative EV → relative Bradford white balance → V-Gamut D65 → V-Log → LUT → display, RGB16 TIFF, or Quality 95 JPEG`.
 - V-Log preserves negative values; only LUT lookup clamps to its declared domain.
 - Camera-Match Boost is off in corrected-v2.
 - Full-resolution export writes either uncompressed RGB16 TIFF or 8-bit JPEG at quality 95.

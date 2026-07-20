@@ -15,6 +15,10 @@ export interface QueueItem {
   status: QueueStatus;
   /** Exposure compensation applied to this photo, in EV. */
   ev: number;
+  /** Relative warm/cool adjustment; zero preserves As Shot. */
+  temperature: number;
+  /** Relative green/magenta adjustment; zero preserves As Shot. */
+  tint: number;
   /** Scene-dependent automatic exposure measured once from the linear Preview. */
   baseEv?: number;
   /** Selected built-in look for this photo. */
@@ -24,6 +28,11 @@ export interface QueueItem {
   error?: string;
   /** Filmstrip thumbnail URL from the camera thumbnail or processed Preview. */
   thumbUrl?: string;
+}
+
+export interface WhiteBalanceValues {
+  temperature: number;
+  tint: number;
 }
 
 export interface LutDefinition {
@@ -147,6 +156,7 @@ export interface CameraPreview {
 export interface LookPreviewResult {
   fileId: string;
   ev: number;
+  whiteBalance: WhiteBalanceValues;
   lutId: string;
   width: number;
   height: number;
@@ -185,6 +195,7 @@ export type WorkerCommand =
       fileId: string;
       buffer: ArrayBuffer;
       ev: number;
+      whiteBalance: WhiteBalanceValues;
       lut: LutDefinition;
     }
   | {
@@ -192,6 +203,7 @@ export type WorkerCommand =
       type: "render";
       fileId: string;
       ev: number;
+      whiteBalance: WhiteBalanceValues;
       lut: LutDefinition;
       maxEdge: number;
       includeBase: boolean;
@@ -201,6 +213,7 @@ export type WorkerCommand =
       type: "render-looks";
       fileId: string;
       ev: number;
+      whiteBalance: WhiteBalanceValues;
       luts: LutDefinition[];
       maxEdge: number;
     }
@@ -210,6 +223,7 @@ export type WorkerCommand =
       fileId: string;
       buffer: ArrayBuffer;
       ev: number;
+      whiteBalance: WhiteBalanceValues;
       baseEv?: number;
       lut: LutDefinition;
       format: OutputFormat;

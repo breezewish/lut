@@ -11,6 +11,8 @@ pub enum LutifyError {
     ImageTooLarge,
     #[error("EV must be finite and within -12..=12")]
     InvalidExposure,
+    #[error("white balance temperature and tint must be finite and within -100..=100")]
+    InvalidWhiteBalance,
     #[error("preview max edge must be non-zero")]
     InvalidPreviewSize,
     #[error("CUBE line {line}: {message}")]

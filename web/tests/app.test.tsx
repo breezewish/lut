@@ -377,7 +377,45 @@ test("selects the first photo and preloads later filmstrip thumbnails", async ()
   ).toHaveLength(1);
 });
 
-test("renders the main preview only after the exposure recipe changes", async () => {
+test("applies white balance to every selected photo and resets mixed values", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    () => new Promise<Response>(() => {}),
+  );
+
+  const { container } = render(<App />);
+  const first = new File(["first"], "first.dng", { lastModified: 1 });
+  const second = new File(["second"], "second.dng", { lastModified: 2 });
+  fireEvent.change(container.querySelector('input[type="file"]')!, {
+    target: { files: [first, second] },
+  });
+
+  const firstPhoto = screen.getByRole("button", { name: /^first\.dng/ });
+  const secondPhoto = screen.getByRole("button", { name: /^second\.dng/ });
+  fireEvent.pointerDown(secondPhoto, { button: 0, ctrlKey: true });
+  const temperature = screen.getByRole("slider", {
+    name: "White balance temperature",
+  });
+  fireEvent.input(temperature, { target: { value: "37" } });
+
+  fireEvent.pointerDown(firstPhoto, { button: 0 });
+  await waitFor(() => expect(temperature).toHaveValue("37"));
+  fireEvent.change(
+    screen.getByRole("spinbutton", {
+      name: "White balance temperature value",
+    }),
+    { target: { value: "12" } },
+  );
+  fireEvent.pointerDown(secondPhoto, { button: 0, ctrlKey: true });
+  expect(screen.getByText(/As Shot · 2 photos · mixed/)).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "Reset white balance" }));
+  fireEvent.pointerDown(firstPhoto, { button: 0 });
+  await waitFor(() => expect(temperature).toHaveValue("0"));
+  fireEvent.pointerDown(secondPhoto, { button: 0 });
+  await waitFor(() => expect(temperature).toHaveValue("0"));
+});
+
+test("renders the main preview only after the adjustment recipe changes", async () => {
   const manifest = {
     ...MANIFEST,
     luts: [
@@ -396,6 +434,7 @@ test("renders the main preview only after the exposure recipe changes", async ()
     type: "clear" | "decode" | "render" | "export";
     fileId?: string;
     ev?: number;
+    whiteBalance?: { temperature: number; tint: number };
     maxEdge?: number;
     includeBase?: boolean;
     lut?: { id: string };
@@ -629,6 +668,38 @@ test("renders the main preview only after the exposure recipe changes", async ()
   );
   RecipeWorker.instance.replyToRender(8);
   await waitFor(() => expect(exportButton).toBeEnabled());
+
+  const temperature = screen.getByRole("slider", {
+    name: "White balance temperature",
+  });
+  expect(temperature).toHaveClass(
+    "chromatic-range",
+    "chromatic-range--temperature",
+  );
+  fireEvent.input(temperature, { target: { value: "42" } });
+  expect(exportButton).toBeDisabled();
+  await waitFor(() =>
+    expect(mainRenders()[9]).toEqual(
+      expect.objectContaining({
+        whiteBalance: { temperature: 42, tint: 0 },
+        maxEdge: 256,
+        includeBase: true,
+      }),
+    ),
+  );
+  fireEvent.pointerUp(temperature);
+  RecipeWorker.instance.replyToRender(9);
+  await waitFor(() =>
+    expect(mainRenders()[10]).toEqual(
+      expect.objectContaining({
+        whiteBalance: { temperature: 42, tint: 0 },
+        maxEdge: 1024,
+        includeBase: true,
+      }),
+    ),
+  );
+  RecipeWorker.instance.replyToRender(10);
+  await waitFor(() => expect(exportButton).toBeEnabled());
 });
 
 test("reuses a decoded photo when switching back to it", async () => {
@@ -637,6 +708,7 @@ test("reuses a decoded photo when switching back to it", async () => {
     type: "activate" | "clear" | "decode" | "render" | "export";
     fileId?: string;
     ev?: number;
+    whiteBalance?: { temperature: number; tint: number };
     maxEdge?: number;
     includeBase?: boolean;
   };
@@ -782,6 +854,7 @@ test("rerenders every look thumbnail after exposure changes", async () => {
       | "export";
     fileId?: string;
     ev?: number;
+    whiteBalance?: { temperature: number; tint: number };
     maxEdge?: number;
     includeBase?: boolean;
     lut?: { id: string };
@@ -852,6 +925,7 @@ test("rerenders every look thumbnail after exposure changes", async () => {
               result: {
                 fileId: command.fileId,
                 ev: command.ev,
+                whiteBalance: command.whiteBalance,
                 lutId: lut.id,
                 width: 1,
                 height: 1,

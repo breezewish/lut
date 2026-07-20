@@ -5,6 +5,9 @@ struct Parameters {
   _padding: u32,
   domain_min: vec4f,
   inverse_domain_range: vec4f,
+  white_balance_0: vec4f,
+  white_balance_1: vec4f,
+  white_balance_2: vec4f,
 }
 
 @group(0) @binding(0) var<storage, read> source: array<u32>;
@@ -73,10 +76,15 @@ fn tetrahedral_sample(rgb: vec3f) -> vec3f {
 }
 
 fn render_pixel(rgb: vec3f) -> vec3u {
+  let balanced = vec3f(
+    dot(parameters.white_balance_0.xyz, rgb),
+    dot(parameters.white_balance_1.xyz, rgb),
+    dot(parameters.white_balance_2.xyz, rgb),
+  );
   let linear = vec3f(
-    1.1159087 * rgb.x + (-0.042472865 * rgb.y + -0.073432505 * rgb.z),
-    -0.02851772 * rgb.x + (0.93679124 * rgb.y + 0.09172473 * rgb.z),
-    0.01285477 * rgb.x + (-0.008144919 * rgb.y + 0.9952912 * rgb.z),
+    1.1159087 * balanced.x + (-0.042472865 * balanced.y + -0.073432505 * balanced.z),
+    -0.02851772 * balanced.x + (0.93679124 * balanced.y + 0.09172473 * balanced.z),
+    0.01285477 * balanced.x + (-0.008144919 * balanced.y + 0.9952912 * balanced.z),
   );
   let encoded = vec3f(
     encode_v_log(linear.x),

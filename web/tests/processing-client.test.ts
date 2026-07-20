@@ -16,6 +16,7 @@ const lut: LutDefinition = {
   file: "look.cube",
   sha256: "00",
 };
+const AS_SHOT = { temperature: 0, tint: 0 } as const;
 
 const exportTimings: ExportTimings = {
   libraw: {
@@ -139,12 +140,13 @@ test("publishes each look thumbnail before its Worker batch finishes", async () 
   const onLookPreview = vi.fn();
   client.onLookPreview(onLookPreview);
 
-  const rendering = client.renderLooks("one", 1, [lut], 132);
+  const rendering = client.renderLooks("one", 1, AS_SHOT, [lut], 132);
   const command = ControlledWorker.instance.messages[0];
   expect(command).toMatchObject({
     type: "render-looks",
     fileId: "one",
     ev: 1,
+    whiteBalance: AS_SHOT,
     luts: [lut],
     maxEdge: 132,
   });
@@ -156,6 +158,7 @@ test("publishes each look thumbnail before its Worker batch finishes", async () 
     result: {
       fileId: "one",
       ev: 1,
+      whiteBalance: AS_SHOT,
       lutId: lut.id,
       width: 1,
       height: 1,
@@ -165,6 +168,7 @@ test("publishes each look thumbnail before its Worker batch finishes", async () 
   expect(onLookPreview).toHaveBeenCalledWith({
     fileId: "one",
     ev: 1,
+    whiteBalance: AS_SHOT,
     lutId: lut.id,
     width: 1,
     height: 1,
@@ -186,10 +190,10 @@ test("supersedes queued exposure renders with the latest request", async () => {
   vi.stubGlobal("Worker", ControlledWorker);
   const client = new ProcessingClient();
 
-  const first = client.render("one", 0.1, lut);
-  const superseded = client.render("one", 0.2, lut);
+  const first = client.render("one", 0.1, AS_SHOT, lut);
+  const superseded = client.render("one", 0.2, AS_SHOT, lut);
   const supersededOutcome = superseded.catch((error: Error) => error);
-  const latest = client.render("one", 0.3, lut);
+  const latest = client.render("one", 0.3, AS_SHOT, lut);
 
   expect(
     ControlledWorker.instance.messages.map((message) => [
@@ -240,13 +244,13 @@ test("decode rejects an unsent render instead of dispatching stale exposure", as
   const onPreviewFrame = vi.fn();
   client.onPreviewFrame(onPreviewFrame);
 
-  const rendering = client.render("one", 0.1, lut);
-  const staleRender = client.render("one", 0.2, lut);
+  const rendering = client.render("one", 0.1, AS_SHOT, lut);
+  const staleRender = client.render("one", 0.2, AS_SHOT, lut);
   const staleOutcome = staleRender.then(
     () => "resolved",
     () => "rejected",
   );
-  const decoding = client.decode("two", new ArrayBuffer(1), 0, lut);
+  const decoding = client.decode("two", new ArrayBuffer(1), 0, AS_SHOT, lut);
 
   expect(
     ControlledWorker.instance.messages.map((message) => message.type),
@@ -290,8 +294,8 @@ test("clear rejects an unsent render instead of dispatching stale exposure", asy
   vi.stubGlobal("Worker", ControlledWorker);
   const client = new ProcessingClient();
 
-  const rendering = client.render("one", 0.1, lut);
-  const staleRender = client.render("one", 0.2, lut);
+  const rendering = client.render("one", 0.1, AS_SHOT, lut);
+  const staleRender = client.render("one", 0.2, AS_SHOT, lut);
   const staleOutcome = staleRender.then(
     () => "resolved",
     () => "rejected",
@@ -326,8 +330,8 @@ test("export rejects an unsent render instead of dispatching stale exposure", as
   vi.stubGlobal("Worker", ControlledWorker);
   const client = new ProcessingClient();
 
-  const rendering = client.render("one", 0.1, lut);
-  const staleRender = client.render("one", 0.2, lut);
+  const rendering = client.render("one", 0.1, AS_SHOT, lut);
+  const staleRender = client.render("one", 0.2, AS_SHOT, lut);
   const staleOutcome = staleRender.then(
     () => "resolved",
     () => "rejected",
@@ -336,6 +340,7 @@ test("export rejects an unsent render instead of dispatching stale exposure", as
     "one",
     new ArrayBuffer(1),
     0.3,
+    AS_SHOT,
     1.25,
     lut,
     "tiff",
@@ -357,6 +362,7 @@ test("export rejects an unsent render instead of dispatching stale exposure", as
   expect(exportCommand).toMatchObject({
     type: "export",
     ev: 0.3,
+    whiteBalance: AS_SHOT,
     baseEv: 1.25,
     format: "tiff",
   });
@@ -387,8 +393,8 @@ test("dispose rejects both active and unsent renders", async () => {
   vi.stubGlobal("Worker", ControlledWorker);
   const client = new ProcessingClient();
 
-  const rendering = client.render("one", 0.1, lut);
-  const staleRender = client.render("one", 0.2, lut);
+  const rendering = client.render("one", 0.1, AS_SHOT, lut);
+  const staleRender = client.render("one", 0.2, AS_SHOT, lut);
   const renderingOutcome = rendering.catch((error: Error) => error);
   const staleOutcome = staleRender.catch((error: Error) => error);
   client.dispose();
@@ -420,9 +426,9 @@ test("rejects every pending request when the Worker crashes", async () => {
   }
   vi.stubGlobal("Worker", CrashingWorker);
   const client = new ProcessingClient();
-  const first = client.decode("one", new ArrayBuffer(1), 0, lut);
-  const second = client.render("one", 1, lut);
-  const third = client.render("one", 2, lut);
+  const first = client.decode("one", new ArrayBuffer(1), 0, AS_SHOT, lut);
+  const second = client.render("one", 1, AS_SHOT, lut);
+  const third = client.render("one", 2, AS_SHOT, lut);
 
   CrashingWorker.instance.onerror?.(
     new ErrorEvent("error", { message: "worker crashed" }),

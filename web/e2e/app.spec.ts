@@ -466,6 +466,10 @@ test("exports a full-resolution Quality 95 JPEG", async ({ page }) => {
     timeout: 20_000,
   });
 
+  await page
+    .getByRole("slider", { name: "White balance temperature" })
+    .fill("42");
+  await page.getByRole("slider", { name: "White balance tint" }).fill("-58");
   await page.getByLabel("Export format").selectOption("jpeg");
   const exportButton = page.getByRole("button", {
     name: "Export selected as JPEG",
@@ -1124,6 +1128,12 @@ test("short desktop viewports keep export in view", async ({ page }) => {
   const exportButton = page.getByRole("button", {
     name: "Export selected as TIFF",
   });
+  await expect(
+    page.getByRole("slider", { name: "White balance temperature" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("slider", { name: "White balance tint" }),
+  ).toBeVisible();
   await expect(exportButton).toBeInViewport();
 });
 
@@ -1212,9 +1222,18 @@ test("supports stable look discovery and keyboard-accessible comparison modes", 
   for (const input of [
     page.getByRole("spinbutton", { name: "Exposure value" }),
     page.getByRole("slider", { name: "Exposure" }),
+    page.getByRole("spinbutton", {
+      name: "White balance temperature value",
+    }),
+    page.getByRole("slider", { name: "White balance temperature" }),
+    page.getByRole("spinbutton", { name: "White balance tint value" }),
+    page.getByRole("slider", { name: "White balance tint" }),
   ]) {
     expect((await input.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   }
+  await expect(
+    page.getByRole("button", { name: "Export selected" }),
+  ).toBeVisible();
   await expect(page.locator('input[type="file"]')).toHaveAttribute(
     "tabindex",
     "-1",

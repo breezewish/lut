@@ -1,11 +1,12 @@
 use crate::color::{LIBRAW_PROPHOTO_D65_TO_V_GAMUT, encode_v_log, multiply_matrix};
 use crate::image::checked_pixel_count;
-use crate::{Lut3d, LutifyError, Result, tiff};
+use crate::{Lut3d, LutifyError, Result, WhiteBalance, tiff};
 
 /// Immutable native corrected-v2 TIFF recipe.
 #[derive(Clone, Debug)]
 pub struct ColorPipeline {
     exposure_multiplier: f32,
+    white_balance: WhiteBalance,
     lut: Lut3d,
 }
 
@@ -17,12 +18,13 @@ impl ColorPipeline {
     ///
     /// Returns [`LutifyError::InvalidExposure`] when EV is not finite or is
     /// outside the supported range.
-    pub fn new(ev: f32, lut: Lut3d) -> Result<Self> {
+    pub fn new(ev: f32, white_balance: WhiteBalance, lut: Lut3d) -> Result<Self> {
         if !ev.is_finite() || !(-12.0..=12.0).contains(&ev) {
             return Err(LutifyError::InvalidExposure);
         }
         Ok(Self {
             exposure_multiplier: ev.exp2(),
+            white_balance,
             lut,
         })
     }
@@ -48,11 +50,12 @@ impl ColorPipeline {
     }
 
     fn input_pixel(&self, input: &[u16]) -> [f32; 3] {
-        [
+        let exposed = [
             f32::from(input[0]) / 65_535.0 * self.exposure_multiplier,
             f32::from(input[1]) / 65_535.0 * self.exposure_multiplier,
             f32::from(input[2]) / 65_535.0 * self.exposure_multiplier,
-        ]
+        ];
+        multiply_matrix(&self.white_balance.matrix, exposed)
     }
 
     fn render_lut(&self, linear_libraw_prophoto: [f32; 3]) -> [f32; 3] {
@@ -119,8 +122,8 @@ mod tests {
     #[test]
     fn exposure_supports_both_documented_boundaries() {
         let lut = Lut3d::parse(IDENTITY_2).unwrap();
-        let minimum = ColorPipeline::new(-12.0, lut.clone()).unwrap();
-        let maximum = ColorPipeline::new(12.0, lut).unwrap();
+        let minimum = ColorPipeline::new(-12.0, WhiteBalance::as_shot(), lut.clone()).unwrap();
+        let maximum = ColorPipeline::new(12.0, WhiteBalance::as_shot(), lut).unwrap();
         let pixels = [32_768; 3];
         let minimum_linear = minimum.input_pixel(&pixels);
         let maximum_linear = maximum.input_pixel(&pixels);
@@ -134,19 +137,19 @@ mod tests {
     fn rejects_invalid_dimensions_and_exposure() {
         let lut = Lut3d::parse(IDENTITY_2).unwrap();
         assert_eq!(
-            ColorPipeline::new(f32::NAN, lut.clone()).unwrap_err(),
+            ColorPipeline::new(f32::NAN, WhiteBalance::as_shot(), lut.clone()).unwrap_err(),
             LutifyError::InvalidExposure
         );
         assert_eq!(
-            ColorPipeline::new(f32::INFINITY, lut.clone()).unwrap_err(),
+            ColorPipeline::new(f32::INFINITY, WhiteBalance::as_shot(), lut.clone()).unwrap_err(),
             LutifyError::InvalidExposure
         );
         assert_eq!(
-            ColorPipeline::new(12.1, lut.clone()).unwrap_err(),
+            ColorPipeline::new(12.1, WhiteBalance::as_shot(), lut.clone()).unwrap_err(),
             LutifyError::InvalidExposure
         );
         assert!(matches!(
-            ColorPipeline::new(0.0, lut)
+            ColorPipeline::new(0.0, WhiteBalance::as_shot(), lut)
                 .unwrap()
                 .render_tiff(&[0; 3], 2, 1),
             Err(LutifyError::InvalidPixelCount { .. })
@@ -167,7 +170,8 @@ mod tests {
         let lut = Lut3d::parse(&reference.cube).unwrap();
 
         for case in reference.cases {
-            let pipeline = ColorPipeline::new(case.ev, lut.clone()).unwrap();
+            let pipeline =
+                ColorPipeline::new(case.ev, WhiteBalance::as_shot(), lut.clone()).unwrap();
             let encoded = pipeline
                 .render_tiff(&case.pixels, case.width, case.height)
                 .unwrap();

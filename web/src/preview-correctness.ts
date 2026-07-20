@@ -6,6 +6,7 @@ import {
   WebGpuPreviewRenderer,
   WebGpuPreviewSource,
 } from "./lib/webgpu-preview";
+import { whiteBalanceMatrix } from "./lib/white-balance";
 
 export function mountPreviewCorrectness(): void {
   document.body.dataset.benchmarkStatus = "running";
@@ -46,6 +47,7 @@ async function run() {
     try {
       const preview = await renderer.render(
         testCase.ev,
+        whiteBalanceMatrix({ temperature: 0, tint: 0 }),
         Math.max(testCase.width, testCase.height),
         true,
       );

@@ -2,7 +2,7 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
-use lutify_core::{ColorPipeline, Lut3d};
+use lutify_core::{ColorPipeline, Lut3d, WhiteBalance};
 
 #[derive(Debug, Parser)]
 #[command(name = "lutify", about = "Apply a V-Log Alchemy look to a camera RAW")]
@@ -17,6 +17,12 @@ struct Args {
     /// Exposure adjustment in stops.
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     ev: f32,
+    /// Relative warm/cool adjustment; zero preserves As Shot.
+    #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+    temperature: f32,
+    /// Relative green/magenta adjustment; zero preserves As Shot.
+    #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+    tint: f32,
     /// Message rendering format.
     #[arg(long, value_enum, default_value_t = Output::Text)]
     output: Output,
@@ -79,7 +85,10 @@ fn run(args: &Args, output: Output) -> Result<(), String> {
     let cube = std::fs::read_to_string(&args.lut)
         .map_err(|error| format!("could not read {}: {error}", args.lut.display()))?;
     let lut = Lut3d::parse(&cube).map_err(|error| error.to_string())?;
-    let pipeline = ColorPipeline::new(args.ev, lut).map_err(|error| error.to_string())?;
+    let white_balance =
+        WhiteBalance::new(args.temperature, args.tint).map_err(|error| error.to_string())?;
+    let pipeline =
+        ColorPipeline::new(args.ev, white_balance, lut).map_err(|error| error.to_string())?;
     let decoded = lutify_libraw::decode(&input, false).map_err(|_| {
         format!(
             "could not decode {}: the file may be damaged or its camera format may not be supported yet",

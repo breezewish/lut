@@ -6,6 +6,8 @@ import {
   renderImageInGpuStrips,
 } from "../src/lib/image-export";
 
+const AS_SHOT = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+
 test("streams rendered bands across fixed image strip boundaries", () => {
   const sizes = [6, 6, 0];
   const writes: Uint16Array[] = [];
@@ -61,10 +63,11 @@ test("batches GPU color independently from image encoder strips", async () => {
     encoder,
     renderer,
     0,
+    AS_SHOT,
   );
 
   expect(renderer.renderStrip).toHaveBeenCalledOnce();
-  expect(renderer.renderStrip).toHaveBeenCalledWith(source, 0);
+  expect(renderer.renderStrip).toHaveBeenCalledWith(source, 0, AS_SHOT);
   expect(writes).toEqual([
     new Uint16Array([1, 2, 3]),
     new Uint16Array([4, 5, 6]),
@@ -102,6 +105,7 @@ test("rejects a GPU batch that does not cover its source", async () => {
         }),
       },
       0,
+      AS_SHOT,
     ),
   ).rejects.toThrow("GPU output length differs from its input batch.");
   expect(encoder.write_rendered_strip).not.toHaveBeenCalled();

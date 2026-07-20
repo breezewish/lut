@@ -16,6 +16,7 @@ import {
   type WebGpuRuntime,
   writePaddedBuffer,
 } from "./webgpu-runtime";
+import { writeWhiteBalanceUniform } from "./white-balance";
 
 export interface WebGpuPreview {
   width: number;
@@ -128,7 +129,7 @@ export class WebGpuPreviewRenderer {
   private lutReadback: GPUBuffer;
   private workspaceBytes: number;
   private bindGroup: GPUBindGroup;
-  private readonly parameters = new ArrayBuffer(64);
+  private readonly parameters = new ArrayBuffer(112);
   private readonly parameterView = new DataView(this.parameters);
 
   private constructor(
@@ -175,7 +176,7 @@ export class WebGpuPreviewRenderer {
     try {
       const workspace = createWorkspace(device, outputBytes, buffers);
       const parameterBuffer = device.createBuffer({
-        size: 64,
+        size: 112,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
       buffers.push(parameterBuffer);
@@ -280,6 +281,7 @@ export class WebGpuPreviewRenderer {
 
   async render(
     ev: number,
+    whiteBalance: Float32Array,
     maxEdge: number,
     includeBase: boolean,
   ): Promise<WebGpuPreview> {
@@ -291,7 +293,14 @@ export class WebGpuPreviewRenderer {
     );
     const pixelCount = width * height;
     const outputBytes = pixelCount * Uint32Array.BYTES_PER_ELEMENT;
-    this.writeParameters(ev, width, height, pixelCount, includeBase);
+    this.writeParameters(
+      ev,
+      whiteBalance,
+      width,
+      height,
+      pixelCount,
+      includeBase,
+    );
 
     const commands = this.runtime.device.createCommandEncoder();
     const pass = commands.beginComputePass();
@@ -348,6 +357,7 @@ export class WebGpuPreviewRenderer {
 
   private writeParameters(
     ev: number,
+    whiteBalance: Float32Array,
     outputWidth: number,
     outputHeight: number,
     pixelCount: number,
@@ -367,6 +377,7 @@ export class WebGpuPreviewRenderer {
       view.setFloat32(32 + axis * 4, lut.domainMin[axis], true);
       view.setFloat32(48 + axis * 4, lut.inverseDomainRange[axis], true);
     }
+    writeWhiteBalanceUniform(view, 64, whiteBalance);
     this.runtime.device.queue.writeBuffer(
       this.parameterBuffer,
       0,

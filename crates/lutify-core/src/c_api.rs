@@ -1,6 +1,6 @@
 use std::ffi::{c_char, c_int};
 
-use crate::{ColorPipeline, Lut3d, LutifyError};
+use crate::{ColorPipeline, Lut3d, LutifyError, WhiteBalance};
 
 /// Stable status values returned by the C ABI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,6 +12,7 @@ pub enum LutifyStatus {
     InvalidImage = 3,
     InvalidExposure = 4,
     EncodingFailed = 5,
+    InvalidWhiteBalance = 6,
 }
 
 /// A Rust-owned byte allocation returned through the C ABI.
@@ -52,6 +53,8 @@ pub unsafe extern "C" fn lutify_render_tiff_v2(
     width: u32,
     height: u32,
     ev: f32,
+    temperature: f32,
+    tint: f32,
     cube: *const u8,
     cube_len: usize,
 ) -> LutifyRenderResult {
@@ -72,7 +75,11 @@ pub unsafe extern "C" fn lutify_render_tiff_v2(
         Ok(lut) => lut,
         Err(error) => return failed(status_for(&error)),
     };
-    let pipeline = match ColorPipeline::new(ev, lut) {
+    let white_balance = match WhiteBalance::new(temperature, tint) {
+        Ok(white_balance) => white_balance,
+        Err(error) => return failed(status_for(&error)),
+    };
+    let pipeline = match ColorPipeline::new(ev, white_balance, lut) {
         Ok(pipeline) => pipeline,
         Err(error) => return failed(status_for(&error)),
     };
@@ -113,6 +120,7 @@ pub extern "C" fn lutify_status_message(status: c_int) -> *const c_char {
         3 => b"invalid image dimensions or RGB16 length\0",
         4 => b"invalid exposure\0",
         5 => b"TIFF encoding failed\0",
+        6 => b"invalid white balance\0",
         _ => b"unknown LUTify status\0",
     };
     message.as_ptr().cast()
@@ -145,6 +153,7 @@ fn status_for(error: &LutifyError) -> LutifyStatus {
             LutifyStatus::InvalidCube
         }
         LutifyError::InvalidExposure => LutifyStatus::InvalidExposure,
+        LutifyError::InvalidWhiteBalance => LutifyStatus::InvalidWhiteBalance,
         LutifyError::TiffEncoding(_) => LutifyStatus::EncodingFailed,
         LutifyError::EmptyImage
         | LutifyError::InvalidPixelCount { .. }
@@ -171,6 +180,8 @@ mod tests {
                 1,
                 1,
                 0.0,
+                0.0,
+                0.0,
                 IDENTITY.as_ptr(),
                 IDENTITY.len(),
             )
@@ -191,6 +202,8 @@ mod tests {
                 0,
                 1,
                 1,
+                0.0,
+                0.0,
                 0.0,
                 IDENTITY.as_ptr(),
                 IDENTITY.len(),

@@ -6,7 +6,7 @@ The decoder accepts camera RAW bytes and either returns a three-channel RGB16 im
 
 ## Corrected-v2
 
-Exposure multiplies linear RGB by `2^EV`. The shared computation API accepts finite EV in `[-12, 12]`. The Base path converts ProPhoto D65 to linear sRGB, applies the hue-preserving luminance scale `1 / (1 + Y)`, clamps negative display values, and applies the sRGB transfer function.
+Exposure multiplies linear RGB by `2^EV`. The shared computation API accepts finite EV in `[-12, 12]`. Relative white balance then applies a Bradford chromatic-adaptation matrix in linear ProPhoto D65. Temperature and Tint each accept finite values in `[-100, 100]`; zero on both axes is the exact As Shot identity. Temperature shifts the 6504 K anchor by one mired per step. Tint shifts the Planckian locus by `-0.0005 Duv` per step. The Base path converts ProPhoto D65 to linear sRGB, applies the hue-preserving luminance scale `1 / (1 + Y)`, clamps negative display values, and applies the sRGB transfer function.
 
 The LUT path applies the fixed ProPhoto D65 to V-Gamut D65 matrix, Panasonic's piecewise V-Log formula including its negative-capable linear branch, lookup-domain clamping, and tetrahedral interpolation. Red is the fastest-changing CUBE axis. Camera-Match Boost is disabled.
 
@@ -26,4 +26,4 @@ The LUT input is verified as V-Gamut/V-Log with tetrahedral interpolation. Outpu
 
 ## Failure behavior
 
-Empty images, inconsistent dimensions, invalid exposure, malformed CUBE data, unsupported RAW files, non-finite values, and encoding failures are errors. No pipeline stage silently falls back or skips a failed LUT.
+Empty images, inconsistent dimensions, invalid exposure or white balance, malformed CUBE data, unsupported RAW files, non-finite values, and encoding failures are errors. No pipeline stage silently falls back or skips a failed LUT.

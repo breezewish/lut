@@ -2,13 +2,13 @@
 
 ## Introduction
 
-The system separates deterministic computation from presentation. Rust owns color processing and TIFF encoding. Pinned LibRaw and libjpeg-turbo builds own RAW decoding and JPEG encoding. TypeScript owns orchestration and UI state but performs no color mathematics.
+The system separates deterministic computation from presentation. WebGPU owns browser pixel color processing, while Rust owns the native reference pipeline and TIFF encoding. Pinned LibRaw and libjpeg-turbo builds own RAW decoding and JPEG encoding. TypeScript owns orchestration, UI state, and per-recipe white-balance matrix construction; it performs no per-pixel color work.
 
 ## Architecture
 
 The workspace contains three Rust crates:
 
-- `lutify-core`: CUBE parsing, exposure, fixed matrices, transfer functions, tetrahedral interpolation, previews, and TIFF encoding.
+- `lutify-core`: CUBE parsing, exposure, relative white balance, fixed matrices, transfer functions, tetrahedral interpolation, previews, and TIFF encoding.
 - `lutify-libraw`: a small safe Rust API over a pinned LibRaw C++ build.
 - `lutify-cli`: native RAW-to-TIFF product surface.
 
@@ -16,7 +16,7 @@ LUTify is distinct from upstream [RAW Alchemy](https://github.com/shenmintao/Raw
 
 The browser uses one Dedicated Worker. It hosts the regular LibRaw WASM build, a lazily loaded pthread build for proven parallel decoders, and the `lutify-core` WASM build. Commands are serialized. LibRaw's decoder identity and format metadata, rather than camera naming, select the pthread build for Fujifilm compressed, Panasonic C8, Canon CRX, Sony ARW2, and large 8–15-bit single-sample packed DNG input. The minimal project-owned wrapper exposes metadata, an optional copied JPEG thumbnail, image dimensions, sensor metadata, and bounds-checked views. Preview asks LibRaw to build only the display-sized source cells that contribute to a longest-edge-1024 result. Rust owns the row-resampling coordinates. WebGPU retains six recent RGB16 photo sources, one shared output/readback workspace, and a 32 MiB LRU of LUT uploads shared by Preview and Export. Removing a file releases only its resources; clearing the queue releases the complete photo cache.
 
-Initial decode uploads one longest-edge-1024 linear source, meters a per-photo automatic exposure baseline on WebGPU, and publishes a longest-edge-384 frame before the settled longest-edge-1024 frame. EV and LUT interactions publish a Worker-created 256px bitmap before refining at 1024px. Interactive rerenders use latest-wins scheduling: one render may run and at most one newer recipe waits, so obsolete slider values cannot form an unbounded Worker queue. LUT changes omit the unchanged Base pane. Rerenders neither copy the source image nor decode RAW again, and only the exact current 1024px recipe enables export.
+Initial decode uploads one longest-edge-1024 linear source, meters a per-photo automatic exposure baseline on WebGPU, and publishes a longest-edge-384 frame before the settled longest-edge-1024 frame. EV, white-balance, and LUT interactions publish a Worker-created 256px bitmap before refining at 1024px. Interactive rerenders use latest-wins scheduling: one render may run and at most one newer recipe waits, so obsolete slider values cannot form an unbounded Worker queue. LUT changes omit the unchanged Base pane. Rerenders neither copy the source image nor decode RAW again, and only the exact current 1024px recipe enables export.
 
 Full-resolution export reuses a Preview-unpacked sensor mosaic when a strict WebGPU demosaic input is compressed. Retained mosaics share one 64 MiB budget across the photo LRU; uncompressed input, evicted mosaics, and unsupported geometry decode on demand. Even, unrotated, standard three-color Bayer inputs use tiled WebGPU LibRaw-parity AAHD. Standard, unrotated three-color X-Trans inputs use tiled WebGPU LibRaw-parity three-pass Markesteijn. Other supported RAW contracts keep LibRaw's demosaic and geometry handling, then enter required WebGPU color through bounded zero-copy views. Every route streams rendered RGB16 strips into the selected encoder. Rust writes uncompressed TIFF strips; pinned libjpeg-turbo converts bounded strips to RGB8 scanlines and writes quality-95 JPEG data. Batch files enter a pass-through ZIP incrementally, avoiding contiguous archive copies while retaining only the final Blob chunks required by portable browser downloads.
 
@@ -28,7 +28,7 @@ Full-resolution export reuses a Preview-unpacked sensor mosaic when a strict Web
 - Browser and native LibRaw builds use source revision `0029e79482c3a133d3de72ff51117ca7d0a4ff43` and libjpeg-turbo revision `4e151a4ad91001b3aa8c2ece2205c15f487ce320`. Both use Blend highlight mode, camera white balance, AAHD, 16-bit output, linear gamma, and no auto-brightening.
 - Both LibRaw builds use signed `char`, define signed-integer overflow as two's-complement wrapping, and disable implicit floating-point contraction. They replace one pinned post-processing source unit with an otherwise identical local copy whose color-matrix dot products use explicit fused multiply-add order, and compile AAHD with a narrow override that promotes its float gamma-table power operation to double. These constraints remove compiler and C-library variation while preserving intentional fused operations. Defined wrapping is required because AAHD's gradient squares can exceed `int`; leaving that overflow undefined changes interpolation direction across targets.
 - The canonical core is single-threaded f32 WASM SIMD and never uses `fast-math`.
-- Browser Preview and Export use the same cached automatic baseline plus relative EV. They share the required WebGPU exposure, matrices, V-Log, and LUT interpolation contract. The independent Rust implementation remains a native test oracle and C/CLI surface; its EV is explicit and it is not exported as a browser preview or color fallback.
+- Browser Preview and Export use the same cached automatic baseline, relative EV, and relative Bradford white balance. They share the required WebGPU exposure, matrices, V-Log, and LUT interpolation contract. The independent Rust implementation remains a native test oracle and C/CLI surface; its recipe is explicit and it is not exported as a browser preview or color fallback.
 - TIFF output is uncompressed RGB16. JPEG output is 8-bit at quality 95. Neither route creates a full-size float or quantized intermediate image.
 - Full-resolution export holds one LibRaw-owned processed RGB16 image, one encoded output, and bounded source and quantized strip buffers at a time; JavaScript owns no complete decoded copy and no second full-image RGB16 allocation crosses into the color WASM.
 

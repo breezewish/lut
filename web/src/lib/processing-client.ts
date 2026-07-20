@@ -8,6 +8,7 @@ import type {
   PreviewResult,
   WorkerCommand,
   WorkerReply,
+  WhiteBalanceValues,
 } from "../types";
 
 type Pending = {
@@ -23,6 +24,7 @@ type PreviewPending = {
 type RenderBatch = {
   fileId: string;
   ev: number;
+  whiteBalance: WhiteBalanceValues;
   lut: LutDefinition;
   maxEdge: number;
   includeBase: boolean;
@@ -152,6 +154,7 @@ export class ProcessingClient {
     fileId: string,
     buffer: ArrayBuffer,
     ev: number,
+    whiteBalance: WhiteBalanceValues,
     lut: LutDefinition,
   ): Promise<DisplayPreviewResult> {
     this.rejectQueuedRender(
@@ -163,6 +166,7 @@ export class ProcessingClient {
         fileId,
         buffer,
         ev,
+        whiteBalance,
         lut,
       },
       [buffer],
@@ -182,6 +186,7 @@ export class ProcessingClient {
   render(
     fileId: string,
     ev: number,
+    whiteBalance: WhiteBalanceValues,
     lut: LutDefinition,
     options: PreviewRenderOptions = { maxEdge: 1_024, includeBase: true },
   ): Promise<DisplayPreviewResult> {
@@ -190,7 +195,14 @@ export class ProcessingClient {
     return new Promise((resolve, reject) => {
       const pending = { resolve, reject };
       if (!this.activeRender) {
-        this.startRender({ fileId, ev, lut, ...options, pending });
+        this.startRender({
+          fileId,
+          ev,
+          whiteBalance,
+          lut,
+          ...options,
+          pending,
+        });
         return;
       }
 
@@ -202,6 +214,7 @@ export class ProcessingClient {
       this.queuedRender = {
         fileId,
         ev,
+        whiteBalance,
         lut,
         ...options,
         pending,
@@ -213,6 +226,7 @@ export class ProcessingClient {
   async renderLooks(
     fileId: string,
     ev: number,
+    whiteBalance: WhiteBalanceValues,
     luts: LutDefinition[],
     maxEdge: number,
   ): Promise<number> {
@@ -221,6 +235,7 @@ export class ProcessingClient {
       type: "render-looks",
       fileId,
       ev,
+      whiteBalance,
       luts,
       maxEdge,
     });
@@ -243,6 +258,7 @@ export class ProcessingClient {
     fileId: string,
     buffer: ArrayBuffer,
     ev: number,
+    whiteBalance: WhiteBalanceValues,
     baseEv: number | undefined,
     lut: LutDefinition,
     format: OutputFormat,
@@ -256,6 +272,7 @@ export class ProcessingClient {
         fileId,
         buffer,
         ev,
+        whiteBalance,
         baseEv,
         lut,
         format,
@@ -289,6 +306,7 @@ export class ProcessingClient {
       type: "render",
       fileId: batch.fileId,
       ev: batch.ev,
+      whiteBalance: batch.whiteBalance,
       lut: batch.lut,
       maxEdge: batch.maxEdge,
       includeBase: batch.includeBase,
@@ -301,6 +319,7 @@ export class ProcessingClient {
           detail: {
             fileId: batch.fileId,
             ev: batch.ev,
+            whiteBalance: batch.whiteBalance,
             lutId: batch.lut.id,
             maxEdge: batch.maxEdge,
             includeBase: batch.includeBase,

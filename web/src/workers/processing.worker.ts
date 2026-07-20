@@ -17,6 +17,7 @@ import { demosaicLibRawAahdTiledWithWgsl } from "../lib/libraw-aahd";
 import { demosaicLibRawXtransTiledWithWgsl } from "../lib/libraw-xtrans";
 import type { SensorImageInfo } from "../lib/sensor-image";
 import { WebGpuColorRenderer } from "../lib/webgpu-color";
+import { whiteBalanceMatrix } from "../lib/white-balance";
 import {
   prepareWebGpuPreview,
   WebGpuPreviewRenderer,
@@ -251,9 +252,11 @@ async function handleCommand(
       }
       let sensorCaptured = false;
       try {
+        const whiteBalance = whiteBalanceMatrix(data.whiteBalance);
         const interactive = await renderCached(
           data.fileId,
           data.ev,
+          whiteBalance,
           data.lut,
           384,
           true,
@@ -263,6 +266,7 @@ async function handleCommand(
         const result = await renderCached(
           data.fileId,
           data.ev,
+          whiteBalance,
           data.lut,
           PREVIEW_MAX_EDGE,
           true,
@@ -288,6 +292,7 @@ async function handleCommand(
       const result = await renderCached(
         data.fileId,
         data.ev,
+        whiteBalanceMatrix(data.whiteBalance),
         data.lut,
         data.maxEdge,
         data.includeBase,
@@ -303,6 +308,7 @@ async function handleCommand(
 
     if (data.type === "render-looks") {
       const pending = [...data.luts];
+      const whiteBalance = whiteBalanceMatrix(data.whiteBalance);
       let completed = 0;
       while (pending.length > 0) {
         if (priority !== previewPriority) break;
@@ -323,6 +329,7 @@ async function handleCommand(
         const result = await renderCached(
           data.fileId,
           data.ev,
+          whiteBalance,
           lut,
           data.maxEdge,
           false,
@@ -340,6 +347,7 @@ async function handleCommand(
           result: {
             fileId: data.fileId,
             ev: data.ev,
+            whiteBalance: data.whiteBalance,
             lutId: lut.id,
             width: result.width,
             height: result.height,
@@ -366,6 +374,7 @@ async function handleCommand(
       cachedPreview?.baseEv ??
       (await measureRawBaseEv(module, data.buffer));
     const effectiveEv = baseEv + data.ev;
+    const whiteBalance = whiteBalanceMatrix(data.whiteBalance);
     const lut = await loadLut(data.lut);
     const cachedSensor = cachedPreview?.sensor;
     if (cachedSensor) module = cachedSensor.module;
@@ -403,14 +412,14 @@ async function handleCommand(
               ? await demosaicLibRawAahdTiledWithWgsl(
                   mosaic,
                   sensor,
-                  { renderer: gpuRenderer, ev: effectiveEv },
+                  { renderer: gpuRenderer, ev: effectiveEv, whiteBalance },
                   (pixels) => stream.write(pixels),
                 )
               : await demosaicLibRawXtransTiledWithWgsl(
                   mosaic,
                   sensor,
                   new Float32Array(exportRaw.xtransCbrtView()),
-                  { renderer: gpuRenderer, ev: effectiveEv },
+                  { renderer: gpuRenderer, ev: effectiveEv, whiteBalance },
                   (pixels) => stream.write(pixels),
                 );
           const rendered = stream.finish(sensor.sampleCount * 3);
@@ -455,6 +464,7 @@ async function handleCommand(
         createImageEncoder(module, data.format, image.width, image.height),
         gpuRenderer,
         effectiveEv,
+        whiteBalance,
       );
       const timings: ExportTimings = {
         libraw: exportRaw.timings(),
@@ -712,6 +722,7 @@ function describeRuntimeError(
 async function renderCached(
   fileId: string,
   ev: number,
+  whiteBalance: Float32Array,
   lut: LutDefinition,
   maxEdge: number,
   includeBase: boolean,
@@ -742,6 +753,7 @@ async function renderCached(
   const startedAt = performance.now();
   const preview = await previewRenderer.render(
     cached.baseEv + ev,
+    whiteBalance,
     maxEdge,
     includeBase,
   );

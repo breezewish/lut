@@ -171,6 +171,7 @@ export interface LibRawXtransResult {
 export interface TiledXtransColor {
   renderer: WebGpuColorRenderer;
   ev: number;
+  whiteBalance: Float32Array;
 }
 
 export type XtransBandWriter = (
@@ -305,6 +306,7 @@ export async function demosaicLibRawXtransTiledWithWgsl(
           workspace.colorBuffer,
           tile.outputWidth * tile.outputHeight,
           color.ev,
+          color.whiteBalance,
         );
         output = workspace.colorBuffer;
       }

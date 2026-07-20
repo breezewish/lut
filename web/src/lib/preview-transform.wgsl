@@ -9,6 +9,9 @@ struct Parameters {
   include_base: u32,
   domain_min: vec4f,
   inverse_domain_range: vec4f,
+  white_balance_0: vec4f,
+  white_balance_1: vec4f,
+  white_balance_2: vec4f,
 }
 
 @group(0) @binding(0) var<storage, read> source: array<u32>;
@@ -128,9 +131,14 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     source_sample(source_offset + 1u),
     source_sample(source_offset + 2u),
   );
+  let balanced = vec3f(
+    dot(parameters.white_balance_0.xyz, rgb),
+    dot(parameters.white_balance_1.xyz, rgb),
+    dot(parameters.white_balance_2.xyz, rgb),
+  );
 
   if parameters.include_base != 0u {
-    base_output[id.x] = pack_rgba8(render_base(rgb));
+    base_output[id.x] = pack_rgba8(render_base(balanced));
   }
-  lut_output[id.x] = pack_rgba8(render_lut(rgb));
+  lut_output[id.x] = pack_rgba8(render_lut(balanced));
 }

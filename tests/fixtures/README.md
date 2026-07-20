@@ -48,3 +48,8 @@ results avoids shipping a second full-frame GPU implementation solely as a
 self-comparison oracle. Color grading is covered separately by the independent
 corrected-v2 pixel oracle and production export comparison because portable GPU
 floating-point output is not bit-exact.
+
+`studio-white-balance-reference.json` freezes relative Bradford matrices from
+Raw Alchemy Studio commit `c9823146ba674be52d62f4c55b4c649f796bafd0` and its
+pinned colour-science Ohno 2013 implementation. The adjacent generator is an
+independent NumPy/colour-science oracle and is not part of production runtime.
