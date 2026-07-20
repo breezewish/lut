@@ -138,6 +138,15 @@ export class ProcessingClient {
     throw new Error("Worker returned an unexpected release response.");
   }
 
+  /** Loads a RAW's embedded thumbnail without decoding its processed Preview. */
+  async loadThumbnail(fileId: string, buffer: ArrayBuffer): Promise<boolean> {
+    const reply = await this.send({ type: "load-thumbnail", fileId, buffer }, [
+      buffer,
+    ]);
+    if (reply.ok && reply.type === "thumbnail-loaded") return reply.found;
+    throw new Error("Worker returned an unexpected thumbnail response.");
+  }
+
   async decode(
     fileId: string,
     buffer: ArrayBuffer,

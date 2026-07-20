@@ -133,6 +133,29 @@ async function handleCommand(
       context.postMessage(reply);
       return;
     }
+    if (data.type === "load-thumbnail") {
+      const raw = new module.LibRaw();
+      let found = false;
+      try {
+        raw.openPreview(new Uint8Array(data.buffer), PREVIEW_MAX_EDGE);
+        const thumbnail = raw.thumbnailData();
+        const jpeg = thumbnail && (await thumbnailJpeg(thumbnail));
+        if (jpeg) {
+          found = true;
+          postThumbnail(data.requestId, data.fileId, jpeg);
+        }
+      } finally {
+        raw.delete();
+      }
+      const reply: WorkerReply = {
+        requestId: data.requestId,
+        ok: true,
+        type: "thumbnail-loaded",
+        found,
+      };
+      context.postMessage(reply);
+      return;
+    }
     if (data.type === "decode") {
       const workerStartedAt = performance.now();
       const openedPreview = await openPreviewRaw(module, data.buffer);
@@ -154,14 +177,9 @@ async function handleCommand(
         // this entry point.
         const metadata = previewRaw.metadata();
         const thumbnail = previewRaw.thumbnailData();
-        if (thumbnail?.format === "jpeg") {
-          const reply: WorkerReply = {
-            requestId: data.requestId,
-            ok: true,
-            type: "thumbnail",
-            result: { fileId: data.fileId, jpeg: thumbnail.data },
-          };
-          context.postMessage(reply, [thumbnail.data.buffer]);
+        const thumbnailBytes = thumbnail && (await thumbnailJpeg(thumbnail));
+        if (thumbnailBytes) {
+          postThumbnail(data.requestId, data.fileId, thumbnailBytes);
         }
         const sensorBackend = previewRaw.supportsWebGpuAahd()
           ? "webgpu-aahd"
@@ -477,6 +495,56 @@ const ZERO_SENSOR_TIMINGS = {
   mosaicCopyMs: 0,
   totalMs: 0,
 } as const;
+
+function postThumbnail(
+  requestId: number,
+  fileId: string,
+  jpeg: Uint8Array<ArrayBuffer>,
+): void {
+  const reply: WorkerReply = {
+    requestId,
+    ok: true,
+    type: "thumbnail",
+    result: { fileId, jpeg },
+  };
+  context.postMessage(reply, [jpeg.buffer]);
+}
+
+async function thumbnailJpeg(thumbnail: {
+  format: "jpeg" | "bitmap" | "unknown";
+  width: number;
+  height: number;
+  data: Uint8Array<ArrayBuffer>;
+}): Promise<Uint8Array<ArrayBuffer> | undefined> {
+  if (thumbnail.format === "jpeg") return thumbnail.data;
+  if (thumbnail.format !== "bitmap") return undefined;
+  if (thumbnail.data.length !== thumbnail.width * thumbnail.height * 3) {
+    throw new Error("The embedded camera thumbnail has invalid RGB data.");
+  }
+  const rgba = new Uint8ClampedArray(thumbnail.width * thumbnail.height * 4);
+  for (
+    let source = 0, destination = 0;
+    source < thumbnail.data.length;
+    source += 3, destination += 4
+  ) {
+    rgba[destination] = thumbnail.data[source];
+    rgba[destination + 1] = thumbnail.data[source + 1];
+    rgba[destination + 2] = thumbnail.data[source + 2];
+    rgba[destination + 3] = 255;
+  }
+  const canvas = new OffscreenCanvas(thumbnail.width, thumbnail.height);
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("The embedded camera thumbnail could not be encoded.");
+  }
+  context.putImageData(
+    new ImageData(rgba, thumbnail.width, thumbnail.height),
+    0,
+    0,
+  );
+  const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.8 });
+  return new Uint8Array(await blob.arrayBuffer());
+}
 
 function releaseAllPreviews(): void {
   previewRenderer?.free();

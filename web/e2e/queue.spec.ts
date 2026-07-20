@@ -5,7 +5,53 @@ import { expect, test } from "@playwright/test";
 import { unzipSync } from "fflate";
 
 const linearFixture = resolve("tests/fixtures/linear.dng");
+const leicaFixture = resolve("tests/fixtures/leica-m8.dng");
 const lossyFixture = resolve("vendor/LibRaw-Wasm/test/integration/lossy.dng");
+
+test("an import selects its first photo and preloads later filmstrip thumbnails", async ({
+  page,
+}) => {
+  const [linearBytes, leicaBytes] = await Promise.all([
+    readFile(linearFixture),
+    readFile(leicaFixture),
+  ]);
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles([
+    {
+      name: "first.dng",
+      mimeType: "image/x-adobe-dng",
+      buffer: linearBytes,
+    },
+    {
+      name: "second.dng",
+      mimeType: "image/x-adobe-dng",
+      buffer: leicaBytes,
+    },
+    {
+      name: "third.dng",
+      mimeType: "image/x-adobe-dng",
+      buffer: leicaBytes,
+    },
+  ]);
+
+  const first = page.getByRole("button", { name: /^first\.dng/ });
+  await expect(first).toHaveAttribute("aria-current", "true");
+  await expect(first).toHaveAttribute("aria-pressed", "true");
+  await expect(first).toHaveAccessibleName(/first\.dng — Ready/, {
+    timeout: 20_000,
+  });
+  await expect(
+    page
+      .getByRole("button", { name: /^second\.dng/ })
+      .locator("img.photo__thumb"),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("button", { name: /^third\.dng/ })
+      .locator("img.photo__thumb"),
+  ).toBeVisible();
+  await expect(first).toHaveAttribute("aria-current", "true");
+});
 
 test("rapid selection keeps the preview and metadata on the latest RAW", async ({
   page,
@@ -35,7 +81,9 @@ test("batch export continues after an export-time RAW failure", async ({
     File.prototype.arrayBuffer = function () {
       const count = (readCounts.get(this) ?? 0) + 1;
       readCounts.set(this, count);
-      if (this.name === "middle.dng" && count > 1) {
+      // The queued filmstrip thumbnail and selected Preview consume the first
+      // two reads. Corrupt only the later full-resolution export read.
+      if (this.name === "middle.dng" && count > 2) {
         return Promise.resolve(
           new TextEncoder().encode("corrupt at export").buffer,
         );

@@ -20,7 +20,7 @@ export interface QueueItem {
   camera?: string;
   dimensions?: string;
   error?: string;
-  /** Filmstrip thumbnail (a small JPEG data URL) built from the base preview. */
+  /** Filmstrip thumbnail URL from the camera thumbnail or processed Preview. */
   thumbUrl?: string;
 }
 
@@ -173,6 +173,12 @@ export type WorkerCommand =
     }
   | {
       requestId: number;
+      type: "load-thumbnail";
+      fileId: string;
+      buffer: ArrayBuffer;
+    }
+  | {
+      requestId: number;
       type: "decode";
       fileId: string;
       buffer: ArrayBuffer;
@@ -222,6 +228,12 @@ export type WorkerReply =
       requestId: number;
       ok: true;
       type: "released";
+    }
+  | {
+      requestId: number;
+      ok: true;
+      type: "thumbnail-loaded";
+      found: boolean;
     }
   | {
       requestId: number;

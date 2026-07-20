@@ -224,11 +224,157 @@ test("deduplicates one input batch and accepts drops after the queue is populate
 
   const first = new File(["first"], "first.dng", { lastModified: 1 });
   fireEvent.change(input!, { target: { files: [first, first] } });
-  expect(screen.getByRole("button", { name: /^first\.dng/ })).toBeVisible();
+  const firstButton = screen.getByRole("button", { name: /^first\.dng/ });
+  expect(firstButton).toHaveAttribute("aria-current", "true");
+  expect(firstButton).toHaveAttribute("aria-pressed", "true");
 
   const second = new File(["second"], "second.dng", { lastModified: 2 });
   fireEvent.drop(app!, { dataTransfer: { files: [second] } });
-  expect(screen.getByRole("button", { name: /^second\.dng/ })).toBeVisible();
+  const secondButton = screen.getByRole("button", { name: /^second\.dng/ });
+  expect(secondButton).toHaveAttribute("aria-current", "true");
+  expect(secondButton).toHaveAttribute("aria-pressed", "true");
+  expect(firstButton).toHaveAttribute("aria-pressed", "false");
+});
+
+test("selects the first photo and preloads later filmstrip thumbnails", async () => {
+  type Command = {
+    requestId: number;
+    type: string;
+    fileId?: string;
+  };
+
+  class FilmstripThumbnailWorker {
+    static instance: FilmstripThumbnailWorker;
+    readonly commands: Command[] = [];
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: ((event: ErrorEvent) => void) | null = null;
+
+    constructor() {
+      FilmstripThumbnailWorker.instance = this;
+    }
+
+    postMessage(command: Command) {
+      this.commands.push(command);
+      if (command.type === "decode") {
+        this.reply(command, {
+          requestId: command.requestId,
+          ok: true,
+          type: "preview",
+          result: {
+            fileId: command.fileId,
+            baseEv: 0,
+            width: 1,
+            height: 1,
+            baseBitmap: bitmap(1),
+            lutBitmap: bitmap(2),
+            metadata: { camera: "Test Camera", width: 1, height: 1 },
+            decodeCount: 1,
+            timings: {},
+          },
+        });
+        return;
+      }
+      if (command.type === "load-thumbnail") {
+        this.reply(command, {
+          requestId: command.requestId,
+          ok: true,
+          type: "thumbnail",
+          result: {
+            fileId: command.fileId,
+            jpeg: new Uint8Array([1, 2, 3]),
+          },
+        });
+        this.reply(command, {
+          requestId: command.requestId,
+          ok: true,
+          type: "thumbnail-loaded",
+          found: true,
+        });
+        return;
+      }
+      if (command.type === "render-looks") {
+        this.reply(command, {
+          requestId: command.requestId,
+          ok: true,
+          type: "look-previews",
+          fileId: command.fileId,
+          completed: 0,
+        });
+      }
+    }
+
+    private reply(command: Command, data: object) {
+      queueMicrotask(() =>
+        this.onmessage?.(new MessageEvent("message", { data })),
+      );
+    }
+
+    terminate() {}
+  }
+
+  let nextObjectUrl = 0;
+  class TestUrl extends URL {
+    static createObjectURL() {
+      nextObjectUrl += 1;
+      return `blob:thumbnail-${nextObjectUrl}`;
+    }
+
+    static revokeObjectURL() {}
+  }
+
+  vi.stubGlobal("URL", TestUrl);
+  vi.stubGlobal("Worker", FilmstripThumbnailWorker);
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify(MANIFEST), { status: 200 }),
+  );
+
+  const { container } = render(<App />);
+  const files = [
+    new File(["first"], "first.dng", { lastModified: 1 }),
+    new File(["second"], "second.dng", { lastModified: 2 }),
+    new File(["third"], "third.dng", { lastModified: 3 }),
+  ];
+  for (const file of files) {
+    Object.defineProperty(file, "arrayBuffer", {
+      value: async () => new ArrayBuffer(3),
+    });
+  }
+
+  fireEvent.change(container.querySelector('input[type="file"]')!, {
+    target: { files },
+  });
+
+  const firstButton = await screen.findByRole("button", {
+    name: /first\.dng — Ready/,
+  });
+  expect(firstButton).toHaveAttribute("aria-current", "true");
+  expect(firstButton).toHaveAttribute("aria-pressed", "true");
+
+  await waitFor(() => {
+    expect(
+      FilmstripThumbnailWorker.instance.commands
+        .filter(({ type }) => type === "load-thumbnail")
+        .map(({ fileId }) => fileId),
+    ).toEqual(["second.dng:6:2", "third.dng:5:3"]);
+  });
+  await waitFor(() => {
+    expect(
+      screen
+        .getByRole("button", { name: /^second\.dng/ })
+        .querySelector("img.photo__thumb"),
+    ).not.toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: /^third\.dng/ })
+        .querySelector("img.photo__thumb"),
+    ).not.toBeNull();
+  });
+  expect(firstButton).toHaveAttribute("aria-current", "true");
+  expect(
+    FilmstripThumbnailWorker.instance.commands.filter(
+      ({ type }) => type === "decode",
+    ),
+  ).toHaveLength(1);
 });
 
 test("renders the main preview only after the exposure recipe changes", async () => {

@@ -274,6 +274,7 @@ export default function App() {
   const [dragOver, setDragOver] = useState(false);
   const [thumbs, setThumbs] = useState<Map<string, LookThumbImage>>(new Map());
   const [thumbBatchTick, setThumbBatchTick] = useState(0);
+  const [filmstripThumbTick, setFilmstripThumbTick] = useState(0);
   const [sourceTick, setSourceTick] = useState(0);
   const [exposureInteracting, setExposureInteracting] = useState(false);
   const [interactionExposure, setInteractionExposure] = useState<{
@@ -312,6 +313,9 @@ export default function App() {
   const stopAfterCurrent = useRef(false);
   const thumbBusy = useRef(false);
   const failedThumbRecipe = useRef<string | undefined>(undefined);
+  const attemptedFilmstripThumbs = useRef(new Set<string>());
+  const filmstripThumbBusy = useRef(false);
+  const filmstripThumbUrls = useRef(new Map<string, string>());
   const previewCache = useRef(new Map<string, CachedDisplayedPreview>());
   const lookThumbCache = useRef(new Map<string, CachedLookThumbs>());
   const displayedThumbFileId = useRef<string | undefined>(undefined);
@@ -638,10 +642,31 @@ export default function App() {
   useEffect(() => {
     return client.onThumbnail(({ fileId, jpeg }) => {
       performance.mark("lutify:thumbnail");
-      const url = URL.createObjectURL(new Blob([jpeg], { type: "image/jpeg" }));
-      setCameraPreview({ fileId, url });
+      const filmstripUrl = URL.createObjectURL(
+        new Blob([jpeg], { type: "image/jpeg" }),
+      );
+      const previousUrl = filmstripThumbUrls.current.get(fileId);
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      filmstripThumbUrls.current.set(fileId, filmstripUrl);
+      updateItem(fileId, { thumbUrl: filmstripUrl });
+      if (fileId === activeId) {
+        const previewUrl = URL.createObjectURL(
+          new Blob([jpeg], { type: "image/jpeg" }),
+        );
+        setCameraPreview({ fileId, url: previewUrl });
+      }
     });
-  }, [client]);
+  }, [activeId, client, updateItem]);
+
+  useEffect(
+    () => () => {
+      for (const url of filmstripThumbUrls.current.values()) {
+        URL.revokeObjectURL(url);
+      }
+      filmstripThumbUrls.current.clear();
+    },
+    [],
+  );
 
   useEffect(() => {
     return client.onPreviewFrame((result) => {
@@ -792,6 +817,36 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, active?.id, Boolean(activeLut), updateItem]);
+
+  // Once the selected photo is usable, load each remaining RAW's embedded
+  // camera thumbnail in queue order. This gives the filmstrip visual context
+  // without changing selection or paying for a full processed Preview decode.
+  useEffect(() => {
+    if (!active || !hasUsablePreview(active) || exporting) return;
+    if (filmstripThumbBusy.current) return;
+    const next = items.find(
+      (item) =>
+        item.id !== active.id &&
+        !item.thumbUrl &&
+        !attemptedFilmstripThumbs.current.has(item.id),
+    );
+    if (!next) return;
+    attemptedFilmstripThumbs.current.add(next.id);
+    filmstripThumbBusy.current = true;
+    void next.file
+      .arrayBuffer()
+      .then((buffer) => client.loadThumbnail(next.id, buffer))
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        setGlobalError(
+          `The filmstrip thumbnail for ${next.file.name} could not be loaded. ${message}`,
+        );
+      })
+      .finally(() => {
+        filmstripThumbBusy.current = false;
+        setFilmstripThumbTick((tick) => tick + 1);
+      });
+  }, [active, client, exporting, filmstripThumbTick, items]);
 
   // Re-render the settled comparison when EV or look changes (no re-decode).
   useEffect(() => {
@@ -989,20 +1044,9 @@ export default function App() {
   );
 
   // ── File intake ──────────────────────────────────────────────────────────
-  const addFiles = useCallback((files: File[]) => {
-    if (files.length === 0) return;
-    performance.mark("lutify:file-selected");
-    setGlobalError(undefined);
-    setQueueUndo(undefined);
-    setExportSummary(undefined);
-    const first = files[0];
-    const firstId = `${first.name}:${first.size}:${first.lastModified}`;
-    setActiveId((current) => current ?? firstId);
-    setSelectedIds((current) =>
-      current.size > 0 ? current : new Set([firstId]),
-    );
-    setItems((current) => {
-      const existing = new Set(current.map((item) => item.id));
+  const addFiles = useCallback(
+    (files: File[]) => {
+      const existing = new Set(items.map((item) => item.id));
       const additions: QueueItem[] = [];
       for (const file of files) {
         const id = `${file.name}:${file.size}:${file.lastModified}`;
@@ -1014,11 +1058,20 @@ export default function App() {
           status: "queued",
           ev: 0,
           lutId: DEFAULT_LUT_ID,
+          thumbUrl: filmstripThumbUrls.current.get(id),
         });
       }
-      return [...current, ...additions];
-    });
-  }, []);
+      if (additions.length === 0) return;
+      performance.mark("lutify:file-selected");
+      setGlobalError(undefined);
+      setQueueUndo(undefined);
+      setExportSummary(undefined);
+      setItems([...items, ...additions]);
+      setActiveId(additions[0].id);
+      setSelectedIds(new Set([additions[0].id]));
+    },
+    [items],
+  );
 
   const openFilePicker = useCallback(() => fileInput.current?.click(), []);
 
