@@ -22,7 +22,7 @@ for y in range(HEIGHT):
         blue = (red + green) // 2
         pixels += struct.pack("<HHH", red, green, blue)
 
-model = b"RAWAlchemyLinearDNG\0"
+model = b"LUTifyLinearDNG\0"
 matrix = [1, 0, 0, 0, 1, 0, 0, 0, 1]
 entries = [
     (254, LONG, [0]),

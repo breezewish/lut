@@ -10,7 +10,7 @@ export function mountPreviewCorrectness(): void {
   document.body.dataset.benchmarkStatus = "running";
   void run().then(
     (results) => {
-      performance.mark("raw-alchemy:preview-correctness", {
+      performance.mark("lutify:preview-correctness", {
         detail: { results },
       });
       document.body.dataset.benchmarkStatus = "complete";

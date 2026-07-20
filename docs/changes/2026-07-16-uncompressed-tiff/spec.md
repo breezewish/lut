@@ -2,7 +2,7 @@
 
 ## Introduction
 
-RAW Alchemy exports uncompressed interleaved RGB16 TIFF files. The change minimizes local export latency without changing corrected-v2 color values, quantization, dimensions, or TIFF compatibility.
+LUTify exports uncompressed interleaved RGB16 TIFF files. The change minimizes local export latency without changing corrected-v2 color values, quantization, dimensions, or TIFF compatibility.
 
 ## Requirements
 

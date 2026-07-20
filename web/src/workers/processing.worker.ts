@@ -1,11 +1,11 @@
 /// <reference lib="webworker" />
 
 import createLibRaw from "../libraw/libraw.js";
-import initAlchemy, {
+import initLutify, {
   PreviewSource,
   TiffEncoder,
   WasmLut,
-} from "../wasm/alchemy_core.js";
+} from "../wasm/lutify_core.js";
 import { describeProcessingError } from "../lib/errors";
 import { loadLutBytes } from "../lib/lut-cache";
 import { RenderedTiffStream, renderTiffInGpuStrips } from "../lib/tiff-export";
@@ -29,7 +29,7 @@ import type {
 
 const context: DedicatedWorkerGlobalScope =
   self as unknown as DedicatedWorkerGlobalScope;
-const runtime = Promise.all([createLibRaw(), initAlchemy()]).then(
+const runtime = Promise.all([createLibRaw(), initLutify()]).then(
   ([module]) => ({ module }),
 );
 type LibRawModule = Awaited<ReturnType<typeof createLibRaw>>;

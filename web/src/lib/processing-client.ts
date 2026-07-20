@@ -56,7 +56,7 @@ export class ProcessingClient {
         return;
       }
       if (data.ok && data.type === "preview-frame") {
-        performance.mark("raw-alchemy:initial-preview-frame", {
+        performance.mark("lutify:initial-preview-frame", {
           detail: data.result.timings,
         });
         this.previewFrameListener?.(data.result);
@@ -158,7 +158,7 @@ export class ProcessingClient {
       [buffer],
     );
     if (reply.ok && reply.type === "preview") {
-      performance.mark("raw-alchemy:preview-worker", {
+      performance.mark("lutify:preview-worker", {
         detail: reply.result.timings,
       });
       return reply.result;
@@ -212,7 +212,7 @@ export class ProcessingClient {
       maxEdge,
     });
     if (reply.ok && reply.type === "look-previews") {
-      performance.mark("raw-alchemy:look-preview-batch", {
+      performance.mark("lutify:look-preview-batch", {
         detail: {
           fileId,
           ev,
@@ -276,7 +276,7 @@ export class ProcessingClient {
         if (!reply.ok || reply.type !== "preview") {
           throw new Error("Worker returned an unexpected render response.");
         }
-        performance.mark("raw-alchemy:preview-render", {
+        performance.mark("lutify:preview-render", {
           detail: {
             fileId: batch.fileId,
             ev: batch.ev,

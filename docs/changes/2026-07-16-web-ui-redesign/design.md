@@ -2,7 +2,7 @@
 
 ## Introduction
 
-The application uses a compact three-zone editing shell inspired by professional image tools while preserving RAW Alchemy's focused single-workflow scope.
+The application uses a compact three-zone editing shell inspired by professional image tools while preserving LUTify's focused single-workflow scope.
 
 ## Detailed Design
 

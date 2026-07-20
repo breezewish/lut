@@ -12,7 +12,7 @@
     "outputGamut": "unspecified-display-rgb",
     "outputTransfer": "unspecified-display-encoding",
     "outputStatus": "unverified",
-    "provenance": "The source CUBE files contain no output color-space metadata. RAW Alchemy sends their encoded values to an sRGB browser canvas and labels this assumption in the UI."
+    "provenance": "The source CUBE files contain no output color-space metadata. LUTify sends their encoded values to an sRGB browser canvas and labels this assumption in the UI."
   },
   "luts": [
     { "id": "arri-classic-709", "group": "ARRI", "name": "Classic 709", "file": "Arri/ARRI_LogC2Video_Classic709_VLog.cube", "sha256": "3070e0ac2c6b591702477830d99c5478a1047dbd068e1fb5ac4cf720ff49eb10" },

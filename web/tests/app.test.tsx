@@ -40,6 +40,7 @@ test("teaches the private local workflow before files are selected", async () =>
   );
 
   render(<App />);
+  expect(screen.getByRole("heading", { name: "LUTify" })).toBeVisible();
   expect(
     screen.getByRole("heading", { name: "Start with a camera RAW" }),
   ).toBeVisible();
@@ -64,7 +65,7 @@ test("switches and persists the workspace theme", () => {
   fireEvent.click(screen.getByRole("button", { name: "Switch to light mode" }));
 
   expect(document.documentElement).toHaveAttribute("data-theme", "light");
-  expect(localStorage.getItem("raw-alchemy-theme")).toBe("light");
+  expect(localStorage.getItem("lutify-theme")).toBe("light");
 });
 
 test("deduplicates one input batch and accepts drops after the queue is populated", async () => {

@@ -15,7 +15,7 @@ export function mountXtransParity(): void {
     document.body.dataset.benchmarkStatus = "running";
     void compare(file)
       .then((report) => {
-        performance.mark("raw-alchemy:xtrans-parity", { detail: report });
+        performance.mark("lutify:xtrans-parity", { detail: report });
         document.body.dataset.benchmarkStatus = "complete";
       })
       .catch((error: unknown) => {

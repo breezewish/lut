@@ -55,13 +55,12 @@ test("records phased production Worker performance", async ({
     await expect
       .poll(() =>
         page.evaluate(
-          () =>
-            performance.getEntriesByName("raw-alchemy:preview-worker").length,
+          () => performance.getEntriesByName("lutify:preview-worker").length,
         ),
       )
       .toBe(1);
     const previewWallMs = performance.now() - previewStartedAt;
-    const preview = await latestMarkDetail(page, "raw-alchemy:preview-worker");
+    const preview = await latestMarkDetail(page, "lutify:preview-worker");
     const initial = await initialPreviewBoundaries(page);
 
     runs.push({ previewWallMs, initial, preview });
@@ -84,8 +83,8 @@ test("records phased production Worker performance", async ({
       await download.path();
       exportRun = {
         exportWallMs: performance.now() - exportStartedAt,
-        worker: await latestMarkDetail(page, "raw-alchemy:export-worker"),
-        blob: await latestMarkDetail(page, "raw-alchemy:blob"),
+        worker: await latestMarkDetail(page, "lutify:export-worker"),
+        blob: await latestMarkDetail(page, "lutify:blob"),
       };
     }
     await page
@@ -148,15 +147,14 @@ async function latestMarkDetail(page: Page, name: string) {
 
 async function initialPreviewBoundaries(page: Page) {
   return page.evaluate(() => {
-    const selectedAt = performance.getEntriesByName(
-      "raw-alchemy:file-selected",
-    )[0].startTime;
-    const thumbnail = performance.getEntriesByName("raw-alchemy:thumbnail")[0];
+    const selectedAt = performance.getEntriesByName("lutify:file-selected")[0]
+      .startTime;
+    const thumbnail = performance.getEntriesByName("lutify:thumbnail")[0];
     const fileRead = performance.getEntriesByName(
-      "raw-alchemy:file-read",
+      "lutify:file-read",
     )[0] as PerformanceMark;
     const draws = performance
-      .getEntriesByName("raw-alchemy:canvas-draw")
+      .getEntriesByName("lutify:canvas-draw")
       .map((entry) => ({
         at: entry.startTime,
         ...(entry as PerformanceMark).detail,

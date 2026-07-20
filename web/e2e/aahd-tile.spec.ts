@@ -20,7 +20,7 @@ test("tiled AAHD matches full-frame math across seams and CFA phases", async ({
     () =>
       (
         performance
-          .getEntriesByName("raw-alchemy:aahd-tile-benchmark")
+          .getEntriesByName("lutify:aahd-tile-benchmark")
           .at(-1) as PerformanceMark
       ).detail,
   );

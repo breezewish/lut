@@ -2,7 +2,7 @@
 
 ## Direction
 
-RAW Alchemy is a precise, flat editing workspace. Its visual language is neutral, compact, and calm so photographs remain dominant. The shell uses no decorative borders, shadows, gradients, or glass effects. A restrained spectral-blue accent identifies selection, active values, and primary actions; amber is reserved for the unverified LUT output assumption.
+LUTify is a precise, flat editing workspace. Its visual language is neutral, compact, and calm so photographs remain dominant. The shell uses no decorative borders, shadows, gradients, or glass effects. A restrained spectral-blue accent identifies selection, active values, and primary actions; amber is reserved for the unverified LUT output assumption.
 
 ## Theme
 

@@ -1,5 +1,6 @@
 # Web End-to-End Tests
 
+- The document title and top toolbar identify the application as LUTify.
 - Selecting a RAW shows its labeled embedded JPEG only as a placeholder, decodes a display-sized linear source through the Preview-only LibRaw entry point, draws a longest-edge-384 processed comparison before the longest-edge-1024 settled comparison, exposes local camera metadata and readiness to assistive technology, and rerenders EV plus LUT through a persistent WebGPU source without another RAW decode or source-image transfer.
 - Progressive longest-edge-384 and longest-edge-1024 frames keep identical preview Canvas geometry while changing only the pixel buffer resolution.
 - EV and LUT changes show a processing spinner in Adjustments and a Processing canvas status until the exact settled recipe is rendered.

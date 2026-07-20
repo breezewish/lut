@@ -89,7 +89,7 @@ function readStoredSize(key: string, fallback: number, lo: number, hi: number) {
 
 function initialTheme(): Theme {
   try {
-    const saved = localStorage.getItem("raw-alchemy-theme");
+    const saved = localStorage.getItem("lutify-theme");
     if (saved === "light" || saved === "dark") return saved;
   } catch {
     // Storage is optional; the OS preference remains authoritative.
@@ -277,10 +277,10 @@ export default function App() {
   const [interactionLookRecipe, setInteractionLookRecipe] = useState<string>();
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [panelWidth, setPanelWidth] = useState(() =>
-    readStoredSize("raw-alchemy-panel-w", 288, PANEL_MIN, PANEL_MAX),
+    readStoredSize("lutify-panel-w", 288, PANEL_MIN, PANEL_MAX),
   );
   const [stripHeight, setStripHeight] = useState(() =>
-    readStoredSize("raw-alchemy-strip-h", 104, STRIP_MIN, STRIP_MAX),
+    readStoredSize("lutify-strip-h", 104, STRIP_MIN, STRIP_MAX),
   );
 
   const decodedFileId = useRef<string | undefined>(undefined);
@@ -355,7 +355,7 @@ export default function App() {
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute("content", theme === "dark" ? "#1a1e24" : "#f0f1f4");
     try {
-      localStorage.setItem("raw-alchemy-theme", theme);
+      localStorage.setItem("lutify-theme", theme);
     } catch {
       // Persisted theme is a convenience only.
     }
@@ -631,7 +631,7 @@ export default function App() {
 
   useEffect(() => {
     return client.onThumbnail(({ fileId, jpeg }) => {
-      performance.mark("raw-alchemy:thumbnail");
+      performance.mark("lutify:thumbnail");
       const url = URL.createObjectURL(new Blob([jpeg], { type: "image/jpeg" }));
       setCameraPreview({ fileId, url });
     });
@@ -732,7 +732,7 @@ export default function App() {
       updateItem(active.id, { status: "decoding", error: undefined });
       const fileReadStartedAt = performance.now();
       const buffer = await active.file.arrayBuffer();
-      performance.mark("raw-alchemy:file-read", {
+      performance.mark("lutify:file-read", {
         detail: { durationMs: performance.now() - fileReadStartedAt },
       });
       return client.decode(active.id, buffer, ev, activeLut);
@@ -974,7 +974,7 @@ export default function App() {
   // ── File intake ──────────────────────────────────────────────────────────
   const addFiles = useCallback((files: File[]) => {
     if (files.length === 0) return;
-    performance.mark("raw-alchemy:file-selected");
+    performance.mark("lutify:file-selected");
     setGlobalError(undefined);
     setQueueUndo(undefined);
     setExportSummary(undefined);
@@ -1134,7 +1134,7 @@ export default function App() {
             lut,
           );
           tiff = exported.tiff;
-          performance.mark("raw-alchemy:export-worker", {
+          performance.mark("lutify:export-worker", {
             detail: exported.timings,
           });
         } catch (error) {
@@ -1195,9 +1195,7 @@ export default function App() {
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement("a");
         anchor.href = url;
-        anchor.download = single
-          ? singleOutput!.name
-          : `raw-alchemy-${lutId}.zip`;
+        anchor.download = single ? singleOutput!.name : `lutify-${lutId}.zip`;
         anchor.click();
         window.setTimeout(() => URL.revokeObjectURL(url), 0);
       }
@@ -1228,10 +1226,7 @@ export default function App() {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       try {
-        localStorage.setItem(
-          "raw-alchemy-panel-w",
-          String(panelWidthRef.current),
-        );
+        localStorage.setItem("lutify-panel-w", String(panelWidthRef.current));
       } catch {
         // Persisted layout is a convenience only.
       }
@@ -1250,10 +1245,7 @@ export default function App() {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       try {
-        localStorage.setItem(
-          "raw-alchemy-strip-h",
-          String(stripHeightRef.current),
-        );
+        localStorage.setItem("lutify-strip-h", String(stripHeightRef.current));
       } catch {
         // Persisted layout is a convenience only.
       }
@@ -1328,7 +1320,7 @@ export default function App() {
               fill="var(--accent)"
             />
           </svg>
-          <h1 className="brand__name">RAW Alchemy</h1>
+          <h1 className="brand__name">LUTify</h1>
         </div>
         <div
           className="header__doc"

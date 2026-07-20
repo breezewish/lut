@@ -47,12 +47,12 @@ jobs:
       - run: cargo test --workspace
       - run: cargo test --workspace --release
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo clippy -p alchemy-core --target wasm32-unknown-unknown --features wasm -- -D warnings
-      - run: cargo build -p alchemy-core
+      - run: cargo clippy -p lutify-core --target wasm32-unknown-unknown --features wasm -- -D warnings
+      - run: cargo build -p lutify-core
       - run: >-
           cc -std=c11 -Wall -Wextra -Werror
-          -Icrates/alchemy-core/include tests/c-api-smoke.c
-          -Ltarget/debug -lalchemy_core -lm
+          -Icrates/lutify-core/include tests/c-api-smoke.c
+          -Ltarget/debug -llutify_core -lm
           -Wl,-rpath,"$PWD/target/debug"
           -o target/c-api-smoke
       - run: target/c-api-smoke

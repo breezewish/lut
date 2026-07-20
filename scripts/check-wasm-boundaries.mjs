@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
 
 const [binding, worker, browserWrapper, compareStage] = await Promise.all([
-  readFile("web/src/wasm/alchemy_core.js", "utf8"),
+  readFile("web/src/wasm/lutify_core.js", "utf8"),
   readFile("web/src/workers/processing.worker.ts", "utf8"),
-  readFile("crates/alchemy-libraw/src/browser_wrapper.cpp", "utf8"),
+  readFile("crates/lutify-libraw/src/browser_wrapper.cpp", "utf8"),
   readFile("web/src/components/compare-stage.tsx", "utf8"),
 ]);
 

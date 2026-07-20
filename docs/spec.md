@@ -1,8 +1,8 @@
-# RAW Alchemy Product Specification
+# LUTify Product Specification
 
 ## Introduction
 
-RAW Alchemy is a static browser application for local camera RAW processing. It provides an approachable GUI and a reusable Rust computation core while keeping photographs off servers.
+LUTify is a static browser application for local camera RAW processing. It provides an approachable GUI and a reusable Rust computation core while keeping photographs off servers.
 
 ## Goals
 

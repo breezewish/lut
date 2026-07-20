@@ -18,7 +18,7 @@ test("WebGPU Preview matches the independent corrected-v2 pixel oracle", async (
     () =>
       (
         performance
-          .getEntriesByName("raw-alchemy:preview-correctness")
+          .getEntriesByName("lutify:preview-correctness")
           .at(-1) as PerformanceMark
       ).detail,
   );

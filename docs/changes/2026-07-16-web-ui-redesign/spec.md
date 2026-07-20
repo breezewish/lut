@@ -2,7 +2,7 @@
 
 ## Introduction
 
-RAW Alchemy provides a full-screen editing workspace rather than a page-shaped interface. The redesign improves information architecture, theme support, and control density without changing RAW processing behavior.
+LUTify provides a full-screen editing workspace rather than a page-shaped interface. The redesign improves information architecture, theme support, and control density without changing RAW processing behavior.
 
 ## Requirements
 

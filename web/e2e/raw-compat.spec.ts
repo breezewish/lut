@@ -23,7 +23,7 @@ test("a real camera CFA DNG matches the native full-resolution export", async ({
   );
   test.setTimeout(120_000);
   const nativeOutput = test.info().outputPath("leica-m8-native.tif");
-  const nativeExport = execFileAsync(resolve("target/release/alchemy"), [
+  const nativeExport = execFileAsync(resolve("target/release/lutify"), [
     realDng,
     nativeOutput,
     "--lut",
@@ -222,7 +222,7 @@ test("a full-resolution Sony ARW export matches the native pipeline", async ({
   const browserOutput = await download.path();
   expect(browserOutput).not.toBeNull();
 
-  await execFileAsync(resolve("target/release/alchemy"), [
+  await execFileAsync(resolve("target/release/lutify"), [
     sonyArw,
     nativeOutput,
     "--lut",

@@ -43,7 +43,7 @@ test("tiled AAHD streams repeated aligned RGB16 exports", async ({
       () =>
         (
           performance
-            .getEntriesByName("raw-alchemy:export-worker")
+            .getEntriesByName("lutify:export-worker")
             .at(-1) as PerformanceMark
         ).detail,
     );
@@ -184,7 +184,7 @@ test("rotated Bayer keeps LibRaw geometry and required GPU color", async ({
     () =>
       (
         performance
-          .getEntriesByName("raw-alchemy:export-worker")
+          .getEntriesByName("lutify:export-worker")
           .at(-1) as PerformanceMark
       ).detail,
   );
@@ -200,7 +200,7 @@ test("rotated Bayer keeps LibRaw geometry and required GPU color", async ({
 });
 
 async function nativeExport(input: string, output: string): Promise<void> {
-  await execFileAsync(resolve("target/release/alchemy"), [
+  await execFileAsync(resolve("target/release/lutify"), [
     input,
     output,
     "--lut",

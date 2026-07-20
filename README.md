@@ -1,6 +1,6 @@
-# RAW Alchemy
+# LUTify
 
-RAW Alchemy is a private, static browser color lab. It decodes camera RAW files locally, compares a neutral base rendering with a built-in V-Log Alchemy look, and exports 16-bit TIFF files without uploading photos.
+LUTify is a private, static browser color lab. It decodes camera RAW files locally, compares a neutral base rendering with a built-in V-Log Alchemy look, and exports 16-bit TIFF files without uploading photos.
 
 ## Product behavior
 
@@ -13,7 +13,11 @@ RAW Alchemy is a private, static browser color lab. It decodes camera RAW files 
 
 The base view converts LibRaw ProPhoto D65 Linear to linear sRGB, applies a neutral luminance shoulder, then applies the sRGB transfer function. The LUT view applies exposure, the fixed ProPhoto D65 to V-Gamut D65 matrix, negative-preserving V-Log, domain-boundary clamping, and tetrahedral interpolation.
 
-The source CUBE files do not declare their output gamut or transfer function. RAW Alchemy therefore labels the display assumption in the UI and does not attach a misleading ICC profile to TIFF exports.
+The source CUBE files do not declare their output gamut or transfer function. LUTify therefore labels the display assumption in the UI and does not attach a misleading ICC profile to TIFF exports.
+
+## Upstream provenance
+
+LUTify is a separate project from [RAW Alchemy](https://github.com/shenmintao/Raw-Alchemy). The pinned `vendor/Raw-Alchemy` submodule and test baselines derived from it retain the upstream project's original name and identity. Project-owned crates, commands, APIs, assets, and runtime identifiers use the LUTify name.
 
 ## Development
 
@@ -45,7 +49,7 @@ Every successful `main` verification deploys the repository-path bundle to [GitH
 The CLI uses the same corrected-v2 Rust core and pinned native LibRaw source:
 
 ```sh
-cargo run -p alchemy-cli -- \
+cargo run -p lutify-cli -- \
   photo.dng output.tif \
   --lut vendor/V-Log-Alchemy/Luts/Fujifilm/FLog2C_to_CLASSIC-Neg_VLog.cube \
   --ev 0.5 \
@@ -62,10 +66,10 @@ cargo fmt --all --check
 cargo test --workspace
 cargo test --workspace --release
 cargo clippy --workspace --all-targets -- -D warnings
-cargo build -p alchemy-core
+cargo build -p lutify-core
 cc -std=c11 -Wall -Wextra -Werror \
-  -Icrates/alchemy-core/include tests/c-api-smoke.c \
-  -Ltarget/debug -lalchemy_core -lm -Wl,-rpath,"$PWD/target/debug" \
+  -Icrates/lutify-core/include tests/c-api-smoke.c \
+  -Ltarget/debug -llutify_core -lm -Wl,-rpath,"$PWD/target/debug" \
   -o target/c-api-smoke
 target/c-api-smoke
 npm test
@@ -75,4 +79,4 @@ npm run test:e2e
 
 See [docs/README.md](docs/README.md) for the product, technical, and test source of truth.
 The reusable Rust core also publishes a minimal C ABI in
-[crates/alchemy-core/include/alchemy.h](crates/alchemy-core/include/alchemy.h).
+[crates/lutify-core/include/lutify.h](crates/lutify-core/include/lutify.h).

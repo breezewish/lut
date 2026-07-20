@@ -15,7 +15,7 @@ export function mountAahdTileBenchmark(): void {
   document.body.dataset.benchmarkStatus = "running";
   void runFixtures()
     .then((report) => {
-      performance.mark("raw-alchemy:aahd-tile-benchmark", { detail: report });
+      performance.mark("lutify:aahd-tile-benchmark", { detail: report });
       document.body.dataset.benchmarkStatus = "complete";
     })
     .catch((error: unknown) => {

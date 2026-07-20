@@ -1,4 +1,4 @@
-# RAW Alchemy Technical Design
+# LUTify Technical Design
 
 ## Introduction
 
@@ -8,17 +8,19 @@ The system separates deterministic computation from presentation. Rust owns colo
 
 The workspace contains three Rust crates:
 
-- `alchemy-core`: CUBE parsing, exposure, fixed matrices, transfer functions, tetrahedral interpolation, previews, and TIFF encoding.
-- `alchemy-libraw`: a small safe Rust API over a pinned LibRaw C++ build.
-- `alchemy-cli`: native RAW-to-TIFF product surface.
+- `lutify-core`: CUBE parsing, exposure, fixed matrices, transfer functions, tetrahedral interpolation, previews, and TIFF encoding.
+- `lutify-libraw`: a small safe Rust API over a pinned LibRaw C++ build.
+- `lutify-cli`: native RAW-to-TIFF product surface.
 
-The browser uses one Dedicated Worker. It hosts the regular LibRaw WASM build, a lazily loaded pthread build for proven parallel decoders, and the `alchemy-core` WASM build. Commands are serialized. LibRaw's decoder identity and format metadata, rather than camera naming, select the pthread build for Fujifilm compressed, Panasonic C8, Canon CRX, Sony ARW2, and large 8–15-bit single-sample packed DNG input. The minimal project-owned wrapper exposes metadata, an optional copied JPEG thumbnail, image dimensions, sensor metadata, and bounds-checked views. Preview asks LibRaw to build only the display-sized source cells that contribute to a longest-edge-1024 result. Rust owns the row-resampling coordinates. WebGPU retains six recent RGB16 photo sources and one shared parsed LUT, output, and readback workspace. Removing a file releases only its resources; clearing the queue releases the complete cache.
+LUTify is distinct from upstream [RAW Alchemy](https://github.com/shenmintao/Raw-Alchemy). The `vendor/Raw-Alchemy` gitlink pins the upstream source used for migration evidence and test baselines. Upstream paths, names, and provenance remain unchanged; all project-owned modules and public surfaces use the LUTify name.
+
+The browser uses one Dedicated Worker. It hosts the regular LibRaw WASM build, a lazily loaded pthread build for proven parallel decoders, and the `lutify-core` WASM build. Commands are serialized. LibRaw's decoder identity and format metadata, rather than camera naming, select the pthread build for Fujifilm compressed, Panasonic C8, Canon CRX, Sony ARW2, and large 8–15-bit single-sample packed DNG input. The minimal project-owned wrapper exposes metadata, an optional copied JPEG thumbnail, image dimensions, sensor metadata, and bounds-checked views. Preview asks LibRaw to build only the display-sized source cells that contribute to a longest-edge-1024 result. Rust owns the row-resampling coordinates. WebGPU retains six recent RGB16 photo sources and one shared parsed LUT, output, and readback workspace. Removing a file releases only its resources; clearing the queue releases the complete cache.
 
 Initial decode publishes a longest-edge-384 frame before the settled longest-edge-1024 frame. EV and LUT interactions publish a Worker-created 256px bitmap before refining at 1024px. Interactive rerenders use latest-wins scheduling: one render may run and at most one newer recipe waits, so obsolete slider values cannot form an unbounded Worker queue. LUT changes omit the unchanged Base pane. Rerenders neither copy the source image nor decode RAW again, and only the exact current 1024px recipe enables export.
 
 Full-resolution export reuses a Preview-unpacked sensor mosaic when a strict WebGPU demosaic input is compressed. Retained mosaics share one 64 MiB budget across the photo LRU; uncompressed input, evicted mosaics, and unsupported geometry decode on demand. Even, unrotated, standard three-color Bayer inputs use tiled WebGPU LibRaw-parity AAHD. Standard, unrotated three-color X-Trans inputs use tiled WebGPU LibRaw-parity three-pass Markesteijn. Other supported RAW contracts keep LibRaw's demosaic and geometry handling, then enter required WebGPU color through bounded zero-copy views. Every route streams rendered RGB16 strips into a stateful uncompressed TIFF writer. Batch TIFFs enter a pass-through ZIP incrementally, avoiding contiguous archive copies while retaining only the final Blob chunks required by portable browser downloads.
 
-`alchemy-core/include/alchemy.h` is the stable corrected-v2 C surface. It accepts the same decoded RGB16 contract, returns an owned TIFF buffer with stable status codes, and pairs allocation with `alchemy_free_buffer`. The Rust API remains the native CLI's direct integration surface.
+`lutify-core/include/lutify.h` is the stable corrected-v2 C surface. It accepts the same decoded RGB16 contract, returns an owned TIFF buffer with stable status codes, and pairs allocation with `lutify_free_buffer`. The Rust API remains the native CLI's direct integration surface.
 
 ## Invariants
 

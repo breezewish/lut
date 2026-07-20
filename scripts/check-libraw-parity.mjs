@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import createLibRaw from "./libraw-node-runtime.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-const temporaryDirectory = await mkdtemp(join(tmpdir(), "raw-alchemy-"));
+const temporaryDirectory = await mkdtemp(join(tmpdir(), "lutify-"));
 const nativeOutput = join(temporaryDirectory, "native.rgb16");
 const fixtures = [
   {
@@ -44,7 +44,7 @@ try {
         "run",
         "--quiet",
         "-p",
-        "alchemy-libraw",
+        "lutify-libraw",
         "--example",
         "decode_rgb16",
         "--",

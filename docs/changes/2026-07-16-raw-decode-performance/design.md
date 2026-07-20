@@ -320,12 +320,12 @@ npm run benchmark:libraw -- --fixture=/path/to/fujifilm-x-t1.raf \
   --crop-dir=/tmp/libraw-fujifilm-quality-crops
 RAW_PERF_SAMPLES=5 npm run benchmark:browser
 
-PYTHONPATH=/path/to/Raw-Alchemy-studio/src \
+PYTHONPATH=/path/to/LUTify-studio/src \
   /path/to/python scripts/benchmark-studio-decode.py \
   --fixture=vendor/LibRaw-Wasm/example-sony.ARW --samples=5 --warmups=1 \
   --crop=2400,1500,1400,1000 --crop-output=/tmp/studio-sony-rcd.ppm
 
-PYTHONPATH=/path/to/Raw-Alchemy-studio/src \
+PYTHONPATH=/path/to/LUTify-studio/src \
   /path/to/python scripts/benchmark-studio-decode.py \
   --fixture=/path/to/fujifilm-x-t1.raf --samples=5 --warmups=1 \
   --crop=1800,1100,1200,900 --crop-output=/tmp/studio-fujifilm-markesteijn.ppm

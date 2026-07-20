@@ -31,7 +31,7 @@ for (const [camera, file, width, height, minimumHighlights] of fixtures)
       () =>
         (
           performance
-            .getEntriesByName("raw-alchemy:xtrans-parity")
+            .getEntriesByName("lutify:xtrans-parity")
             .at(-1) as PerformanceMark
         ).detail,
     );

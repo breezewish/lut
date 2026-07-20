@@ -15,6 +15,12 @@ const classicNegative = resolve(
 );
 const execFileAsync = promisify(execFile);
 
+test("identifies the application as LUTify", async ({ page }) => {
+  await page.goto("/");
+  await expect(page).toHaveTitle("LUTify");
+  await expect(page.getByRole("heading", { name: "LUTify" })).toBeVisible();
+});
+
 test("shows an embedded camera JPEG before the processed preview", async ({
   page,
 }) => {
@@ -363,7 +369,7 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
     "run",
     "--quiet",
     "-p",
-    "alchemy-cli",
+    "lutify-cli",
     "--",
     linearFixture,
     nativeOutput,
@@ -480,9 +486,7 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
     page.getByRole("button", { name: /^linear\.dng/ }),
   ).toBeDisabled();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe(
-    "raw-alchemy-fuji-classic-negative.zip",
-  );
+  expect(download.suggestedFilename()).toBe("lutify-fuji-classic-negative.zip");
   const archivePath = await download.path();
   expect(archivePath).not.toBeNull();
   const archive = unzipSync(new Uint8Array(await readFile(archivePath!)));
@@ -502,7 +506,7 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
   const nativeLinearPath = test.info().outputPath("batch-linear-native.tif");
   const nativeLossyPath = test.info().outputPath("batch-lossy-native.tif");
   await Promise.all([
-    execFileAsync(resolve("target/release/alchemy"), [
+    execFileAsync(resolve("target/release/lutify"), [
       linearFixture,
       nativeLinearPath,
       "--lut",
@@ -510,7 +514,7 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
       "--color",
       "never",
     ]),
-    execFileAsync(resolve("target/release/alchemy"), [
+    execFileAsync(resolve("target/release/lutify"), [
       lossyFixture,
       nativeLossyPath,
       "--lut",
@@ -687,7 +691,7 @@ test("all built-in LUTs match optimized native RGB16 exports", async ({
   ) as {
     luts: Array<{ id: string; group: string; name: string; file: string }>;
   };
-  const nativeAlchemy = resolve("target/release/alchemy");
+  const nativeLutify = resolve("target/release/lutify");
 
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
@@ -707,7 +711,7 @@ test("all built-in LUTs match optimized native RGB16 exports", async ({
     expect(download.suggestedFilename()).toBe(`linear-${look.id}.tif`);
 
     const nativeOutput = test.info().outputPath(`${look.id}.tif`);
-    await execFileAsync(nativeAlchemy, [
+    await execFileAsync(nativeLutify, [
       linearFixture,
       nativeOutput,
       "--lut",
@@ -987,7 +991,7 @@ test("supports stable look discovery and keyboard-accessible comparison modes", 
 test("workspace theme persists across reloads", async ({ page }) => {
   await page.goto("/");
   await page.evaluate(() => {
-    localStorage.setItem("raw-alchemy-theme", "dark");
+    localStorage.setItem("lutify-theme", "dark");
   });
   await page.reload();
 

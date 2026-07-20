@@ -39,7 +39,7 @@ for y in range(HEIGHT):
             (first >> 4, ((first & 0xF) << 4) | (second >> 8), second & 0xFF)
         )
 
-model = b"RAWAlchemyPacked12\0"
+model = b"LUTifyPacked12\0"
 matrix = [
     (1, 1),
     (0, 1),

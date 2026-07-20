@@ -5,7 +5,7 @@ import "./styles.css";
 
 declare const TEST_ENTRIES_ENABLED: boolean;
 
-const ISOLATION_RELOAD_KEY = "raw-alchemy-cross-origin-isolation-reload";
+const ISOLATION_RELOAD_KEY = "lutify-cross-origin-isolation-reload";
 
 async function enableCrossOriginIsolation(): Promise<void> {
   if (crossOriginIsolated) {
@@ -17,7 +17,7 @@ async function enableCrossOriginIsolation(): Promise<void> {
   if (!isSecureContext) return;
   if (!("serviceWorker" in navigator)) {
     throw new Error(
-      "RAW Alchemy requires a secure browser context with service workers",
+      "LUTify requires a secure browser context with service workers",
     );
   }
 

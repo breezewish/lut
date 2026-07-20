@@ -57,7 +57,7 @@ test("renders full-detail interaction with every built-in LUT on WebGPU", async 
   );
   await page.evaluate(() => {
     (window as Window & { previewWidths?: number[] }).previewWidths = [];
-    performance.clearMarks("raw-alchemy:preview-render");
+    performance.clearMarks("lutify:preview-render");
   });
 
   await page.getByRole("slider", { name: "Exposure" }).fill("0.7");
@@ -77,7 +77,7 @@ test("renders full-detail interaction with every built-in LUT on WebGPU", async 
   expect(widths[0]).toBe(1_024);
   const timing = await page.evaluate(() => {
     const entry = performance
-      .getEntriesByName("raw-alchemy:preview-render")
+      .getEntriesByName("lutify:preview-render")
       .at(-1) as PerformanceMark | undefined;
     return entry?.detail as PreviewTiming | undefined;
   });
@@ -90,9 +90,7 @@ test("renders full-detail interaction with every built-in LUT on WebGPU", async 
     return (await response.json()).luts as Array<{ id: string; name: string }>;
   });
   for (const lut of luts.filter(({ id }) => id !== timing.lutId)) {
-    await page.evaluate(() =>
-      performance.clearMarks("raw-alchemy:preview-render"),
-    );
+    await page.evaluate(() => performance.clearMarks("lutify:preview-render"));
     await page.getByRole("button", { name: lut.name, exact: true }).click();
     await expect
       .poll(() => latestTiming(page, lut.id))
@@ -111,7 +109,7 @@ test("renders full-detail interaction with every built-in LUT on WebGPU", async 
 async function latestTiming(page: Page, lutId: string) {
   return page.evaluate((expectedLutId) => {
     const details = performance
-      .getEntriesByName("raw-alchemy:preview-render")
+      .getEntriesByName("lutify:preview-render")
       .map(
         (candidate) => (candidate as PerformanceMark).detail as PreviewTiming,
       );

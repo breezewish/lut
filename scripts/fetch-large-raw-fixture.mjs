@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 
 const fixturePath =
-  process.env.RAW_LARGE_FIXTURE_PATH ?? "/tmp/raw-alchemy-ilce-7rm4-61mp.ARW";
+  process.env.RAW_LARGE_FIXTURE_PATH ?? "/tmp/lutify-ilce-7rm4-61mp.ARW";
 const expectedSha256 =
   "e6dafe42643f69ab9d1fd00414b7a1f5104df354bb589201600ac934b29b5e4a";
 const fixtureUrl =

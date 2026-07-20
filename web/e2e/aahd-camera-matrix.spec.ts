@@ -39,7 +39,7 @@ for (const fixture of manifest.fixtures) {
 
     const path = resolve(fixtureRoot, fixture.file);
     const nativeOutput = testInfo.outputPath(`${fixture.id}-native.tif`);
-    await execFileAsync(resolve("target/release/alchemy"), [
+    await execFileAsync(resolve("target/release/lutify"), [
       path,
       nativeOutput,
       "--lut",
@@ -52,7 +52,7 @@ for (const fixture of manifest.fixtures) {
       () =>
         (
           performance
-            .getEntriesByName("raw-alchemy:preview-worker")
+            .getEntriesByName("lutify:preview-worker")
             .at(-1) as PerformanceMark
         ).detail,
     );
@@ -60,7 +60,7 @@ for (const fixture of manifest.fixtures) {
       () =>
         (
           performance
-            .getEntriesByName("raw-alchemy:export-worker")
+            .getEntriesByName("lutify:export-worker")
             .at(-1) as PerformanceMark
         ).detail,
     );

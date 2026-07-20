@@ -30,7 +30,7 @@ test("keeps per-photo edits and previews warm while switching photos", async ({
         page.evaluate(
           () =>
             performance
-              .getEntriesByName("raw-alchemy:look-preview-batch")
+              .getEntriesByName("lutify:look-preview-batch")
               .filter(
                 (entry) =>
                   (entry as PerformanceMark).detail.ev === 1 &&
@@ -71,7 +71,7 @@ test("keeps per-photo edits and previews warm while switching photos", async ({
 
   expect(
     await page.evaluate(
-      () => performance.getEntriesByName("raw-alchemy:preview-worker").length,
+      () => performance.getEntriesByName("lutify:preview-worker").length,
     ),
   ).toBe(2);
 });
@@ -108,7 +108,7 @@ test("retains six decoded GPU sources independently from the three-frame UI cach
   ).toHaveAttribute("aria-current", "true");
   expect(
     await page.evaluate(
-      () => performance.getEntriesByName("raw-alchemy:preview-worker").length,
+      () => performance.getEntriesByName("lutify:preview-worker").length,
     ),
   ).toBe(7);
 
@@ -117,8 +117,7 @@ test("retains six decoded GPU sources independently from the three-frame UI cach
     .poll(
       () =>
         page.evaluate(
-          () =>
-            performance.getEntriesByName("raw-alchemy:preview-worker").length,
+          () => performance.getEntriesByName("lutify:preview-worker").length,
         ),
       { timeout: 20_000 },
     )

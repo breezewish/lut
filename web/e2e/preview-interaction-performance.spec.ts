@@ -184,7 +184,7 @@ test("keeps painting fresh frames during continuous EV input", async ({
   const burst = await page.evaluate(async () => {
     const state = window as Window & { previewDraws?: Draw[] };
     state.previewDraws = [];
-    performance.clearMarks("raw-alchemy:preview-render");
+    performance.clearMarks("lutify:preview-render");
     const input = document.querySelector<HTMLInputElement>(
       'input[type="range"]',
     );
@@ -227,7 +227,7 @@ test("keeps painting fresh frames during continuous EV input", async ({
   const settled = [...fullResolution].reverse().at(0);
   const previewBackend = await page.evaluate(() => {
     const entry = performance
-      .getEntriesByName("raw-alchemy:preview-render")
+      .getEntriesByName("lutify:preview-render")
       .at(-1) as PerformanceMark | undefined;
     return entry?.detail.previewBackend as "webgpu" | undefined;
   });
@@ -395,9 +395,8 @@ test("switches back to a warm RAW without blocking the interface", async ({
 
   const before = await page.evaluate(() => ({
     at: performance.now(),
-    decodeCount: performance.getEntriesByName("raw-alchemy:preview-worker")
-      .length,
-    fileReadCount: performance.getEntriesByName("raw-alchemy:file-read").length,
+    decodeCount: performance.getEntriesByName("lutify:preview-worker").length,
+    fileReadCount: performance.getEntriesByName("lutify:file-read").length,
   }));
   await page
     .getByRole("button", { name: new RegExp(`^${fixture.split("/").at(-1)}`) })
@@ -445,10 +444,9 @@ test("switches back to a warm RAW without blocking the interface", async ({
         longTasks: (state.rawSwitchLongTasks ?? []).filter(
           ({ at, duration }) => at <= endedAt && at + duration >= startedAt,
         ),
-        decodeCount: performance.getEntriesByName("raw-alchemy:preview-worker")
+        decodeCount: performance.getEntriesByName("lutify:preview-worker")
           .length,
-        fileReadCount: performance.getEntriesByName("raw-alchemy:file-read")
-          .length,
+        fileReadCount: performance.getEntriesByName("lutify:file-read").length,
       };
     },
     { fallbackStartedAt: before.at },
@@ -868,7 +866,7 @@ async function chooseLook(page: Page, name: string) {
 async function measure(page: Page, change: () => Promise<void>) {
   await page.evaluate(() => {
     (window as Window & { previewDraws?: Draw[] }).previewDraws = [];
-    performance.clearMarks("raw-alchemy:preview-render");
+    performance.clearMarks("lutify:preview-render");
   });
   const startedAt = await page.evaluate(() => performance.now());
   await change();
@@ -889,7 +887,7 @@ async function measure(page: Page, change: () => Promise<void>) {
   );
   const worker = await page.evaluate(() =>
     performance
-      .getEntriesByName("raw-alchemy:preview-render")
+      .getEntriesByName("lutify:preview-render")
       .map((entry) => (entry as PerformanceMark).detail),
   );
   return {

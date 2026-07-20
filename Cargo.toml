@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/alchemy-core", "crates/alchemy-libraw", "crates/alchemy-cli"]
+members = ["crates/lutify-core", "crates/lutify-libraw", "crates/lutify-cli"]
 resolver = "2"
 
 [workspace.package]
