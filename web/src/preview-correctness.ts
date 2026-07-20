@@ -1,4 +1,5 @@
 import reference from "../../tests/fixtures/corrected-v2-reference.json";
+import autoExposureReference from "../../tests/fixtures/auto-exposure-reference.json";
 
 import type { GpuLut } from "./lib/webgpu-color";
 import {
@@ -9,16 +10,16 @@ import {
 export function mountPreviewCorrectness(): void {
   document.body.dataset.benchmarkStatus = "running";
   void run().then(
-    (results) => {
+    (report) => {
       performance.mark("lutify:preview-correctness", {
-        detail: { results },
+        detail: report,
       });
       document.body.dataset.benchmarkStatus = "complete";
     },
     (error: unknown) => {
       document.body.dataset.benchmarkError =
         error instanceof Error ? error.message : String(error);
-      document.body.dataset.benchmarkStatus = "failed";
+      document.body.dataset.benchmarkStatus = "error";
     },
   );
 }
@@ -61,7 +62,24 @@ async function run() {
       source.free();
     }
   }
-  return results;
+  const autoExposureResults = [];
+  for (const testCase of autoExposureReference.cases) {
+    const source = await WebGpuPreviewSource.create(
+      new Uint16Array(testCase.pixels),
+      testCase.width,
+      testCase.height,
+    );
+    try {
+      autoExposureResults.push({
+        name: testCase.name,
+        expectedEv: testCase.expected_ev,
+        actualEv: await source.measureAutoExposure(),
+      });
+    } finally {
+      source.free();
+    }
+  }
+  return { results, autoExposureResults };
 }
 
 function maximumDifference(actual: Uint8Array, expected: number[]): number {

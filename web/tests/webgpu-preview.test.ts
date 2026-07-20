@@ -74,7 +74,7 @@ test("releases a partially allocated shared workspace without releasing its sour
   expect(gpu.buffers[0].destroy).toHaveBeenCalledOnce();
 });
 
-test("shares one output workspace and LUT across retained preview sources", async () => {
+test("shares output and cached LUT buffers across retained preview sources", async () => {
   vi.stubGlobal("GPUBufferUsage", {
     STORAGE: 1,
     COPY_DST: 2,
@@ -110,13 +110,14 @@ test("shares one output workspace and LUT across retained preview sources", asyn
   expect(gpu.buffers[6].destroy).not.toHaveBeenCalled();
 
   renderer.setLut(lut);
-  expect(gpu.buffers).toHaveLength(14);
-  expect(gpu.buffers[6].destroy).toHaveBeenCalledOnce();
+  expect(gpu.buffers).toHaveLength(13);
+  expect(gpu.buffers[6].destroy).not.toHaveBeenCalled();
 
   renderer.free();
   expect(gpu.buffers[0].destroy).not.toHaveBeenCalled();
   expect(gpu.buffers[7].destroy).not.toHaveBeenCalled();
   expect(gpu.buffers[8].destroy).not.toHaveBeenCalled();
+  expect(gpu.buffers[6].destroy).not.toHaveBeenCalled();
 
   first.free();
   smaller.free();

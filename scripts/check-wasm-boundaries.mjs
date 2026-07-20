@@ -1,11 +1,30 @@
 import { readFile } from "node:fs/promises";
 
-const [binding, worker, browserWrapper, compareStage] = await Promise.all([
-  readFile("web/src/wasm/lutify_core.js", "utf8"),
-  readFile("web/src/workers/processing.worker.ts", "utf8"),
-  readFile("crates/lutify-libraw/src/browser_wrapper.cpp", "utf8"),
-  readFile("web/src/components/compare-stage.tsx", "utf8"),
+const [binding, wasm, worker, browserWrapper, compareStage] = await Promise.all(
+  [
+    readFile("web/src/wasm/lutify_core.js", "utf8"),
+    readFile("web/src/wasm/lutify_core_bg.wasm"),
+    readFile("web/src/workers/processing.worker.ts", "utf8"),
+    readFile("crates/lutify-libraw/src/browser_wrapper.cpp", "utf8"),
+    readFile("web/src/components/compare-stage.tsx", "utf8"),
+  ],
+);
+
+const forbiddenWasmExports = new Set([
+  "lutify_render_tiff_v2",
+  "lutify_free_buffer",
+  "lutify_status_message",
+  "lutify_encode_v_log",
 ]);
+const wasmModule = await WebAssembly.compile(wasm);
+const nativeExports = WebAssembly.Module.exports(wasmModule)
+  .map(({ name }) => name)
+  .filter((name) => forbiddenWasmExports.has(name));
+if (nativeExports.length > 0) {
+  throw new Error(
+    `Native CPU ABI leaked into browser WASM: ${nativeExports.join(", ")}`,
+  );
+}
 
 function methodBody(signature) {
   const start = binding.indexOf(signature);

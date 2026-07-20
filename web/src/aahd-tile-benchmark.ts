@@ -1,14 +1,12 @@
-import { demosaicLibRawAahdWithWgsl } from "./lib/libraw-aahd";
-import { demosaicLibRawAahdTiledValidated } from "./lib/aahd-tiled-validation";
-import type { SensorImageInfo } from "./lib/sensor-image";
-import { WebGpuColorRenderer } from "./lib/webgpu-color";
+import reference from "../../tests/fixtures/aahd-tiled-reference.json";
 
-const CFA_PHASES = [
-  [0, 1, 1, 2],
-  [1, 0, 2, 1],
-  [1, 2, 0, 1],
-  [2, 1, 1, 0],
-];
+import {
+  demosaicLibRawAahdTiledWithWgsl,
+  type TiledAahdColor,
+} from "./lib/libraw-aahd";
+import type { SensorImageInfo } from "./lib/sensor-image";
+import { sha256Hex } from "./lib/hash";
+import { WebGpuColorRenderer } from "./lib/webgpu-color";
 
 /** Runs portable WebGPU seam fixtures without loading the product UI. */
 export function mountAahdTileBenchmark(): void {
@@ -27,86 +25,66 @@ export function mountAahdTileBenchmark(): void {
 
 async function runFixtures() {
   const results = [];
-  for (const [index, cfaPattern] of CFA_PHASES.entries()) {
-    const crossesTileSeams = index === 0;
-    const width = crossesTileSeams ? 1058 : 64;
-    const height = crossesTileSeams ? 1042 : 46;
-    results.push(
-      await compareFixture(
-        createDependencyFixture(width, height),
-        width,
-        height,
-        cfaPattern,
-        crossesTileSeams,
-      ),
-    );
+  for (const testCase of reference.cases) {
+    results.push(await renderFixture(testCase));
   }
-  const smallWidth = 64;
-  const smallHeight = 46;
-  results.push(
-    await compareFixture(
-      createDependencyFixture(smallWidth, smallHeight),
-      smallWidth,
-      smallHeight,
-      CFA_PHASES[0],
-    ),
-  );
-  results.push(
-    await compareFixture(
-      createDependencyFixture(66, 50),
-      66,
-      50,
-      CFA_PHASES[2],
-      false,
-      [64, 96, 192, 96],
-    ),
-  );
   return { results };
 }
 
-async function compareFixture(
-  mosaic: Uint16Array,
-  width: number,
-  height: number,
-  cfaPattern: number[],
-  validateDirectColor = false,
-  blackLevels = [0, 0, 0, 0],
-) {
-  const info = createSensorInfo(width, height, cfaPattern, blackLevels);
-  const fullFrame = new Uint16Array(info.sampleCount * 3);
-  await demosaicLibRawAahdWithWgsl(
-    mosaic,
-    info,
-    "libraw-parity",
-    "final",
-    undefined,
-    undefined,
-    fullFrame,
+async function renderFixture(testCase: (typeof reference.cases)[number]) {
+  const info = createSensorInfo(
+    testCase.width,
+    testCase.height,
+    testCase.cfa_pattern,
+    testCase.black_levels,
   );
-  const tiled = await demosaicLibRawAahdTiledValidated(mosaic, info, fullFrame);
-  let gradedValidation;
-  if (validateDirectColor) {
+  const mosaic = createDependencyFixture(testCase.width, testCase.height);
+  const rendered = await renderHash(mosaic, info);
+  let gradedHash;
+  if ("graded_rgb16_sha256" in testCase) {
     const renderer = await WebGpuColorRenderer.create(createIdentityLut());
     try {
-      const uploaded = await renderer.renderStrip(fullFrame, 0);
-      gradedValidation = (
-        await demosaicLibRawAahdTiledValidated(mosaic, info, uploaded.pixels, {
-          renderer,
-          ev: 0,
-        })
-      ).validation;
+      gradedHash = (await renderHash(mosaic, info, { renderer, ev: 0 })).hash;
     } finally {
       renderer.destroy();
     }
   }
   return {
-    width,
-    height,
-    cfaPattern,
-    blackLevels,
-    validation: tiled.validation,
-    gradedValidation,
-    resources: tiled.resources,
+    name: testCase.name,
+    hash: rendered.hash,
+    expectedHash: testCase.rgb16_sha256,
+    gradedHash,
+    expectedGradedHash:
+      "graded_rgb16_sha256" in testCase
+        ? testCase.graded_rgb16_sha256
+        : undefined,
+    blackLevels: testCase.black_levels,
+    resources: rendered.resources,
+  };
+}
+
+async function renderHash(
+  mosaic: Uint16Array,
+  info: SensorImageInfo,
+  color?: TiledAahdColor,
+) {
+  const pixels = new Uint16Array(info.sampleCount * 3);
+  let offset = 0;
+  const result = await demosaicLibRawAahdTiledWithWgsl(
+    mosaic,
+    info,
+    color,
+    (band) => {
+      pixels.set(band, offset);
+      offset += band.length;
+    },
+  );
+  if (offset !== pixels.length) {
+    throw new Error(`AAHD produced ${offset} of ${pixels.length} samples.`);
+  }
+  return {
+    hash: sha256Hex(new Uint8Array(pixels.buffer)),
+    resources: result.resources,
   };
 }
 

@@ -10,7 +10,7 @@ test("WebGPU Preview matches the independent corrected-v2 pixel oracle", async (
   await page.goto("/?previewCorrectness=1");
   await expect
     .poll(() => page.locator("body").getAttribute("data-benchmark-status"))
-    .not.toBe("running");
+    .toMatch(/^(complete|error)$/);
   expect(
     await page.locator("body").getAttribute("data-benchmark-error"),
   ).toBeNull();
@@ -26,5 +26,9 @@ test("WebGPU Preview matches the independent corrected-v2 pixel oracle", async (
   for (const result of report.results) {
     expect(result.baseMaximumDifference, result.name).toBeLessThanOrEqual(1);
     expect(result.lutMaximumDifference, result.name).toBeLessThanOrEqual(1);
+  }
+  expect(report.autoExposureResults).toHaveLength(5);
+  for (const result of report.autoExposureResults) {
+    expect(result.actualEv, result.name).toBeCloseTo(result.expectedEv, 5);
   }
 });

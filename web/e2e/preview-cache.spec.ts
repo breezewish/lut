@@ -10,6 +10,11 @@ test("keeps per-photo edits and previews warm while switching photos", async ({
 }) => {
   test.setTimeout(60_000);
   const bytes = await readFile(fixture);
+  let lutRequests = 0;
+  await page.route("**/luts/*.ralut?sha256=*", async (route) => {
+    lutRequests += 1;
+    await route.continue();
+  });
 
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles([
@@ -22,6 +27,7 @@ test("keeps per-photo edits and previews warm while switching photos", async ({
   await expect(page.locator(".look:not(.is-loading)")).toHaveCount(27, {
     timeout: 20_000,
   });
+  expect(lutRequests).toBe(27);
 
   await page.getByRole("slider", { name: "Exposure" }).fill("1");
   await expect
@@ -40,6 +46,7 @@ test("keeps per-photo edits and previews warm while switching photos", async ({
       { timeout: 20_000 },
     )
     .toBe(1);
+  expect(lutRequests).toBe(27);
   await page.locator(".look").nth(1).click();
   await expect(page.locator(".look").nth(1)).toHaveAttribute(
     "aria-pressed",

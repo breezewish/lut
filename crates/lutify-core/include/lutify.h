@@ -28,9 +28,6 @@ typedef struct LutifyRenderResult {
   LutifyBuffer buffer;
 } LutifyRenderResult;
 
-/* Encodes one linear V-Gamut value with Panasonic's piecewise V-Log curve. */
-float lutify_encode_v_log(float linear);
-
 /*
  * Renders one corrected-v2 16-bit RGB TIFF.
  *

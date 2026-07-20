@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("tiled AAHD matches full-frame math across seams and CFA phases", async ({
+test("tiled AAHD matches pinned parity outputs across seams and CFA phases", async ({
   page,
 }) => {
   test.skip(
@@ -13,7 +13,7 @@ test("tiled AAHD matches full-frame math across seams and CFA phases", async ({
     .poll(() => page.locator("body").getAttribute("data-benchmark-status"), {
       timeout: 5 * 60_000,
     })
-    .not.toBe("running");
+    .toMatch(/^(complete|error)$/);
   const error = await page.locator("body").getAttribute("data-benchmark-error");
   expect(error).toBeNull();
   const report = await page.evaluate(
@@ -26,13 +26,13 @@ test("tiled AAHD matches full-frame math across seams and CFA phases", async ({
   );
   expect(report.results).toHaveLength(6);
   for (const result of report.results) {
-    expect(result.validation.differingSamples).toBe(0);
-    expect(result.validation.maximumDifference).toBe(0);
+    expect(result.hash, result.name).toBe(result.expectedHash);
+    if (result.expectedGradedHash) {
+      expect(result.gradedHash, result.name).toBe(result.expectedGradedHash);
+    }
     expect(result.resources.peakGpuBytes).toBeLessThanOrEqual(
       256 * 1024 * 1024,
     );
   }
-  expect(report.results[0].gradedValidation.differingSamples).toBe(0);
-  expect(report.results[0].gradedValidation.maximumDifference).toBe(0);
   expect(report.results.at(-1).blackLevels).toEqual([64, 96, 192, 96]);
 });

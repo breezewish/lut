@@ -59,10 +59,11 @@
   LibRaw result before highlights and color. X-T1 and X-T2 must match every
   RGB16 sample exactly; X-T1 also supplies nonempty Blend-highlight coverage to
   the end-to-end TIFF comparison.
-- A synthetic hardware fixture proves that sparse ordered defect correction and
-  tiled AAHD bit-match the full-frame parity route across all four Bayer phases,
-  both tile axes, rectangular edge tiles, a smaller-than-tile image, and
-  unequal per-channel black levels.
+- Pinned synthetic output hashes prove that sparse ordered defect correction and
+  tiled AAHD remain exact across all four Bayer phases, both tile axes,
+  rectangular edge tiles, a smaller-than-tile image, unequal per-channel black
+  levels, and the production graded-output path without retaining a second
+  full-frame GPU implementation as its oracle.
 - Removing camera white balance from the Leica DNG makes the wrapper reproduce
   LibRaw's four-channel auto-WB pre-multipliers before WebGPU scaling, and the
   final hardware TIFF remains within two codes of production LibRaw.
@@ -73,7 +74,7 @@
 - After the RAW and every Look tile are ready, a 60-step pointer drag under SwiftShader plus 4× CPU throttling enforces UI frame-gap, input-handler, and long-task ceilings independently of Preview throughput.
 - The hardware Preview test verifies a non-fallback WebGPU adapter, requires the first EV response at 1024px, exercises every built-in Look, and records GPU execution plus readback time.
 - Losing the shared WebGPU device makes later work fail with one explicit reload instruction; preview allocation failure releases every buffer already created and never enters a CPU renderer.
-- Retained photo sources share one Preview LUT and output/readback workspace; switching to a smaller source allocates no workspace, switching to a larger source replaces the workspace once, and source lifetime remains independent from renderer lifetime.
+- Retained photo sources share one Preview output/readback workspace; switching to a smaller source allocates no workspace, switching to a larger source replaces the workspace once, and source lifetime remains independent from renderer lifetime. Preview and export reuse parsed LUT uploads from one 32 MiB per-device LRU, which evicts only idle least-recently-used buffers.
 - The production build contains no ONNX Runtime, model asset, native RCD backend, benchmark worker, stage-capture entry, or CPU/GPU validation switch.
 - Default CI downloads the SHA-256-pinned Nikon Z 6 NEF, verifies every visible sensor sample between regular and pthread LibRaw WASM, checks its metadata and Preview-retained mosaic, and requires the strict WebGPU AAHD route.
 - Default CI generates a bounded 6 × 6 CFA DNG, verifies every X-Trans sensor sample between regular and pthread LibRaw WASM, and requires the strict WebGPU X-Trans route.

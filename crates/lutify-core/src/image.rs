@@ -9,6 +9,7 @@ pub(crate) fn checked_pixel_count(width: u32, height: u32) -> Result<usize> {
         .ok_or(LutifyError::ImageTooLarge)
 }
 
+#[cfg(any(test, all(feature = "wasm", target_arch = "wasm32")))]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub(crate) fn preview_dimensions(width: u32, height: u32, max_edge: u32) -> Result<(u32, u32)> {
     if max_edge == 0 {
@@ -114,12 +115,7 @@ impl PreviewSource {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ColorPipeline, Lut3d};
-
     use super::*;
-
-    const IDENTITY_2: &str =
-        "LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n";
 
     #[test]
     fn preview_source_keeps_only_pixels_used_by_the_display_size() {
@@ -140,19 +136,6 @@ mod tests {
             source.pixels().unwrap(),
             &[0, 1, 2, 20, 21, 22, 200, 201, 202, 220, 221, 222]
         );
-
-        let full_source = [
-            0, 1, 2, 10, 11, 12, 20, 21, 22, 30, 31, 32, 100, 101, 102, 110, 111, 112, 120, 121,
-            122, 130, 131, 132, 200, 201, 202, 210, 211, 212, 220, 221, 222, 230, 231, 232, 300,
-            301, 302, 310, 311, 312, 320, 321, 322, 330, 331, 332,
-        ];
-        let lut = Lut3d::parse(IDENTITY_2).unwrap();
-        let pipeline = ColorPipeline::new(0.0, lut).unwrap();
-        let direct = pipeline.render_preview(&full_source, 4, 4, 2).unwrap();
-        let cached = pipeline
-            .render_preview(source.pixels().unwrap(), 2, 2, 2)
-            .unwrap();
-        assert_eq!(cached, direct);
 
         let moved = source.take_pixels().unwrap();
         assert_eq!(moved.len(), 12);

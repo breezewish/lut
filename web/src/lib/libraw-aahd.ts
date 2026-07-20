@@ -4,10 +4,8 @@ import {
   scaleDemosaicSample,
   type SensorImageInfo,
 } from "./sensor-image";
-import { refineImmutableIsolatedDirections } from "./aahd-candidate-reference";
 import {
   blendLibRawHighlights,
-  correctLibRawSerialDefects,
   correctLibRawSparseDefects,
   createLibRawGammaLut,
   refineLibRawSerialDirections,
@@ -21,30 +19,10 @@ import {
 import type { WebGpuColorRenderer } from "./webgpu-color";
 import { getWebGpuRuntime } from "./webgpu-runtime";
 
-export type AahdContract = "deterministic-parallel-candidate" | "libraw-parity";
-
-export interface AahdReferenceInfo {
-  width: number;
-  height: number;
-  inputSampleCount: number;
-  outputSampleCount: number;
-  highlightSampleCount: number;
-  candidateSampleCount: number;
-  directionSampleCount: number;
-  hotPixelMs: number;
-  scaleMultipliers: number[];
-  preMultipliers: number[];
-  yuvMatrix: number[];
-  outputMatrix: number[];
-  channelMinimum: number[];
-  channelMaximum: number[];
-}
-
 export interface LibRawAahdTimings {
   deviceCreateMs: number;
   workspaceCreateMs: number;
   scaleAndInitializeMs: number;
-  hotPixelMs: number;
   serialDefectMs: number;
   interpolateMs: number;
   homogeneityMs: number;
@@ -54,49 +32,14 @@ export interface LibRawAahdTimings {
   highlightMs: number;
   colorMs: number;
   readbackMs: number;
-  validationMs: number;
   totalMs: number;
-}
-
-export interface LibRawAahdValidation {
-  sampleCount: number;
-  differingSamples: number;
-  samplesOverOneCode: number;
-  samplesOverEightCodes: number;
-  maximumDifference: number;
-  maximumDifferenceIndex: number;
-  actualAtMaximumDifference: number;
-  expectedAtMaximumDifference: number;
-  actualPixelAtMaximumDifference?: number[];
-  expectedPixelAtMaximumDifference?: number[];
-  meanAbsoluteDifference: number;
-  rootMeanSquareDifference: number;
-  psnrDb: number;
 }
 
 export interface LibRawAahdResult {
   width: number;
   height: number;
-  algorithm: "Deterministic parallel AAHD candidate" | "LibRaw AAHD parity";
-  contract: AahdContract;
+  algorithm: "LibRaw AAHD parity";
   backend: "native-wgsl";
-  outputStage:
-    | "scaled"
-    | "corrected"
-    | "defects"
-    | "horizontal"
-    | "vertical"
-    | "horizontal-yuv"
-    | "vertical-yuv"
-    | "horizontal-homogeneity"
-    | "vertical-homogeneity"
-    | "chosen-directions"
-    | "directions"
-    | "candidate-directions"
-    | "aahd"
-    | "highlight"
-    | "final"
-    | "graded-final";
   adapterInfo: {
     vendor: string;
     architecture: string;
@@ -104,7 +47,7 @@ export interface LibRawAahdResult {
     description: string;
     isFallbackAdapter: boolean;
   };
-  resources?: {
+  resources: {
     tileCoreSize: number;
     tileHalo: number;
     tileCount: number;
@@ -112,57 +55,24 @@ export interface LibRawAahdResult {
     maximumBufferBytes: number;
   };
   timings: LibRawAahdTimings;
-  validation?: LibRawAahdValidation;
 }
 
 const ENTRY_POINTS = [
   "preprocess_scale_pairs",
   "preprocess_classify_defects",
-  "clear",
   "clear_tile",
-  "initialize",
   "initialize_parity",
-  "hide_hot_pixels",
-  "copy_corrected",
-  "write_corrected",
-  "write_defects",
   "interpolate_green",
   "interpolate_rb_at_green",
   "interpolate_remaining_rb",
-  "convert_candidates_to_yuv",
   "convert_candidates_to_yuv_parity",
-  "initialize_yuv_first_products",
-  "store_yuv_second_0",
-  "add_yuv_second_0",
-  "store_yuv_third_0",
-  "finish_yuv_0",
-  "store_yuv_second_1",
-  "add_yuv_second_1",
-  "store_yuv_third_1",
-  "finish_yuv_1",
-  "store_yuv_second_2",
-  "add_yuv_second_2",
-  "store_yuv_third_2",
-  "finish_yuv_2",
-  "write_horizontal_yuv",
-  "write_vertical_yuv",
   "evaluate_homogeneity",
   "choose_direction",
-  "write_horizontal_homogeneity",
-  "write_vertical_homogeneity",
   "refine_checker_even",
   "refine_checker_odd",
   "load_tiled_direction_plane",
-  "refine_isolated",
-  "copy_refined_directions",
   "combine",
-  "write_horizontal",
-  "write_vertical",
-  "write_directions",
   "write_direction_plane",
-  "load_direction_plane",
-  "write_aahd",
-  "blend_highlights",
   "collect_highlights",
   "apply_highlights",
   "write_final",
@@ -185,51 +95,19 @@ const LINEAR_DISPATCH_WIDTH = 65535;
 const BINDINGS: Record<EntryPoint, number[]> = {
   preprocess_scale_pairs: [0, 8, 10, 11],
   preprocess_classify_defects: [10, 11, 12],
-  clear: [5, 6, 7, 11],
   clear_tile: [1, 2, 3, 4, 5, 6, 7, 11],
-  initialize: [1, 2, 8, 11, 12, 13],
   initialize_parity: [0, 1, 2, 5, 11, 12],
-  hide_hot_pixels: [1, 2, 5, 11, 12],
-  copy_corrected: [1, 2, 11],
-  write_corrected: [1, 10, 11],
-  write_defects: [10, 11, 12],
   interpolate_green: [1, 2, 8, 11],
   interpolate_rb_at_green: [1, 2, 8, 11],
   interpolate_remaining_rb: [1, 2, 8, 11],
-  convert_candidates_to_yuv: [1, 2, 3, 4, 9, 11],
   convert_candidates_to_yuv_parity: [1, 2, 3, 4, 9, 11],
-  initialize_yuv_first_products: [1, 2, 3, 4, 9, 11],
-  store_yuv_second_0: [1, 2, 9, 11],
-  add_yuv_second_0: [1, 2, 3, 4, 11],
-  store_yuv_third_0: [1, 2, 9, 11],
-  finish_yuv_0: [1, 2, 3, 4, 11],
-  store_yuv_second_1: [1, 2, 9, 11],
-  add_yuv_second_1: [1, 2, 3, 4, 11],
-  store_yuv_third_1: [1, 2, 9, 11],
-  finish_yuv_1: [1, 2, 3, 4, 11],
-  store_yuv_second_2: [1, 2, 9, 11],
-  add_yuv_second_2: [1, 2, 3, 4, 11],
-  store_yuv_third_2: [1, 2, 9, 11],
-  finish_yuv_2: [1, 2, 3, 4, 11],
-  write_horizontal_yuv: [3, 10, 11],
-  write_vertical_yuv: [4, 10, 11],
   evaluate_homogeneity: [3, 4, 6, 7, 11],
   choose_direction: [3, 4, 5, 6, 7, 11],
-  write_horizontal_homogeneity: [6, 7, 10, 11],
-  write_vertical_homogeneity: [6, 7, 10, 11],
   refine_checker_even: [5, 11],
   refine_checker_odd: [5, 11],
   load_tiled_direction_plane: [5, 11, 15],
-  refine_isolated: [5, 6, 11],
-  copy_refined_directions: [5, 6, 11],
   combine: [1, 2, 5, 11, 13],
-  write_horizontal: [1, 10, 11],
-  write_vertical: [2, 10, 11],
-  write_directions: [5, 10, 11],
   write_direction_plane: [5, 10, 11],
-  load_direction_plane: [0, 5, 11],
-  write_aahd: [1, 10, 11],
-  blend_highlights: [1, 11],
   collect_highlights: [1, 10, 11, 14],
   apply_highlights: [1, 10, 11],
   write_final: [1, 10, 11],
@@ -240,24 +118,6 @@ const PARITY_INTERPOLATION_PASSES: readonly PassCommand[] = [
   { entryPoint: "interpolate_rb_at_green" },
   { entryPoint: "interpolate_remaining_rb" },
   { entryPoint: "convert_candidates_to_yuv_parity", padded: true },
-];
-
-const TILED_ENTRY_POINTS: readonly EntryPoint[] = [
-  "preprocess_scale_pairs",
-  "preprocess_classify_defects",
-  "clear_tile",
-  "initialize_parity",
-  ...PARITY_INTERPOLATION_PASSES.map(({ entryPoint }) => entryPoint),
-  "evaluate_homogeneity",
-  "choose_direction",
-  "refine_checker_even",
-  "refine_checker_odd",
-  "write_direction_plane",
-  "load_tiled_direction_plane",
-  "combine",
-  "collect_highlights",
-  "apply_highlights",
-  "write_final",
 ];
 
 interface Runtime {
@@ -308,392 +168,7 @@ interface PendingRgbReadback {
 }
 
 let runtimePromise: Promise<Runtime> | undefined;
-let cachedWorkspace: Workspace | undefined;
 let cachedTiledWorkspace: Workspace | undefined;
-
-/** Runs the deterministic parallel AAHD candidate in WGSL. */
-export async function demosaicLibRawAahdWithWgsl(
-  mosaic: Uint16Array,
-  info: SensorImageInfo,
-  contract: AahdContract,
-  outputStage:
-    | "scaled"
-    | "corrected"
-    | "defects"
-    | "horizontal"
-    | "vertical"
-    | "horizontal-yuv"
-    | "vertical-yuv"
-    | "horizontal-homogeneity"
-    | "vertical-homogeneity"
-    | "chosen-directions"
-    | "directions"
-    | "candidate-directions"
-    | "aahd"
-    | "highlight"
-    | "final",
-  reference?: Uint16Array,
-  referenceInfo?: AahdReferenceInfo,
-  capture?: Uint16Array,
-): Promise<LibRawAahdResult> {
-  validateInput(mosaic, info);
-  if (contract === "libraw-parity" && outputStage === "candidate-directions") {
-    throw new Error("Candidate directions require the deterministic contract.");
-  }
-  const startedAt = performance.now();
-  const deviceStartedAt = performance.now();
-  const runtime = await getRuntime(largestBufferBytes(info));
-  const deviceCreateMs = performance.now() - deviceStartedAt;
-  const workspaceStartedAt = performance.now();
-  const workspace = getWorkspace(runtime.device, info, mosaic.byteLength);
-  const workspaceCreateMs = performance.now() - workspaceStartedAt;
-  const parameters = createParameters(
-    info,
-    workspace,
-    contract === "libraw-parity" ? undefined : referenceInfo,
-  );
-  const scaleMultipliers = new Float32Array(parameters.buffer, 12 * 4, 4);
-  const preMultipliers = new Float32Array(parameters.buffer, 16 * 4, 4);
-  const firstSensorColor = info.cfaPattern[0];
-  const firstColor = normalizedCfa(firstSensorColor);
-  const firstScaled = scaleDemosaicSample(
-    mosaic[0],
-    info.blackLevels[firstSensorColor],
-    scaleMultipliers[firstSensorColor],
-  );
-  const extrema = new Uint32Array(6);
-  extrema[firstColor] = firstScaled;
-
-  try {
-    const scaleStartedAt = performance.now();
-    runtime.device.queue.writeBuffer(
-      workspace.resources[0],
-      0,
-      mosaic.buffer,
-      mosaic.byteOffset,
-      mosaic.byteLength,
-    );
-    runtime.device.queue.writeBuffer(
-      workspace.resources[13],
-      0,
-      mosaic.buffer,
-      mosaic.byteOffset,
-      mosaic.byteLength,
-    );
-    runtime.device.queue.writeBuffer(workspace.resources[8], 0, extrema);
-    runtime.device.queue.writeBuffer(workspace.resources[11], 0, parameters);
-    submitPass(runtime, workspace, "clear", { padded: true });
-    submitPass(runtime, workspace, "initialize");
-    if (outputStage === "scaled") {
-      submitPass(runtime, workspace, "write_corrected", { paired: true });
-    }
-    await runtime.device.queue.onSubmittedWorkDone();
-    const scaleAndInitializeMs = performance.now() - scaleStartedAt;
-
-    const hotStartedAt = performance.now();
-    let serialDefectMs = 0;
-    if (contract === "libraw-parity") {
-      const serialStartedAt = performance.now();
-      const correction = correctLibRawSerialDefects(
-        mosaic,
-        info.width,
-        info.height,
-        info.cfaPattern,
-        info.blackLevels,
-        scaleMultipliers,
-      );
-      serialDefectMs = performance.now() - serialStartedAt;
-      runtime.device.queue.writeBuffer(
-        workspace.resources[0],
-        0,
-        correction.corrected,
-      );
-      runtime.device.queue.writeBuffer(
-        workspace.resources[12],
-        0,
-        correction.defects,
-      );
-      submitPass(runtime, workspace, "initialize_parity");
-    } else {
-      submitPass(runtime, workspace, "hide_hot_pixels");
-      submitPass(runtime, workspace, "copy_corrected");
-    }
-    if (outputStage === "corrected") {
-      submitPass(runtime, workspace, "write_corrected", { paired: true });
-    } else if (outputStage === "defects") {
-      submitPass(runtime, workspace, "write_defects", { paired: true });
-    }
-    await runtime.device.queue.onSubmittedWorkDone();
-    const hotPixelMs = performance.now() - hotStartedAt;
-
-    const interpolateStartedAt = performance.now();
-    submitPass(runtime, workspace, "interpolate_green");
-    submitPass(runtime, workspace, "interpolate_rb_at_green");
-    submitPass(runtime, workspace, "interpolate_remaining_rb");
-    if (contract === "libraw-parity") {
-      submitPass(runtime, workspace, "initialize_yuv_first_products", {
-        padded: true,
-      });
-      for (const component of [0, 1, 2] as const) {
-        submitPass(runtime, workspace, `store_yuv_second_${component}`, {
-          padded: true,
-        });
-        submitPass(runtime, workspace, `add_yuv_second_${component}`, {
-          padded: true,
-        });
-        submitPass(runtime, workspace, `store_yuv_third_${component}`, {
-          padded: true,
-        });
-        submitPass(runtime, workspace, `finish_yuv_${component}`, {
-          padded: true,
-        });
-      }
-    } else {
-      submitPass(runtime, workspace, "convert_candidates_to_yuv", {
-        padded: true,
-      });
-    }
-    await runtime.device.queue.onSubmittedWorkDone();
-    const interpolateMs = performance.now() - interpolateStartedAt;
-
-    const homogeneityStartedAt = performance.now();
-    submitPass(runtime, workspace, "evaluate_homogeneity");
-    if (outputStage === "horizontal-homogeneity") {
-      submitPass(runtime, workspace, "write_horizontal_homogeneity", {
-        paired: true,
-      });
-    } else if (outputStage === "vertical-homogeneity") {
-      submitPass(runtime, workspace, "write_vertical_homogeneity", {
-        paired: true,
-      });
-    }
-    submitPass(runtime, workspace, "choose_direction");
-    if (outputStage === "chosen-directions") {
-      submitPass(runtime, workspace, "write_directions", { paired: true });
-    }
-    await runtime.device.queue.onSubmittedWorkDone();
-    const homogeneityMs = performance.now() - homogeneityStartedAt;
-
-    const refineStartedAt = performance.now();
-    const stopsBeforeRefinement =
-      outputStage !== "candidate-directions" &&
-      outputStage !== "directions" &&
-      outputStage !== "aahd" &&
-      outputStage !== "highlight" &&
-      outputStage !== "final";
-    if (!stopsBeforeRefinement) {
-      submitPass(runtime, workspace, "refine_checker_even");
-      submitPass(runtime, workspace, "refine_checker_odd");
-    }
-    let serialDirectionMs = 0;
-    let candidateDirections: Uint32Array | undefined;
-    if (outputStage === "candidate-directions") {
-      submitPass(runtime, workspace, "write_directions", { paired: true });
-      await runtime.device.queue.onSubmittedWorkDone();
-      const encoder = runtime.device.createCommandEncoder();
-      encoder.copyBufferToBuffer(
-        workspace.resources[10],
-        0,
-        workspace.readback,
-        0,
-        workspace.packedBytes,
-      );
-      runtime.device.queue.submit([encoder.finish()]);
-      await workspace.readback.mapAsync(GPUMapMode.READ);
-      try {
-        const packed = new Uint16Array(workspace.readback.getMappedRange());
-        const before = new Uint32Array(info.sampleCount);
-        for (let index = 0; index < before.length; index += 1) {
-          before[index] = packed[index * 3];
-        }
-        candidateDirections = refineImmutableIsolatedDirections(
-          before,
-          info.width,
-          info.height,
-        );
-      } finally {
-        workspace.readback.unmap();
-      }
-    }
-    if (contract === "libraw-parity" && !stopsBeforeRefinement) {
-      submitPass(runtime, workspace, "write_direction_plane", {
-        paired: true,
-      });
-      await runtime.device.queue.onSubmittedWorkDone();
-      const encoder = runtime.device.createCommandEncoder();
-      encoder.copyBufferToBuffer(
-        workspace.resources[10],
-        0,
-        workspace.readback,
-        0,
-        mosaic.byteLength,
-      );
-      runtime.device.queue.submit([encoder.finish()]);
-      await workspace.readback.mapAsync(GPUMapMode.READ, 0, mosaic.byteLength);
-      let refined: Uint16Array<ArrayBuffer>;
-      try {
-        const directions = new Uint16Array(info.sampleCount);
-        directions.set(
-          new Uint16Array(
-            workspace.readback.getMappedRange(0, mosaic.byteLength),
-          ),
-        );
-        const serialStartedAt = performance.now();
-        refined = refineLibRawSerialDirections(
-          directions,
-          info.width,
-          info.height,
-        );
-        serialDirectionMs = performance.now() - serialStartedAt;
-      } finally {
-        workspace.readback.unmap();
-      }
-      runtime.device.queue.writeBuffer(workspace.resources[0], 0, refined);
-      submitPass(runtime, workspace, "load_direction_plane");
-    } else if (!stopsBeforeRefinement) {
-      submitPass(runtime, workspace, "refine_isolated");
-      submitPass(runtime, workspace, "copy_refined_directions");
-    }
-    if (outputStage === "horizontal-yuv") {
-      submitPass(runtime, workspace, "write_horizontal_yuv", { paired: true });
-    } else if (outputStage === "vertical-yuv") {
-      submitPass(runtime, workspace, "write_vertical_yuv", { paired: true });
-    } else if (
-      outputStage === "scaled" ||
-      outputStage === "corrected" ||
-      outputStage === "defects"
-    ) {
-      // The requested preprocessing boundary was packed before interpolation.
-    } else if (outputStage === "horizontal") {
-      submitPass(runtime, workspace, "write_horizontal", { paired: true });
-    } else if (outputStage === "vertical") {
-      submitPass(runtime, workspace, "write_vertical", { paired: true });
-    } else if (stopsBeforeRefinement) {
-      // The requested diagnostic was packed before refinement.
-    } else if (
-      outputStage === "directions" ||
-      outputStage === "candidate-directions"
-    ) {
-      submitPass(runtime, workspace, "write_directions", { paired: true });
-    } else {
-      submitPass(runtime, workspace, "combine");
-    }
-    await runtime.device.queue.onSubmittedWorkDone();
-    const refineAndCombineMs = performance.now() - refineStartedAt;
-
-    let highlightMs = 0;
-    let serialHighlightMs = 0;
-    const colorStartedAt = performance.now();
-    if (
-      outputStage === "scaled" ||
-      outputStage === "corrected" ||
-      outputStage === "defects" ||
-      outputStage === "horizontal" ||
-      outputStage === "vertical" ||
-      outputStage === "horizontal-yuv" ||
-      outputStage === "vertical-yuv" ||
-      outputStage === "horizontal-homogeneity" ||
-      outputStage === "vertical-homogeneity" ||
-      outputStage === "chosen-directions" ||
-      outputStage === "directions" ||
-      outputStage === "candidate-directions"
-    ) {
-      // The candidate was packed before combine could overwrite it.
-    } else if (outputStage === "aahd") {
-      submitPass(runtime, workspace, "write_aahd", { paired: true });
-    } else {
-      const highlightStartedAt = performance.now();
-      if (contract === "libraw-parity") {
-        serialHighlightMs = await blendLibRawHighlightsWithCpu(
-          runtime,
-          workspace,
-          preMultipliers,
-        );
-      } else {
-        submitPass(runtime, workspace, "blend_highlights");
-      }
-      await runtime.device.queue.onSubmittedWorkDone();
-      highlightMs = performance.now() - highlightStartedAt;
-      submitPass(
-        runtime,
-        workspace,
-        outputStage === "highlight" ? "write_aahd" : "write_final",
-        { paired: true },
-      );
-    }
-    await runtime.device.queue.onSubmittedWorkDone();
-    const colorMs = performance.now() - colorStartedAt - highlightMs;
-
-    const readbackStartedAt = performance.now();
-    const encoder = runtime.device.createCommandEncoder();
-    encoder.copyBufferToBuffer(
-      workspace.resources[10],
-      0,
-      workspace.readback,
-      0,
-      workspace.packedBytes,
-    );
-    runtime.device.queue.submit([encoder.finish()]);
-    await workspace.readback.mapAsync(GPUMapMode.READ);
-    let validation: LibRawAahdValidation | undefined;
-    let validationMs = 0;
-    try {
-      const pixels = new Uint16Array(info.sampleCount * 3);
-      pixels.set(new Uint16Array(workspace.readback.getMappedRange()));
-      copyCapturedOutput(pixels, capture);
-      const readbackMs = performance.now() - readbackStartedAt;
-      const validationStartedAt = performance.now();
-      validation = candidateDirections
-        ? compareExpandedScalar(pixels, candidateDirections)
-        : reference
-          ? compareRgb16(pixels, reference)
-          : undefined;
-      validationMs = performance.now() - validationStartedAt;
-      return {
-        width: info.width,
-        height: info.height,
-        algorithm:
-          contract === "libraw-parity"
-            ? "LibRaw AAHD parity"
-            : "Deterministic parallel AAHD candidate",
-        contract,
-        backend: "native-wgsl",
-        outputStage,
-        adapterInfo: {
-          vendor: runtime.adapter.info.vendor,
-          architecture: runtime.adapter.info.architecture,
-          device: runtime.adapter.info.device,
-          description: runtime.adapter.info.description,
-          isFallbackAdapter: runtime.adapter.info.isFallbackAdapter,
-        },
-        timings: {
-          deviceCreateMs,
-          workspaceCreateMs,
-          scaleAndInitializeMs,
-          hotPixelMs,
-          serialDefectMs,
-          interpolateMs,
-          homogeneityMs,
-          refineAndCombineMs,
-          serialDirectionMs,
-          serialHighlightMs,
-          highlightMs,
-          colorMs,
-          readbackMs,
-          validationMs,
-          totalMs: performance.now() - startedAt,
-        },
-        ...(validation ? { validation } : {}),
-      };
-    } finally {
-      if (workspace.readback.mapState === "mapped") workspace.readback.unmap();
-    }
-  } catch (error) {
-    destroyWorkspace(workspace);
-    cachedWorkspace = undefined;
-    throw error;
-  }
-}
 
 /** Runs the exact LibRaw-parity AAHD route with a bounded reusable tile workspace. */
 export async function demosaicLibRawAahdTiledWithWgsl(
@@ -708,7 +183,6 @@ export async function demosaicLibRawAahdTiledWithWgsl(
   const deviceStartedAt = performance.now();
   const runtime = await getRuntime(
     Math.max(mosaic.byteLength, tiledVectorBytes(info)),
-    TILED_ENTRY_POINTS,
   );
   const deviceCreateMs = performance.now() - deviceStartedAt;
   const sparsePreprocessing = await preprocessLibRawDefectsWithWgsl(
@@ -931,9 +405,7 @@ export async function demosaicLibRawAahdTiledWithWgsl(
       width: info.width,
       height: info.height,
       algorithm: "LibRaw AAHD parity",
-      contract: "libraw-parity",
       backend: "native-wgsl",
-      outputStage: color ? "graded-final" : "final",
       adapterInfo: {
         vendor: runtime.adapter.info.vendor,
         architecture: runtime.adapter.info.architecture,
@@ -952,7 +424,6 @@ export async function demosaicLibRawAahdTiledWithWgsl(
         deviceCreateMs,
         workspaceCreateMs,
         scaleAndInitializeMs,
-        hotPixelMs: serialDefectMs,
         serialDefectMs,
         interpolateMs,
         homogeneityMs,
@@ -962,7 +433,6 @@ export async function demosaicLibRawAahdTiledWithWgsl(
         highlightMs,
         colorMs,
         readbackMs,
-        validationMs: 0,
         totalMs: performance.now() - startedAt,
       },
     };
@@ -1163,19 +633,6 @@ async function readDirectionCore(
   }
 }
 
-function copyCapturedOutput(
-  pixels: Uint16Array,
-  capture: Uint16Array | undefined,
-): void {
-  if (!capture) return;
-  if (capture.length !== pixels.length) {
-    throw new Error(
-      `AAHD capture has ${capture.length} samples; expected ${pixels.length}.`,
-    );
-  }
-  capture.set(pixels);
-}
-
 function validateInput(mosaic: Uint16Array, info: SensorImageInfo): void {
   if (info.sensorType !== "bayer" || info.cfaSize !== 2) {
     throw new Error("The LibRaw AAHD benchmark requires a Bayer RAW.");
@@ -1200,10 +657,7 @@ function validateInput(mosaic: Uint16Array, info: SensorImageInfo): void {
   }
 }
 
-async function getRuntime(
-  requiredBufferBytes: number,
-  requiredEntries: readonly EntryPoint[] = ENTRY_POINTS,
-): Promise<Runtime> {
+async function getRuntime(requiredBufferBytes: number): Promise<Runtime> {
   if (runtimePromise) {
     await getWebGpuRuntime(requiredBufferBytes);
   } else {
@@ -1226,7 +680,7 @@ async function getRuntime(
     })();
   }
   const runtime = await runtimePromise;
-  const missing = requiredEntries.filter(
+  const missing = ENTRY_POINTS.filter(
     (entryPoint) => !runtime.pipelines[entryPoint],
   );
   const pipelines = await Promise.all(
@@ -1242,108 +696,6 @@ async function getRuntime(
     runtime.pipelines[entryPoint] = pipelines[index];
   }
   return runtime;
-}
-
-function getWorkspace(
-  device: GPUDevice,
-  info: SensorImageInfo,
-  mosaicBytes: number,
-): Workspace {
-  if (
-    cachedWorkspace?.width === info.width &&
-    cachedWorkspace.height === info.height
-  ) {
-    return cachedWorkspace;
-  }
-  if (cachedWorkspace) {
-    const previous = cachedWorkspace;
-    cachedWorkspace = undefined;
-    destroyWorkspace(previous);
-  }
-  const paddedWidth = info.width + 8;
-  const paddedHeight = info.height + 8;
-  const paddedSamples = paddedWidth * paddedHeight;
-  const vectorBytes = paddedSamples * 4 * Uint32Array.BYTES_PER_ELEMENT;
-  const scalarBytes = paddedSamples * Uint32Array.BYTES_PER_ELEMENT;
-  const packedBytes =
-    (info.sampleCount / 2) * 3 * Uint32Array.BYTES_PER_ELEMENT;
-  const gamma = createLibRawGammaLut();
-  const buffers: GPUBuffer[] = [];
-  const create = (size: number, usage: GPUBufferUsageFlags) => {
-    const buffer = device.createBuffer({ size, usage });
-    buffers.push(buffer);
-    return buffer;
-  };
-  try {
-    const resources = [
-      create(
-        Math.ceil(mosaicBytes / 4) * 4,
-        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      ),
-      create(vectorBytes, GPUBufferUsage.STORAGE),
-      create(vectorBytes, GPUBufferUsage.STORAGE),
-      create(vectorBytes, GPUBufferUsage.STORAGE),
-      create(vectorBytes, GPUBufferUsage.STORAGE),
-      create(scalarBytes, GPUBufferUsage.STORAGE),
-      create(scalarBytes, GPUBufferUsage.STORAGE),
-      create(scalarBytes, GPUBufferUsage.STORAGE),
-      create(
-        6 * Uint32Array.BYTES_PER_ELEMENT,
-        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      ),
-      create(
-        gamma.byteLength,
-        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      ),
-      create(
-        packedBytes,
-        GPUBufferUsage.STORAGE |
-          GPUBufferUsage.COPY_SRC |
-          GPUBufferUsage.COPY_DST,
-      ),
-      create(
-        64 * Uint32Array.BYTES_PER_ELEMENT,
-        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      ),
-      create(
-        Math.ceil(info.sampleCount / 32) * Uint32Array.BYTES_PER_ELEMENT,
-        GPUBufferUsage.STORAGE |
-          GPUBufferUsage.COPY_SRC |
-          GPUBufferUsage.COPY_DST,
-      ),
-      create(
-        Math.ceil(mosaicBytes / 4) * 4,
-        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      ),
-      create(
-        Uint32Array.BYTES_PER_ELEMENT,
-        GPUBufferUsage.STORAGE |
-          GPUBufferUsage.COPY_SRC |
-          GPUBufferUsage.COPY_DST,
-      ),
-    ];
-    device.queue.writeBuffer(resources[9], 0, gamma);
-    const workspace = {
-      width: info.width,
-      height: info.height,
-      paddedWidth,
-      paddedHeight,
-      packedBytes,
-      coreWidth: info.width,
-      coreHeight: info.height,
-      resources,
-      bindGroups: {},
-      readback: create(
-        packedBytes,
-        GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-      ),
-    };
-    cachedWorkspace = workspace;
-    return workspace;
-  } catch (error) {
-    for (const buffer of buffers) buffer.destroy();
-    throw error;
-  }
 }
 
 function getTiledWorkspace(
@@ -1727,7 +1079,6 @@ function submitPasses(
 function createParameters(
   info: SensorImageInfo,
   workspace: Workspace,
-  reference?: AahdReferenceInfo,
 ): Uint32Array<ArrayBuffer> {
   const parameters = new Uint32Array(64);
   const floats = new Float32Array(parameters.buffer);
@@ -1740,13 +1091,11 @@ function createParameters(
   for (let channel = 0; channel < 4; channel += 1) {
     floats[8 + channel] = info.blackLevels[channel];
   }
-  const { scale, pre } = reference
-    ? { scale: reference.scaleMultipliers, pre: reference.preMultipliers }
-    : calculateDemosaicScale(info);
+  const { scale, pre } = calculateDemosaicScale(info);
   floats.set(scale, 12);
   floats.set(pre, 16);
-  floats.set(reference?.yuvMatrix ?? info.aahdYuvMatrix, 20);
-  floats.set(reference?.outputMatrix ?? info.librawProPhotoMatrix, 32);
+  floats.set(info.aahdYuvMatrix, 20);
+  floats.set(info.librawProPhotoMatrix, 32);
   parameters.set(info.cfaPattern, 48);
   parameters[58] = workspace.coreWidth;
   parameters[59] = workspace.coreHeight;
@@ -1771,118 +1120,4 @@ function createPreprocessingParameters(
 
 function normalizedCfa(channel: number): number {
   return channel === 3 ? 1 : channel;
-}
-
-function largestBufferBytes(info: SensorImageInfo): number {
-  return (
-    (info.width + 8) * (info.height + 8) * 4 * Uint32Array.BYTES_PER_ELEMENT
-  );
-}
-
-export function compareRgb16(
-  actual: Uint16Array,
-  expected: Uint16Array,
-): LibRawAahdValidation {
-  if (actual.length !== expected.length) {
-    throw new Error(
-      `The LibRaw reference has ${expected.length} samples; expected ${actual.length}.`,
-    );
-  }
-  let differingSamples = 0;
-  let samplesOverOneCode = 0;
-  let samplesOverEightCodes = 0;
-  let maximumDifference = 0;
-  let maximumDifferenceIndex = 0;
-  let differenceSum = 0;
-  let squaredDifferenceSum = 0;
-  for (let index = 0; index < actual.length; index += 1) {
-    const difference = Math.abs(actual[index] - expected[index]);
-    if (difference !== 0) differingSamples += 1;
-    if (difference > 1) samplesOverOneCode += 1;
-    if (difference > 8) samplesOverEightCodes += 1;
-    if (difference > maximumDifference) {
-      maximumDifference = difference;
-      maximumDifferenceIndex = index;
-    }
-    differenceSum += difference;
-    squaredDifferenceSum += difference * difference;
-  }
-  const rootMeanSquareDifference = Math.sqrt(
-    squaredDifferenceSum / actual.length,
-  );
-  const maximumPixel = Math.floor(maximumDifferenceIndex / 3) * 3;
-  return {
-    sampleCount: actual.length,
-    differingSamples,
-    samplesOverOneCode,
-    samplesOverEightCodes,
-    maximumDifference,
-    maximumDifferenceIndex,
-    actualAtMaximumDifference: actual[maximumDifferenceIndex],
-    expectedAtMaximumDifference: expected[maximumDifferenceIndex],
-    actualPixelAtMaximumDifference: Array.from(
-      actual.subarray(maximumPixel, maximumPixel + 3),
-    ),
-    expectedPixelAtMaximumDifference: Array.from(
-      expected.subarray(maximumPixel, maximumPixel + 3),
-    ),
-    meanAbsoluteDifference: differenceSum / actual.length,
-    rootMeanSquareDifference,
-    psnrDb:
-      rootMeanSquareDifference === 0
-        ? Number.POSITIVE_INFINITY
-        : 20 * Math.log10(65535 / rootMeanSquareDifference),
-  };
-}
-
-function compareExpandedScalar(
-  actual: Uint16Array,
-  expected: Uint32Array,
-): LibRawAahdValidation {
-  if (actual.length !== expected.length * 3) {
-    throw new Error(
-      `The scalar reference has ${expected.length} pixels; expected ${actual.length / 3}.`,
-    );
-  }
-  let differingSamples = 0;
-  let samplesOverOneCode = 0;
-  let samplesOverEightCodes = 0;
-  let maximumDifference = 0;
-  let maximumDifferenceIndex = 0;
-  let differenceSum = 0;
-  let squaredDifferenceSum = 0;
-  for (let index = 0; index < actual.length; index += 1) {
-    const difference = Math.abs(
-      actual[index] - expected[Math.floor(index / 3)],
-    );
-    if (difference !== 0) differingSamples += 1;
-    if (difference > 1) samplesOverOneCode += 1;
-    if (difference > 8) samplesOverEightCodes += 1;
-    if (difference > maximumDifference) {
-      maximumDifference = difference;
-      maximumDifferenceIndex = index;
-    }
-    differenceSum += difference;
-    squaredDifferenceSum += difference * difference;
-  }
-  const rootMeanSquareDifference = Math.sqrt(
-    squaredDifferenceSum / actual.length,
-  );
-  return {
-    sampleCount: actual.length,
-    differingSamples,
-    samplesOverOneCode,
-    samplesOverEightCodes,
-    maximumDifference,
-    maximumDifferenceIndex,
-    actualAtMaximumDifference: actual[maximumDifferenceIndex],
-    expectedAtMaximumDifference:
-      expected[Math.floor(maximumDifferenceIndex / 3)],
-    meanAbsoluteDifference: differenceSum / actual.length,
-    rootMeanSquareDifference,
-    psnrDb:
-      rootMeanSquareDifference === 0
-        ? Number.POSITIVE_INFINITY
-        : 20 * Math.log10(65535 / rootMeanSquareDifference),
-  };
 }

@@ -1,17 +1,17 @@
 import shader from "./color-transform.wgsl?raw";
 import {
+  acquirePreparedGpuLut,
+  type GpuLut,
+  type PreparedGpuLutLease,
+} from "./webgpu-lut";
+import {
   createCheckedComputePipeline,
   getWebGpuRuntime,
   type WebGpuRuntime,
   writePaddedBuffer,
 } from "./webgpu-runtime";
 
-export interface GpuLut {
-  size(): number;
-  domain_min(): Float32Array;
-  domain_max(): Float32Array;
-  samples(): Float32Array;
-}
+export type { GpuLut } from "./webgpu-lut";
 
 export interface GpuStripTimings {
   inputPreparationMs: number;
@@ -35,18 +35,16 @@ export class WebGpuColorRenderer {
   private constructor(
     private readonly runtime: WebGpuRuntime,
     private readonly pipeline: GPUComputePipeline,
-    private readonly lutBuffer: GPUBuffer,
+    private readonly lutLease: PreparedGpuLutLease,
     private readonly parameterBuffer: GPUBuffer,
-    private readonly lutSize: number,
-    private readonly domainMin: Float32Array,
-    private readonly inverseDomainRange: Float32Array,
   ) {
-    this.parameterView.setUint32(4, this.lutSize, true);
+    const lut = lutLease.prepared;
+    this.parameterView.setUint32(4, lut.size, true);
     for (let axis = 0; axis < 3; axis += 1) {
-      this.parameterView.setFloat32(16 + axis * 4, this.domainMin[axis], true);
+      this.parameterView.setFloat32(16 + axis * 4, lut.domainMin[axis], true);
       this.parameterView.setFloat32(
         32 + axis * 4,
-        this.inverseDomainRange[axis],
+        lut.inverseDomainRange[axis],
         true,
       );
     }
@@ -69,37 +67,26 @@ export class WebGpuColorRenderer {
       pipelinePromises.set(device, pipelinePromise);
     }
     const pipeline = await pipelinePromise;
-    const samples = new Float32Array(lut.samples());
     const buffers: GPUBuffer[] = [];
+    let lutLease: PreparedGpuLutLease | undefined;
     try {
-      const lutBuffer = device.createBuffer({
-        size: samples.byteLength,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      });
-      buffers.push(lutBuffer);
-      device.queue.writeBuffer(lutBuffer, 0, samples);
+      lutLease = acquirePreparedGpuLut(device, lut);
       const parameterBuffer = device.createBuffer({
         size: 48,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
       buffers.push(parameterBuffer);
-      const domainMin = lut.domain_min();
-      const domainMax = lut.domain_max();
-      const inverseDomainRange = domainMin.map(
-        (minimum, axis) => 1 / (domainMax[axis] - minimum),
-      );
       const renderer = new WebGpuColorRenderer(
         sharedRuntime,
         pipeline,
-        lutBuffer,
+        lutLease,
         parameterBuffer,
-        lut.size(),
-        domainMin,
-        inverseDomainRange,
       );
+      lutLease = undefined;
       buffers.length = 0;
       return renderer;
     } catch (error) {
+      lutLease?.release();
       for (const buffer of buffers) buffer.destroy();
       throw new Error("WebGPU could not allocate the export color buffers.", {
         cause: error,
@@ -206,7 +193,7 @@ export class WebGpuColorRenderer {
       layout: this.pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: source } },
-        { binding: 1, resource: { buffer: this.lutBuffer } },
+        { binding: 1, resource: { buffer: this.lutLease.prepared.buffer } },
         { binding: 2, resource: { buffer: destination } },
         { binding: 3, resource: { buffer: this.parameterBuffer } },
       ],
@@ -219,7 +206,7 @@ export class WebGpuColorRenderer {
   }
 
   destroy(): void {
-    this.lutBuffer.destroy();
+    this.lutLease.release();
     this.parameterBuffer.destroy();
   }
 }

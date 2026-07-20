@@ -1,4 +1,6 @@
-use std::{io::Cursor, ops::Range};
+use std::io::Cursor;
+#[cfg(not(target_arch = "wasm32"))]
+use std::ops::Range;
 
 use tiff_core::{ByteOrder, Compression, PhotometricInterpretation, PlanarConfiguration};
 use tiff_writer::{ImageBuilder, ImageHandle, TiffVariant, TiffWriter, WriteOptions};
@@ -101,6 +103,7 @@ impl Rgb16TiffWriter {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn encode_rgb16_strips(
     width: u32,
     height: u32,

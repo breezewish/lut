@@ -5,7 +5,11 @@ import {
   AUTO_EXPOSURE_ZONE_COUNT,
   resolveMatrixAutoExposure,
 } from "./auto-exposure";
-import type { GpuLut } from "./webgpu-color";
+import {
+  acquirePreparedGpuLut,
+  type GpuLut,
+  type PreparedGpuLutLease,
+} from "./webgpu-lut";
 import {
   createCheckedComputePipeline,
   getWebGpuRuntime,
@@ -37,7 +41,6 @@ export function prepareWebGpuPreview(): Promise<{
 type PreviewSourceState = {
   runtime: WebGpuRuntime;
   buffer: GPUBuffer;
-  autoExposure?: Promise<number>;
 };
 
 const previewSourceStates = new WeakMap<
@@ -88,16 +91,15 @@ export class WebGpuPreviewSource {
     }
   }
 
-  /** Measures this retained linear source once on WebGPU and caches its base EV. */
+  /** Measures this retained linear source on WebGPU. */
   measureAutoExposure(): Promise<number> {
     const state = getPreviewSourceState(this);
-    state.autoExposure ??= measureAutoExposure(
+    return measureAutoExposure(
       state.runtime,
       state.buffer,
       this.width,
       this.height,
     );
-    return state.autoExposure;
   }
 
   /** Releases this photo's RGB16 GPU source. */
@@ -119,10 +121,7 @@ type PreviewWorkspace = {
 /** Renders any retained photo through one shared LUT and output workspace. */
 export class WebGpuPreviewRenderer {
   private source: WebGpuPreviewSource;
-  private lutBuffer: GPUBuffer;
-  private lutSize: number;
-  private domainMin: Float32Array;
-  private inverseDomainRange: Float32Array;
+  private lutLease: PreparedGpuLutLease;
   private baseBuffer: GPUBuffer;
   private lutOutputBuffer: GPUBuffer;
   private baseReadback: GPUBuffer;
@@ -139,8 +138,7 @@ export class WebGpuPreviewRenderer {
     source: WebGpuPreviewSource,
     workspace: PreviewWorkspace,
     workspaceBytes: number,
-    lutBuffer: GPUBuffer,
-    lut: GpuLut,
+    lutLease: PreparedGpuLutLease,
   ) {
     this.source = source;
     this.baseBuffer = workspace.baseBuffer;
@@ -148,13 +146,11 @@ export class WebGpuPreviewRenderer {
     this.baseReadback = workspace.baseReadback;
     this.lutReadback = workspace.lutReadback;
     this.workspaceBytes = workspaceBytes;
-    this.lutBuffer = lutBuffer;
-    this.lutSize = lut.size();
-    this.domainMin = lut.domain_min();
-    this.inverseDomainRange = inverseRange(lut);
+    this.lutLease = lutLease;
+    const lut = lutLease.prepared;
     this.bindGroup = this.createBindGroup(
       getPreviewSourceState(source).buffer,
-      lutBuffer,
+      lut.buffer,
       workspace.baseBuffer,
       workspace.lutOutputBuffer,
     );
@@ -175,6 +171,7 @@ export class WebGpuPreviewRenderer {
     }
     const { device } = runtime;
     const buffers: GPUBuffer[] = [];
+    let lutLease: PreparedGpuLutLease | undefined;
     try {
       const workspace = createWorkspace(device, outputBytes, buffers);
       const parameterBuffer = device.createBuffer({
@@ -182,8 +179,7 @@ export class WebGpuPreviewRenderer {
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
       buffers.push(parameterBuffer);
-      const lutBuffer = createLutBuffer(device, lut);
-      buffers.push(lutBuffer);
+      lutLease = acquirePreparedGpuLut(device, lut);
       const renderer = new WebGpuPreviewRenderer(
         runtime,
         pipeline,
@@ -191,12 +187,13 @@ export class WebGpuPreviewRenderer {
         source,
         workspace,
         outputBytes,
-        lutBuffer,
-        lut,
+        lutLease,
       );
+      lutLease = undefined;
       buffers.length = 0;
       return renderer;
     } catch (error) {
+      lutLease?.release();
       for (const buffer of buffers) buffer.destroy();
       throw new Error("WebGPU could not allocate the preview buffers.", {
         cause: error,
@@ -218,7 +215,7 @@ export class WebGpuPreviewRenderer {
     if (requiredBytes <= this.workspaceBytes) {
       const bindGroup = this.createBindGroup(
         sourceState.buffer,
-        this.lutBuffer,
+        this.lutLease.prepared.buffer,
         this.baseBuffer,
         this.lutOutputBuffer,
       );
@@ -236,7 +233,7 @@ export class WebGpuPreviewRenderer {
       );
       const bindGroup = this.createBindGroup(
         sourceState.buffer,
-        this.lutBuffer,
+        this.lutLease.prepared.buffer,
         workspace.baseBuffer,
         workspace.lutOutputBuffer,
       );
@@ -262,26 +259,23 @@ export class WebGpuPreviewRenderer {
   setLut(lut: GpuLut): void {
     this.runtime.assertAvailable();
     const sourceState = getPreviewSourceState(this.source);
-    const next = createLutBuffer(this.runtime.device, lut);
+    const next = acquirePreparedGpuLut(this.runtime.device, lut);
     let bindGroup: GPUBindGroup;
     try {
       bindGroup = this.createBindGroup(
         sourceState.buffer,
-        next,
+        next.prepared.buffer,
         this.baseBuffer,
         this.lutOutputBuffer,
       );
     } catch (error) {
-      next.destroy();
+      next.release();
       throw error;
     }
-    const previous = this.lutBuffer;
-    this.lutBuffer = next;
-    this.lutSize = lut.size();
-    this.domainMin = lut.domain_min();
-    this.inverseDomainRange = inverseRange(lut);
+    const previous = this.lutLease;
+    this.lutLease = next;
     this.bindGroup = bindGroup;
-    previous.destroy();
+    previous.release();
   }
 
   async render(
@@ -347,7 +341,7 @@ export class WebGpuPreviewRenderer {
   }
 
   free(): void {
-    this.lutBuffer.destroy();
+    this.lutLease.release();
     destroyWorkspace(this.workspace());
     this.parameterBuffer.destroy();
   }
@@ -360,8 +354,9 @@ export class WebGpuPreviewRenderer {
     includeBase: boolean,
   ): void {
     const view = this.parameterView;
+    const lut = this.lutLease.prepared;
     view.setFloat32(0, 2 ** ev, true);
-    view.setUint32(4, this.lutSize, true);
+    view.setUint32(4, lut.size, true);
     view.setUint32(8, this.source.width, true);
     view.setUint32(12, this.source.height, true);
     view.setUint32(16, outputWidth, true);
@@ -369,8 +364,8 @@ export class WebGpuPreviewRenderer {
     view.setUint32(24, pixelCount, true);
     view.setUint32(28, Number(includeBase), true);
     for (let axis = 0; axis < 3; axis += 1) {
-      view.setFloat32(32 + axis * 4, this.domainMin[axis], true);
-      view.setFloat32(48 + axis * 4, this.inverseDomainRange[axis], true);
+      view.setFloat32(32 + axis * 4, lut.domainMin[axis], true);
+      view.setFloat32(48 + axis * 4, lut.inverseDomainRange[axis], true);
     }
     this.runtime.device.queue.writeBuffer(
       this.parameterBuffer,
@@ -440,21 +435,6 @@ function destroyWorkspace(workspace: PreviewWorkspace): void {
   workspace.lutOutputBuffer.destroy();
   workspace.baseReadback.destroy();
   workspace.lutReadback.destroy();
-}
-
-function createLutBuffer(device: GPUDevice, lut: GpuLut): GPUBuffer {
-  const samples = new Float32Array(lut.samples());
-  const buffer = device.createBuffer({
-    size: samples.byteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  });
-  try {
-    device.queue.writeBuffer(buffer, 0, samples);
-    return buffer;
-  } catch (error) {
-    buffer.destroy();
-    throw error;
-  }
 }
 
 async function createPipeline(): Promise<{
@@ -563,12 +543,6 @@ function previewDimensions(
     Math.max(1, Math.round(width * scale)),
     Math.max(1, Math.round(height * scale)),
   ];
-}
-
-function inverseRange(lut: GpuLut): Float32Array {
-  const minimum = lut.domain_min();
-  const maximum = lut.domain_max();
-  return minimum.map((value, axis) => 1 / (maximum[axis] - value));
 }
 
 function copyMappedBytes(

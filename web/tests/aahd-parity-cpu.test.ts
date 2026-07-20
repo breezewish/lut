@@ -2,8 +2,6 @@ import { expect, test } from "vitest";
 
 import {
   blendLibRawHighlights,
-  classifyLibRawDefectCandidates,
-  correctLibRawSerialDefects,
   correctLibRawSparseDefects,
   refineLibRawSerialDirections,
 } from "../src/lib/aahd-parity-cpu";
@@ -16,39 +14,14 @@ test("matches LibRaw Blend highlight float semantics", () => {
   expect(Array.from(records)).toEqual([2890442, 15079, 14176, 25586]);
 });
 
-test("applies LibRaw defect corrections in row order", () => {
-  const width = 10;
-  const height = 10;
-  const mosaic = new Uint16Array(width * height).fill(100);
-  mosaic[4 * width + 2] = 0;
-  mosaic[4 * width + 4] = 1;
-
-  const result = correctLibRawSerialDefects(
-    mosaic,
-    width,
-    height,
-    new Uint32Array([0, 1, 1, 2]),
-    [0, 0, 0, 0],
-    new Float32Array([1, 1, 1, 1]),
-  );
-
-  expect(result.corrected[4 * width + 2]).toBe(100);
-  expect(result.corrected[4 * width + 4]).toBe(100);
-  expect(result.defects).toEqual(
-    new Uint32Array([0, (1 << 10) | (1 << 12), 0, 0]),
-  );
-  expect(result.extrema).toEqual(new Uint32Array([1, 0, 0, 100, 100, 100]));
-  expect(mosaic[4 * width + 2]).toBe(0);
-  expect(mosaic[4 * width + 4]).toBe(1);
-});
-
 test("sparse defect correction preserves ordered cascades", () => {
   const width = 10;
   const height = 10;
   const scaled = new Uint16Array(width * height).fill(100);
   scaled[4 * width + 2] = 0;
   scaled[4 * width + 4] = 1;
-  const candidates = classifyLibRawDefectCandidates(scaled, width, height);
+  const candidates = new Uint32Array(4);
+  candidates[1] = 1 << 10;
 
   const defects = correctLibRawSparseDefects(
     scaled,

@@ -288,7 +288,9 @@ async function handleCommand(
             ? pending[0]
             : await Promise.race(
                 pending.map((candidate) =>
-                  prepareLutBytes(candidate).then(() => candidate),
+                  cachedLuts.has(lutCacheKey(candidate))
+                    ? Promise.resolve(candidate)
+                    : prepareLutBytes(candidate).then(() => candidate),
                 ),
               );
         pending.splice(
@@ -411,7 +413,7 @@ async function handleCommand(
               webGpuDemosaic: {
                 algorithm: demosaic.algorithm,
                 timings: demosaic.timings,
-                resources: demosaic.resources!,
+                resources: demosaic.resources,
               },
             },
           };
@@ -722,6 +724,7 @@ async function loadLut(lut: LutDefinition): Promise<WasmLut> {
   if (cachedLut) return cachedLut;
   const bytes = await prepareLutBytes(lut);
   const parsed = new WasmLut(bytes);
+  lutBytePromises.delete(key);
   cachedLuts.set(key, parsed);
   return parsed;
 }

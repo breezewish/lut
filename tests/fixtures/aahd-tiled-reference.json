@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "description": "Pinned LibRaw-parity AAHD RGB16 hashes covering tiled seams, Bayer phases, small images, and unequal black levels.",
+  "cases": [
+    {
+      "name": "seams-rggb",
+      "width": 1058,
+      "height": 1042,
+      "cfa_pattern": [0, 1, 1, 2],
+      "black_levels": [0, 0, 0, 0],
+      "rgb16_sha256": "0db0b35b70693e719fc2259ca0fd2853bf8dd04a4027093203987214019d2a1f",
+      "graded_rgb16_sha256": "36f47494cd8fd4c085a44f2acacc9dc8e6ac283381d1f3565cfb81d478fd0398"
+    },
+    {
+      "name": "small-grbg",
+      "width": 64,
+      "height": 46,
+      "cfa_pattern": [1, 0, 2, 1],
+      "black_levels": [0, 0, 0, 0],
+      "rgb16_sha256": "80370a46b3bd46d9132a4fab2cee5dd00f4373cfb059858b539ccb2f9d05d00b"
+    },
+    {
+      "name": "small-gbrg",
+      "width": 64,
+      "height": 46,
+      "cfa_pattern": [1, 2, 0, 1],
+      "black_levels": [0, 0, 0, 0],
+      "rgb16_sha256": "5adf511c97d807dce51e50ecd328d324f94b20682c6d5067b26386d37d7ba4f9"
+    },
+    {
+      "name": "small-bggr",
+      "width": 64,
+      "height": 46,
+      "cfa_pattern": [2, 1, 1, 0],
+      "black_levels": [0, 0, 0, 0],
+      "rgb16_sha256": "34de50ce45df52196967018cf2c5df3ae04376c15a0f5b5a29b9710e90ddd89c"
+    },
+    {
+      "name": "small-rggb",
+      "width": 64,
+      "height": 46,
+      "cfa_pattern": [0, 1, 1, 2],
+      "black_levels": [0, 0, 0, 0],
+      "rgb16_sha256": "bf750d08696e326cb8084e0d237608b837e97515ec436218f4512fa422d34299"
+    },
+    {
+      "name": "unequal-black-levels",
+      "width": 66,
+      "height": 50,
+      "cfa_pattern": [1, 2, 0, 1],
+      "black_levels": [64, 96, 192, 96],
+      "rgb16_sha256": "f3fa8d7b4c2d47dab73d3040794bb7242f6bec7297e7ee884fe68a0d3f921b2b"
+    }
+  ]
+}

@@ -1,22 +1,21 @@
 # Processing End-to-End Tests
 
 - Corrected V-Log preserves negative values and is continuous at the official breakpoint.
-- An independent standard-library Python float64 oracle checks corrected-v2 Base and LUT RGBA8, RGB16, and decoded TIFF samples and tags without importing production code or constants.
+- An independent standard-library Python float64 oracle checks corrected-v2 Base and LUT RGBA8 plus decoded TIFF samples and tags without importing production code or constants.
 - The corrected D65 matrix preserves neutral values and maps unit primaries and HDR input to the frozen coefficients.
-- Frozen non-clipped pixels decoded by pinned LibRaw directly to linear sRGB match the corrected transform from its ProPhoto D65 output within two code values.
 - A strict CUBE parser validates axis order, domain, scientific notation, finite values, sample count, and a non-affine LUT's distinct outputs for all six tetrahedral branches and their shared boundaries.
-- Corrected preview applies EV, including both supported boundaries, to both Base and LUT views while preserving the requested aspect ratio.
-- Matrix automatic exposure maps a uniform 2% linear scene to 18% gray, caps p99 highlights at 6.0 linear, and leaves an all-black source at zero EV.
+- The native TIFF recipe accepts both supported EV boundaries, while the independent browser oracle verifies production WebGPU Base and LUT pixels at representative negative, zero, and positive EV values.
+- An independent generated oracle drives the production WebGPU meter across uniform, center-weighted, p99-highlight, black, and non-divisible image cases without using production metering code to derive expected EV.
 - The browser preview source requests only contributing decoded rows, retains exactly the pixels used at the requested display size, and rejects incomplete or inconsistent rows.
 - The completed browser preview source can move exactly once into WebGPU ownership, after which the Rust source reports its missing pixels instead of retaining a duplicate allocation.
 - TIFF export produces a readable uncompressed RGB16 image with the requested dimensions.
 - A multi-strip TIFF render visits contiguous source ranges, bounds each quantized strip to approximately 1 MB, and produces contiguous uncompressed strips.
 - The browser export adapter reads contiguous source views of at most approximately 1 MB into the stateful color-WASM encoder and rejects inconsistent strip contracts.
 - The browser export adapter processes a 6240 × 4168 source while keeping every requested source view at or below approximately 1 MB.
-- The production WASM binding gate proves the LibRaw wrapper exposes bounded zero-copy RGB16 views instead of a whole-image JavaScript copy, verified LUT bytes enter Rust through one byte-array binding, preview source creation accepts no RGB16 image, row ingestion is the only preview pixel boundary, per-file removal frees its GPU source and sensor mosaic, and no CPU preview, CPU browser color, or whole-image TIFF render function exists.
+- The production WASM binding gate inspects the compiled module and proves native TIFF, C ABI, status, free-buffer, and V-Log symbols are absent. It also proves the LibRaw wrapper exposes bounded zero-copy RGB16 views instead of a whole-image JavaScript copy, verified LUT bytes enter Rust through one byte-array binding, preview source creation accepts no RGB16 image, row ingestion is the only preview pixel boundary, per-file removal frees its GPU source and sensor mosaic, and no CPU preview, CPU browser color, or whole-image TIFF render function exists.
 - A test-only browser entry runs the independent corrected-v2 pixel oracle through the production WebGPU Preview shader under SwiftShader and permits at most one code value of controlled difference.
 - The native/WASM decoder parity harness covers deterministic linear DNG, lossy JPEG DNG, real Leica CFA DNG, and full-resolution Sony ARW in full-size and half-size modes; every fixture proves separated RGB16 slices share the same WASM memory, out-of-bounds views fail, and complete dimensions and samples match exactly.
 - The sensor harness proves a Preview can copy the visible mosaic, complete its display decode, and only then finalize export metadata while preserving the direct-export metadata JSON, full mosaic checksum, and bounds-checked view lifetime exactly.
 - Decoder capability routing selects the lazy pthread WASM only for patched independent-block, plane, row, or tile decoders; every Sony ARW2, real 8-bit tiled DNG, and generated 12-bit packed DNG sensor sample must exactly match the regular build, while other sequential inputs remain on the regular single-thread build.
 - The RAW fixture manifest verifies hashes, provenance, license, dimensions, and distinct roles for synthetic LinearRaw, real camera CFA DNG, and real camera ARW inputs.
-- A C client compiles against the public header, links the produced computation library, verifies the stable V-Log and status symbols, renders corrected-v2 TIFF bytes, and releases the owned buffer through the paired ABI function.
+- A C client compiles against the public header, links the produced computation library, verifies the stable status symbols, renders corrected-v2 TIFF bytes, and releases the owned buffer through the paired ABI function.

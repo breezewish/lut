@@ -1,4 +1,3 @@
-#include <math.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -11,18 +10,15 @@ int main(void) {
       "0 0 1\n1 0 1\n0 1 1\n1 1 1\n";
   const uint16_t pixels[] = {0, 32768, 65535};
 
-  if (fabsf(lutify_encode_v_log(-0.01f) - 0.069f) > 0.000001f) {
-    return 1;
-  }
   if (strcmp(lutify_status_message(LUTIFY_OK), "ok") != 0) {
-    return 2;
+    return 1;
   }
 
   const LutifyRenderResult result = lutify_render_tiff_v2(
       pixels, 3, 1, 1, 0.0f, (const uint8_t *)cube, strlen(cube));
   if (result.status != LUTIFY_OK || result.buffer.data == NULL ||
       result.buffer.len < 8) {
-    return 3;
+    return 2;
   }
   lutify_free_buffer(result.buffer);
   return 0;

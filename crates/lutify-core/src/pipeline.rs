@@ -1,23 +1,12 @@
-use crate::color::{
-    LIBRAW_PROPHOTO_D65_TO_V_GAMUT, encode_v_log, multiply_matrix, render_base_preview,
-};
-use crate::image::{checked_pixel_count, preview_dimensions};
+use crate::color::{LIBRAW_PROPHOTO_D65_TO_V_GAMUT, encode_v_log, multiply_matrix};
+use crate::image::checked_pixel_count;
 use crate::{Lut3d, LutifyError, Result, tiff};
 
-/// Immutable processing recipe shared by preview and export.
+/// Immutable native corrected-v2 TIFF recipe.
 #[derive(Clone, Debug)]
 pub struct ColorPipeline {
     exposure_multiplier: f32,
     lut: Lut3d,
-}
-
-/// Both preview views rendered from the same decoded input.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Preview {
-    pub width: u32,
-    pub height: u32,
-    pub base_rgba: Vec<u8>,
-    pub lut_rgba: Vec<u8>,
 }
 
 impl ColorPipeline {
@@ -38,63 +27,6 @@ impl ColorPipeline {
         })
     }
 
-    /// Renders base and LUT previews while downsampling directly from RGB16.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for invalid dimensions, pixel count, or preview size.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    pub fn render_preview(
-        &self,
-        pixels: &[u16],
-        width: u32,
-        height: u32,
-        max_edge: u32,
-    ) -> Result<Preview> {
-        validate_image(pixels, width, height)?;
-        let (output_width, output_height) = preview_dimensions(width, height, max_edge)?;
-        let output_pixels = checked_pixel_count(output_width, output_height)?;
-        let mut base_rgba = vec![0; output_pixels * 4];
-        let mut lut_rgba = vec![0; output_pixels * 4];
-
-        for output_y in 0..output_height {
-            let source_y =
-                (u64::from(output_y) * u64::from(height) / u64::from(output_height)) as u32;
-            for output_x in 0..output_width {
-                let source_x =
-                    (u64::from(output_x) * u64::from(width) / u64::from(output_width)) as u32;
-                let source = (source_y as usize * width as usize + source_x as usize) * 3;
-                let target = (output_y as usize * output_width as usize + output_x as usize) * 4;
-                let linear = self.input_pixel(&pixels[source..source + 3]);
-                write_rgba8(
-                    &mut base_rgba[target..target + 4],
-                    render_base_preview(linear),
-                );
-                write_rgba(&mut lut_rgba[target..target + 4], self.render_lut(linear));
-            }
-        }
-
-        Ok(Preview {
-            width: output_width,
-            height: output_height,
-            base_rgba,
-            lut_rgba,
-        })
-    }
-
-    /// Renders display-referred RGB16 for TIFF export without allocating an
-    /// intermediate float image.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when dimensions and pixel count disagree.
-    pub fn render_rgb16(&self, pixels: &[u16], width: u32, height: u32) -> Result<Vec<u16>> {
-        validate_image(pixels, width, height)?;
-        let mut output = Vec::with_capacity(pixels.len());
-        self.render_rgb16_strip(pixels, &mut output);
-        Ok(output)
-    }
-
     /// Renders an uncompressed 16-bit RGB TIFF. Processing is fused into bounded
     /// strips, so no full-size float or quantized image is retained.
     ///
@@ -109,7 +41,7 @@ impl ColorPipeline {
         })
     }
 
-    pub(crate) fn render_rgb16_strip(&self, pixels: &[u16], output: &mut Vec<u16>) {
+    fn render_rgb16_strip(&self, pixels: &[u16], output: &mut Vec<u16>) {
         for input in pixels.chunks_exact(3) {
             output.extend(self.render_lut(self.input_pixel(input)).map(quantize_u16));
         }
@@ -143,23 +75,6 @@ pub(crate) fn validate_image(pixels: &[u16], width: u32, height: u32) -> Result<
         });
     }
     Ok(())
-}
-
-fn write_rgba(output: &mut [u8], rgb: [f32; 3]) {
-    for channel in 0..3 {
-        output[channel] = quantize_u8(rgb[channel]);
-    }
-    output[3] = 255;
-}
-
-fn write_rgba8(output: &mut [u8], rgb: [u8; 3]) {
-    output[..3].copy_from_slice(&rgb);
-    output[3] = 255;
-}
-
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn quantize_u8(value: f32) -> u8 {
-    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -198,21 +113,7 @@ mod tests {
         width: u32,
         height: u32,
         pixels: Vec<u16>,
-        base_rgba: Vec<u8>,
-        lut_rgba: Vec<u8>,
         lut_rgb16: Vec<u16>,
-    }
-
-    #[test]
-    fn exposure_is_applied_to_both_views() {
-        let lut = Lut3d::parse(IDENTITY_2).unwrap();
-        let zero = ColorPipeline::new(0.0, lut.clone()).unwrap();
-        let plus_one = ColorPipeline::new(1.0, lut).unwrap();
-        let pixels = [8_000, 10_000, 12_000];
-        let base_zero = zero.render_preview(&pixels, 1, 1, 1).unwrap();
-        let base_plus_one = plus_one.render_preview(&pixels, 1, 1, 1).unwrap();
-        assert!(base_plus_one.base_rgba[1] > base_zero.base_rgba[1]);
-        assert!(base_plus_one.lut_rgba[1] > base_zero.lut_rgba[1]);
     }
 
     #[test]
@@ -230,17 +131,6 @@ mod tests {
     }
 
     #[test]
-    fn preview_downsamples_without_changing_aspect_ratio() {
-        let lut = Lut3d::parse(IDENTITY_2).unwrap();
-        let pipeline = ColorPipeline::new(0.0, lut).unwrap();
-        let preview = pipeline
-            .render_preview(&vec![0; 400 * 200 * 3], 400, 200, 100)
-            .unwrap();
-        assert_eq!((preview.width, preview.height), (100, 50));
-        assert_eq!(preview.base_rgba.len(), 100 * 50 * 4);
-    }
-
-    #[test]
     fn rejects_invalid_dimensions_and_exposure() {
         let lut = Lut3d::parse(IDENTITY_2).unwrap();
         assert_eq!(
@@ -255,9 +145,10 @@ mod tests {
             ColorPipeline::new(12.1, lut.clone()).unwrap_err(),
             LutifyError::InvalidExposure
         );
-        let pipeline = ColorPipeline::new(0.0, lut).unwrap();
         assert!(matches!(
-            pipeline.render_preview(&[0; 3], 2, 1, 100),
+            ColorPipeline::new(0.0, lut)
+                .unwrap()
+                .render_tiff(&[0; 3], 2, 1),
             Err(LutifyError::InvalidPixelCount { .. })
         ));
     }
@@ -277,22 +168,6 @@ mod tests {
 
         for case in reference.cases {
             let pipeline = ColorPipeline::new(case.ev, lut.clone()).unwrap();
-            let preview = pipeline
-                .render_preview(
-                    &case.pixels,
-                    case.width,
-                    case.height,
-                    case.width.max(case.height),
-                )
-                .unwrap();
-            assert_code_values_close(&case.name, &preview.base_rgba, &case.base_rgba);
-            assert_code_values_close(&case.name, &preview.lut_rgba, &case.lut_rgba);
-
-            let rgb16 = pipeline
-                .render_rgb16(&case.pixels, case.width, case.height)
-                .unwrap();
-            assert_code_values_close(&case.name, &rgb16, &case.lut_rgb16);
-
             let encoded = pipeline
                 .render_tiff(&case.pixels, case.width, case.height)
                 .unwrap();

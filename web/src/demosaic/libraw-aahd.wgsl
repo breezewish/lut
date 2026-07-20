@@ -162,15 +162,6 @@ fn set_rgb_channel(direction: u32, index: u32, channel: u32, value: i32) {
 fn square_wrapped(value: i32) -> i32 { return value * value; }
 
 @compute @workgroup_size(16, 16)
-fn clear(@builtin(global_invocation_id) id: vec3u) {
-  if !in_padded(id) { return; }
-  let index = id.y * padded_width() + id.x;
-  directions[index] = 0u;
-  atomicStore(&horizontal_homogeneity[index], 0u);
-  atomicStore(&vertical_homogeneity[index], 0u);
-}
-
-@compute @workgroup_size(16, 16)
 fn clear_tile(@builtin(global_invocation_id) id: vec3u) {
   if !in_padded(id) { return; }
   let index = id.y * padded_width() + id.x;
@@ -181,26 +172,6 @@ fn clear_tile(@builtin(global_invocation_id) id: vec3u) {
   directions[index] = 0u;
   atomicStore(&horizontal_homogeneity[index], 0u);
   atomicStore(&vertical_homogeneity[index], 0u);
-}
-
-@compute @workgroup_size(16, 16)
-fn initialize(@builtin(global_invocation_id) id: vec3u) {
-  if !in_image(id) { return; }
-  let source_index = image_index(id.x, id.y);
-  if (source_index & 31u) == 0u {
-    atomicStore(&defect_mask[source_index / 32u], 0u);
-  }
-  let channel = cfa_color(id.x, id.y);
-  let sample = scaled_sample(id.x, id.y);
-  let index = padded_index(i32(id.x), i32(id.y));
-  var rgb = vec4u(0u);
-  rgb[channel] = sample;
-  horizontal_rgb[index] = rgb;
-  vertical_rgb[index] = rgb;
-  if sample != 0u {
-    atomicMin(&channel_extrema[channel], sample);
-    atomicMax(&channel_extrema[channel + 3u], sample);
-  }
 }
 
 @compute @workgroup_size(16, 16)
@@ -227,82 +198,8 @@ fn hot_or_dead(center: i32, a: i32, b: i32, c: i32, d: i32,
           center < e && center < f && center < g && center < h);
 }
 
-@compute @workgroup_size(16, 16)
-fn hide_hot_pixels(@builtin(global_invocation_id) id: vec3u) {
-  if !in_image(id) { return; }
-  let index = padded_index(i32(id.x), i32(id.y));
-  let channel = cfa_color(id.x, id.y);
-  let row_color = cfa_color(id.x + 1u, id.y);
-  let known = channel;
-  let center = rgb_channel(0u, index, known);
-  let west2 = rgb_channel(0u, padded_offset(index, -2, 0), known);
-  let east2 = rgb_channel(0u, padded_offset(index, 2, 0), known);
-  let north2 = rgb_channel(0u, padded_offset(index, 0, -2), known);
-  let south2 = rgb_channel(0u, padded_offset(index, 0, 2), known);
-  let west_cross = rgb_channel(0u, padded_offset(index, -1, 0), select(1u, row_color, channel == 1u));
-  let east_cross = rgb_channel(0u, padded_offset(index, 1, 0), select(1u, row_color, channel == 1u));
-  let vertical_color = select(1u, row_color ^ 2u, channel == 1u);
-  let north_cross = rgb_channel(0u, padded_offset(index, 0, -1), vertical_color);
-  let south_cross = rgb_channel(0u, padded_offset(index, 0, 1), vertical_color);
-  if !hot_or_dead(center, west2, east2, north2, south2,
-                  west_cross, east_cross, north_cross, south_cross) { return; }
-
-  var average = 0i;
-  for (var dy = -2; dy <= 2; dy += 2) {
-    for (var dx = -2; dx <= 2; dx += 2) {
-      if dx != 0 || dy != 0 {
-        average += rgb_channel(0u, padded_offset(index, dx, dy), known);
-      }
-    }
-  }
-  average /= 8;
-  if (center >> 4) <= average && (center << 4) >= average { return; }
-
-  directions[index] = directions[index] | HOT;
-  let source_index = image_index(id.x, id.y);
-  atomicOr(&defect_mask[source_index / 32u], 1u << (source_index & 31u));
-  let horizontal = abs(west2 - east2) + abs(west_cross - east_cross) +
-    abs(west_cross - east_cross + east2 - west2);
-  let vertical = abs(north2 - south2) + abs(north_cross - south_cross) +
-    abs(north_cross - south_cross + south2 - north2);
-  let dx = select(0, -1, vertical > horizontal);
-  let dy = select(-1, 0, vertical > horizontal);
-  let replacement = (rgb_channel(0u, padded_offset(index, 2 * dx, 2 * dy), known) +
-    rgb_channel(0u, padded_offset(index, -2 * dx, -2 * dy), known)) / 2;
-  set_rgb_channel(1u, index, known, replacement);
-}
-
-@compute @workgroup_size(16, 16)
-fn copy_corrected(@builtin(global_invocation_id) id: vec3u) {
-  if !in_image(id) { return; }
-  let index = padded_index(i32(id.x), i32(id.y));
-  horizontal_rgb[index] = vertical_rgb[index];
-}
-
-@compute @workgroup_size(16, 16)
-fn write_corrected(@builtin(global_invocation_id) id: vec3u) {
-  let pairs_per_row = width() / 2u;
-  if id.x >= pairs_per_row || id.y >= height() { return; }
-  let x = id.x * 2u;
-  let first_index = padded_index(i32(x), i32(id.y));
-  let second_index = padded_index(i32(x + 1u), i32(id.y));
-  let first = horizontal_rgb[first_index][cfa_color(x, id.y)];
-  let second = horizontal_rgb[second_index][cfa_color(x + 1u, id.y)];
-  pack_pair(vec3u(first), vec3u(second), id.y * pairs_per_row + id.x);
-}
-
 fn defect_at(index: u32) -> u32 {
   return (atomicLoad(&defect_mask[index / 32u]) >> (index & 31u)) & 1u;
-}
-
-@compute @workgroup_size(16, 16)
-fn write_defects(@builtin(global_invocation_id) id: vec3u) {
-  let pairs_per_row = width() / 2u;
-  if id.x >= pairs_per_row || id.y >= height() { return; }
-  let first_index = image_index(id.x * 2u, id.y);
-  let second_index = first_index + 1u;
-  pack_pair(vec3u(defect_at(first_index)), vec3u(defect_at(second_index)),
-            id.y * pairs_per_row + id.x);
 }
 
 @compute @workgroup_size(16, 16)
@@ -404,26 +301,6 @@ fn interpolate_remaining_rb(@builtin(global_invocation_id) id: vec3u) {
   }
 }
 
-@compute @workgroup_size(16, 16)
-fn convert_candidates_to_yuv(@builtin(global_invocation_id) id: vec3u) {
-  if !in_padded(id) { return; }
-  let index = id.y * padded_width() + id.x;
-  for (var direction = 0u; direction < 2u; direction += 1u) {
-    let source = rgb_at(direction, index);
-    // LibRaw stores each gamma LUT result in ushort3 before applying yuv_cam.
-    // The truncation materially affects AAHD's discrete direction decisions.
-    let encoded = vec3f(vec3u(vec3f(
-      gamma_lut[source.x], gamma_lut[source.y], gamma_lut[source.z])));
-    let converted = vec4i(
-      i32(parameter(20) * encoded.x + parameter(21) * encoded.y + parameter(22) * encoded.z),
-      i32(parameter(23) * encoded.x + parameter(24) * encoded.y + parameter(25) * encoded.z),
-      i32(parameter(26) * encoded.x + parameter(27) * encoded.y + parameter(28) * encoded.z),
-      0);
-    if direction == 0u { horizontal_yuv[index] = converted; }
-    else { vertical_yuv[index] = converted; }
-  }
-}
-
 fn store_parity_product(direction: u32, index: u32, value: f32) {
   if direction == 0u {
     var rgb = horizontal_rgb[index];
@@ -489,109 +366,6 @@ fn encoded_rgb(direction: u32, index: u32) -> vec3f {
     gamma_lut[source.x], gamma_lut[source.y], gamma_lut[source.z])));
 }
 
-fn initialize_yuv_products(id: vec3u) {
-  if !in_padded(id) { return; }
-  let index = id.y * padded_width() + id.x;
-  for (var direction = 0u; direction < 2u; direction += 1u) {
-    let encoded = encoded_rgb(direction, index);
-    let products = vec4i(
-      bitcast<i32>(parameter(20) * encoded.x),
-      bitcast<i32>(parameter(23) * encoded.x),
-      bitcast<i32>(parameter(26) * encoded.x),
-      0);
-    if direction == 0u { horizontal_yuv[index] = products; }
-    else { vertical_yuv[index] = products; }
-  }
-}
-
-fn store_yuv_product(id: vec3u, component: u32, channel: u32) {
-  if !in_padded(id) { return; }
-  let index = id.y * padded_width() + id.x;
-  for (var direction = 0u; direction < 2u; direction += 1u) {
-    let encoded = encoded_rgb(direction, index);
-    let product = parameter(20u + component * 3u + channel) * encoded[channel];
-    if direction == 0u {
-      var rgb = horizontal_rgb[index];
-      rgb.w = bitcast<u32>(product);
-      horizontal_rgb[index] = rgb;
-    } else {
-      var rgb = vertical_rgb[index];
-      rgb.w = bitcast<u32>(product);
-      vertical_rgb[index] = rgb;
-    }
-  }
-}
-
-fn add_yuv_product(id: vec3u, component: u32, finish: bool) {
-  if !in_padded(id) { return; }
-  let index = id.y * padded_width() + id.x;
-  for (var direction = 0u; direction < 2u; direction += 1u) {
-    var yuv = yuv_at(direction, index);
-    let accumulator = bitcast<f32>(yuv[component]);
-    let product = bitcast<f32>(rgb_at(direction, index).w);
-    let sum = accumulator + product;
-    yuv[component] = select(bitcast<i32>(sum), i32(sum), finish);
-    if direction == 0u { horizontal_yuv[index] = yuv; }
-    else { vertical_yuv[index] = yuv; }
-  }
-}
-
-@compute @workgroup_size(16, 16)
-fn initialize_yuv_first_products(@builtin(global_invocation_id) id: vec3u) {
-  initialize_yuv_products(id);
-}
-
-@compute @workgroup_size(16, 16)
-fn store_yuv_second_0(@builtin(global_invocation_id) id: vec3u) { store_yuv_product(id, 0u, 1u); }
-@compute @workgroup_size(16, 16)
-fn add_yuv_second_0(@builtin(global_invocation_id) id: vec3u) { add_yuv_product(id, 0u, false); }
-@compute @workgroup_size(16, 16)
-fn store_yuv_third_0(@builtin(global_invocation_id) id: vec3u) { store_yuv_product(id, 0u, 2u); }
-@compute @workgroup_size(16, 16)
-fn finish_yuv_0(@builtin(global_invocation_id) id: vec3u) { add_yuv_product(id, 0u, true); }
-
-@compute @workgroup_size(16, 16)
-fn store_yuv_second_1(@builtin(global_invocation_id) id: vec3u) { store_yuv_product(id, 1u, 1u); }
-@compute @workgroup_size(16, 16)
-fn add_yuv_second_1(@builtin(global_invocation_id) id: vec3u) { add_yuv_product(id, 1u, false); }
-@compute @workgroup_size(16, 16)
-fn store_yuv_third_1(@builtin(global_invocation_id) id: vec3u) { store_yuv_product(id, 1u, 2u); }
-@compute @workgroup_size(16, 16)
-fn finish_yuv_1(@builtin(global_invocation_id) id: vec3u) { add_yuv_product(id, 1u, true); }
-
-@compute @workgroup_size(16, 16)
-fn store_yuv_second_2(@builtin(global_invocation_id) id: vec3u) { store_yuv_product(id, 2u, 1u); }
-@compute @workgroup_size(16, 16)
-fn add_yuv_second_2(@builtin(global_invocation_id) id: vec3u) { add_yuv_product(id, 2u, false); }
-@compute @workgroup_size(16, 16)
-fn store_yuv_third_2(@builtin(global_invocation_id) id: vec3u) { store_yuv_product(id, 2u, 2u); }
-@compute @workgroup_size(16, 16)
-fn finish_yuv_2(@builtin(global_invocation_id) id: vec3u) { add_yuv_product(id, 2u, true); }
-
-fn yuv_bits(source: vec4i) -> vec3u {
-  return vec3u(source.xyz) & vec3u(0xffffu);
-}
-
-@compute @workgroup_size(16, 16)
-fn write_horizontal_yuv(@builtin(global_invocation_id) id: vec3u) {
-  let pairs_per_row = width() / 2u;
-  if id.x >= pairs_per_row || id.y >= height() { return; }
-  let x = id.x * 2u;
-  let first = yuv_bits(horizontal_yuv[padded_index(i32(x), i32(id.y))]);
-  let second = yuv_bits(horizontal_yuv[padded_index(i32(x + 1u), i32(id.y))]);
-  pack_pair(first, second, id.y * pairs_per_row + id.x);
-}
-
-@compute @workgroup_size(16, 16)
-fn write_vertical_yuv(@builtin(global_invocation_id) id: vec3u) {
-  let pairs_per_row = width() / 2u;
-  if id.x >= pairs_per_row || id.y >= height() { return; }
-  let x = id.x * 2u;
-  let first = yuv_bits(vertical_yuv[padded_index(i32(x), i32(id.y))]);
-  let second = yuv_bits(vertical_yuv[padded_index(i32(x + 1u), i32(id.y))]);
-  pack_pair(first, second, id.y * pairs_per_row + id.x);
-}
-
 fn yuv_difference(direction: u32, center: u32, neighbor: u32) -> vec2i {
   let a = yuv_at(direction, center);
   let b = yuv_at(direction, neighbor);
@@ -640,31 +414,6 @@ fn evaluate_homogeneity(@builtin(global_invocation_id) id: vec3u) {
   }
 }
 
-fn homogeneity_at(direction: u32, index: u32) -> u32 {
-  return select(atomicLoad(&vertical_homogeneity[index]),
-                atomicLoad(&horizontal_homogeneity[index]), direction == 0u);
-}
-
-@compute @workgroup_size(16, 16)
-fn write_horizontal_homogeneity(@builtin(global_invocation_id) id: vec3u) {
-  let pairs_per_row = width() / 2u;
-  if id.x >= pairs_per_row || id.y >= height() { return; }
-  let x = id.x * 2u;
-  let first = homogeneity_at(0u, padded_index(i32(x), i32(id.y)));
-  let second = homogeneity_at(0u, padded_index(i32(x + 1u), i32(id.y)));
-  pack_pair(vec3u(first), vec3u(second), id.y * pairs_per_row + id.x);
-}
-
-@compute @workgroup_size(16, 16)
-fn write_vertical_homogeneity(@builtin(global_invocation_id) id: vec3u) {
-  let pairs_per_row = width() / 2u;
-  if id.x >= pairs_per_row || id.y >= height() { return; }
-  let x = id.x * 2u;
-  let first = homogeneity_at(1u, padded_index(i32(x), i32(id.y)));
-  let second = homogeneity_at(1u, padded_index(i32(x + 1u), i32(id.y)));
-  pack_pair(vec3u(first), vec3u(second), id.y * pairs_per_row + id.x);
-}
-
 fn homogeneity_sum(direction: u32, index: u32) -> u32 {
   var result = 0u;
   for (var dy = -1; dy <= 1; dy += 1) {
@@ -707,7 +456,7 @@ fn choose_direction(@builtin(global_invocation_id) id: vec3u) {
   directions[index] = (directions[index] & HOT) | direction;
 }
 
-fn refined_direction(index: u32, require_coding_neighbor: bool) -> u32 {
+fn refined_direction(index: u32) -> u32 {
   let north = directions[padded_offset(index, 0, -1)];
   let south = directions[padded_offset(index, 0, 1)];
   let west = directions[padded_offset(index, -1, 0)];
@@ -718,11 +467,10 @@ fn refined_direction(index: u32, require_coding_neighbor: bool) -> u32 {
   let coding_neighbor = select((west & HOR) != 0u || (east & HOR) != 0u,
                                (north & VER) != 0u || (south & VER) != 0u,
                                (value & VER) != 0u);
-  let threshold = select(3u, 2u, require_coding_neighbor);
-  if (value & VER) != 0u && horizontal_count > threshold && (!require_coding_neighbor || !coding_neighbor) {
+  if (value & VER) != 0u && horizontal_count > 2u && !coding_neighbor {
     value = (value & ~VER) | HOR;
   }
-  if (value & HOR) != 0u && vertical_count > threshold && (!require_coding_neighbor || !coding_neighbor) {
+  if (value & HOR) != 0u && vertical_count > 2u && !coding_neighbor {
     value = (value & ~HOR) | VER;
   }
   return value;
@@ -732,14 +480,14 @@ fn refined_direction(index: u32, require_coding_neighbor: bool) -> u32 {
 fn refine_checker_even(@builtin(global_invocation_id) id: vec3u) {
   if !in_image(id) || ((origin_x() + id.x) & 1u) != ((origin_y() + id.y) & 1u) { return; }
   let index = padded_index(i32(id.x), i32(id.y));
-  directions[index] = refined_direction(index, true);
+  directions[index] = refined_direction(index);
 }
 
 @compute @workgroup_size(16, 16)
 fn refine_checker_odd(@builtin(global_invocation_id) id: vec3u) {
   if !in_image(id) || ((origin_x() + id.x) & 1u) == ((origin_y() + id.y) & 1u) { return; }
   let index = padded_index(i32(id.x), i32(id.y));
-  directions[index] = refined_direction(index, true);
+  directions[index] = refined_direction(index);
 }
 
 @compute @workgroup_size(16, 16)
@@ -749,22 +497,6 @@ fn load_tiled_direction_plane(@builtin(global_invocation_id) id: vec3u) {
   let direction = (refined_direction_plane[global_index / 8u] >>
     ((global_index & 7u) * 4u)) & 15u;
   directions[padded_index(i32(id.x), i32(id.y))] = direction;
-}
-
-@compute @workgroup_size(16, 16)
-fn refine_isolated(@builtin(global_invocation_id) id: vec3u) {
-  if !in_image(id) { return; }
-  let index = padded_index(i32(id.x), i32(id.y));
-  var value = directions[index];
-  if (value & 1u) == 0u { value = refined_direction(index, false); }
-  atomicStore(&horizontal_homogeneity[index], value);
-}
-
-@compute @workgroup_size(16, 16)
-fn copy_refined_directions(@builtin(global_invocation_id) id: vec3u) {
-  if !in_image(id) { return; }
-  let index = padded_index(i32(id.x), i32(id.y));
-  directions[index] = atomicLoad(&horizontal_homogeneity[index]);
 }
 
 @compute @workgroup_size(16, 16)
@@ -796,82 +528,12 @@ fn in_core_pairs(id: vec3u) -> bool {
 }
 
 @compute @workgroup_size(16, 16)
-fn write_horizontal(@builtin(global_invocation_id) id: vec3u) {
-  if !in_core_pairs(id) { return; }
-  let position = core_position(id);
-  let first = horizontal_rgb[padded_index(i32(position.x), i32(position.y))].xyz;
-  let second = horizontal_rgb[padded_index(i32(position.x + 1u), i32(position.y))].xyz;
-  pack_pair(first, second, id.y * (core_width() / 2u) + id.x);
-}
-
-@compute @workgroup_size(16, 16)
-fn write_vertical(@builtin(global_invocation_id) id: vec3u) {
-  if !in_core_pairs(id) { return; }
-  let position = core_position(id);
-  let first = vertical_rgb[padded_index(i32(position.x), i32(position.y))].xyz;
-  let second = vertical_rgb[padded_index(i32(position.x + 1u), i32(position.y))].xyz;
-  pack_pair(first, second, id.y * (core_width() / 2u) + id.x);
-}
-
-@compute @workgroup_size(16, 16)
-fn write_directions(@builtin(global_invocation_id) id: vec3u) {
-  if !in_core_pairs(id) { return; }
-  let position = core_position(id);
-  let first = directions[padded_index(i32(position.x), i32(position.y))] & 15u;
-  let second = directions[padded_index(i32(position.x + 1u), i32(position.y))] & 15u;
-  pack_pair(vec3u(first), vec3u(second), id.y * (core_width() / 2u) + id.x);
-}
-
-@compute @workgroup_size(16, 16)
 fn write_direction_plane(@builtin(global_invocation_id) id: vec3u) {
   if !in_core_pairs(id) { return; }
   let position = core_position(id);
   let first = directions[padded_index(i32(position.x), i32(position.y))] & 15u;
   let second = directions[padded_index(i32(position.x + 1u), i32(position.y))] & 15u;
   output[id.y * (core_width() / 2u) + id.x] = first | (second << 16u);
-}
-
-@compute @workgroup_size(16, 16)
-fn load_direction_plane(@builtin(global_invocation_id) id: vec3u) {
-  if !in_image(id) { return; }
-  directions[padded_index(i32(id.x), i32(id.y))] =
-    sensor_sample(image_index(id.x, id.y));
-}
-
-@compute @workgroup_size(16, 16)
-fn write_aahd(@builtin(global_invocation_id) id: vec3u) {
-  if !in_core_pairs(id) { return; }
-  let position = core_position(id);
-  let first = horizontal_rgb[padded_index(i32(position.x), i32(position.y))].xyz;
-  let second = horizontal_rgb[padded_index(i32(position.x + 1u), i32(position.y))].xyz;
-  pack_pair(first, second, id.y * (core_width() / 2u) + id.x);
-}
-
-@compute @workgroup_size(16, 16)
-fn blend_highlights(@builtin(global_invocation_id) id: vec3u) {
-  if !in_image(id) { return; }
-  let index = padded_index(i32(id.x), i32(id.y));
-  let source = horizontal_rgb[index].xyz;
-  let clip = highlight_clip();
-  if all(source <= vec3u(clip)) { return; }
-  let clipped = min(source, vec3u(clip));
-  let source_lab = vec3f(
-    f32(i32(source.x) + i32(source.y) + i32(source.z)),
-    f32(i32(1.7320508 * f32(source.x)) + i32(-1.7320508 * f32(source.y))),
-    f32(-i32(source.x) - i32(source.y) + 2 * i32(source.z)));
-  let clipped_lab = vec3f(
-    f32(i32(clipped.x) + i32(clipped.y) + i32(clipped.z)),
-    f32(i32(1.7320508 * f32(clipped.x)) + i32(-1.7320508 * f32(clipped.y))),
-    f32(-i32(clipped.x) - i32(clipped.y) + 2 * i32(clipped.z)));
-  let source_chroma = source_lab.y * source_lab.y + source_lab.z * source_lab.z;
-  let clipped_chroma = clipped_lab.y * clipped_lab.y + clipped_lab.z * clipped_lab.z;
-  let ratio = sqrt(clipped_chroma / source_chroma);
-  let lab = vec3f(source_lab.x, source_lab.y * ratio, source_lab.z * ratio);
-  let restored = vec3f(
-    lab.x + 0.8660254 * lab.y - 0.5 * lab.z,
-    lab.x - 0.8660254 * lab.y - 0.5 * lab.z,
-    lab.x + lab.z) / 3.0;
-  horizontal_rgb[index] = vec4u(vec3u(restored), 0u);
 }
 
 fn highlight_clip() -> u32 {
