@@ -1289,17 +1289,6 @@ input.chromatic-range--tint::-moz-range-track {
 .output-status svg {
   flex: 0 0 auto;
 }
-.output-head {
-  min-height: 2.125rem;
-  display: flex;
-  align-items: center;
-}
-.output-format__meta {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s1);
-}
 .output-split {
   min-width: 0;
   display: flex;

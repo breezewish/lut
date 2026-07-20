@@ -564,7 +564,7 @@ test("renders the main preview only after the adjustment recipe changes", async 
     name: "Export selected as TIFF",
   });
   expect(exportButton).toBeDisabled();
-  expect(screen.getByLabelText("Output")).toHaveTextContent("Output");
+  expect(screen.queryByText("Output", { exact: true })).not.toBeInTheDocument();
   expect(screen.getByLabelText("Output")).toHaveTextContent(
     /Loading output…|Finishing preview…/,
   );

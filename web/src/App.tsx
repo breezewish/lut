@@ -1799,28 +1799,23 @@ export default function App() {
               </div>
 
               <div className="panel panel--output" aria-label="Output">
-                <div className="output-head">
-                  <span className="output-format__meta">
-                    <span className="panel__title">Output</span>
-                    {exportUnavailableReason && (
-                      <span
-                        id="output-status"
-                        className="output-status"
-                        role="status"
-                        title={exportUnavailableReason}
-                      >
-                        {isPreviewProcessing && (
-                          <LoaderCircle
-                            size={12}
-                            className="spin"
-                            aria-hidden="true"
-                          />
-                        )}
-                        <span>{exportUnavailableReason}</span>
-                      </span>
+                {exportUnavailableReason && (
+                  <span
+                    id="output-status"
+                    className="output-status"
+                    role="status"
+                    title={exportUnavailableReason}
+                  >
+                    {isPreviewProcessing && (
+                      <LoaderCircle
+                        size={12}
+                        className="spin"
+                        aria-hidden="true"
+                      />
                     )}
+                    <span>{exportUnavailableReason}</span>
                   </span>
-                </div>
+                )}
                 {exporting && exportProgress && exportProgress.total > 1 ? (
                   <Button
                     className="output-action export-progress"

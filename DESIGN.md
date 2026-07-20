@@ -12,7 +12,7 @@ The application supports persistent Light and Dark modes. Light mode uses a brig
 
 Desktop uses a stable editing shell:
 
-- The top toolbar owns app identity, active document and camera metadata, output-color status, local-privacy status, theme, and import.
+- The top toolbar owns app identity, active document and camera metadata, local-privacy status, theme, and import.
 - The center canvas owns Base and LUT comparison and remains the largest surface.
 - The right inspector owns adjustments first and output second.
 - The bottom filmstrip owns local source files and their processing state.
@@ -31,7 +31,7 @@ Use one Inter-compatible system sans family. Meaningful UI labels and metadata u
 
 Buttons use a consistent 6 px radius and 32–36 px desktop body; coarse-pointer targets expand to 44 px. Inputs use a compact 30–34 px body inside clear labeled groups. Search, selection, numeric entry, and range controls share dedicated control tokens and authored hover, focus, active, and disabled states instead of browser defaults. Menus render through a portal. A visible spinner in the adjustment header communicates whenever the displayed recipe is still processing. Surfaces use fill changes instead of borders or shadows. Queue status is conveyed per-item by an icon and row fill, not a colored accent stripe.
 
-Look discovery uses a stable searchable thumbnail catalog. Every tile is rendered from a dedicated 132px preview at the active EV. The unverified output color space remains visible as compact toolbar status. Output contains a standard TIFF/JPEG selector and one primary export action.
+Look discovery uses a stable searchable thumbnail catalog. Every tile is rendered from a dedicated 132px preview at the active EV. Export uses one self-labeled split button without a repeated section heading: the main segment exports and the trailing segment chooses TIFF or JPEG.
 
 The six most recently used photos retain decoded WebGPU preview sources, while the three most recent retain their latest comparison and Look thumbnails in UI memory. One serialized renderer shares its LUT, output, and readback workspace across those sources. Returning to a retained source never reads or decodes the RAW again; a UI-retained photo restores its exact visible recipe immediately. Full-resolution export remains uncached and sequential.
 
