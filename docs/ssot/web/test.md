@@ -16,7 +16,7 @@
 - A real camera RAW displays its labeled embedded JPEG before the processed preview replaces it.
 - Decode, rerender, and export issue only same-origin static GET requests; no photo data is uploaded.
 - A populated queue accepts another drop, and duplicate files in the same drop event create only one queue entry.
-- A one-photo import selects that new photo, a multi-photo import selects its first new photo, and after the selected Preview is usable every later photo is asked once for an embedded filmstrip thumbnail, including JPEG and RGB bitmap sources, without changing the active photo or fully decoding the queued RAWs.
+- A one-photo import selects that new photo, rapid consecutive imports retain both batches, a duplicate-only import preserves removal undo, and a multi-photo import selects its first new photo. After the selected Preview is usable and interactive work is idle, a separate worker asks every later photo once for an embedded filmstrip thumbnail, including JPEG and RGB bitmap sources. New interactive work cancels extraction, and idle termination releases the auxiliary LibRaw runtime without changing the active photo or fully decoding queued RAWs.
 - A rotated portrait RAW uses taller-than-wide filmstrip and Look thumbnails from its orientation-correct metadata while landscape thumbnails retain the compact 3:2 layout.
 - Synthetic LinearRaw, real Leica DNG, and Sony ARW output decode to exactly the same RGB16 dimensions and samples in native and WASM LibRaw builds in both full-size and half-size modes.
 - Full-resolution export sampled to display size and fast Preview satisfy the RGB8 quality contract for Linear DNG, lossy Linear DNG, Leica Bayer DNG, rotated Leica Bayer DNG, Sony Bayer ARW, and Fujifilm X-Trans RAF; fixed crops are emitted for visual inspection.
@@ -60,15 +60,17 @@
   JPEG and lossy JPEG DNG files. Both compare every browser TIFF channel with
   the native LibRaw oracle, and the report records their Preview and Export
   decoder timings and selected backend.
-- A test-only hardware entry compares GPU X-Trans camera RGB with a captured
-  LibRaw result before highlights and color. X-T1 and X-T2 must match every
-  RGB16 sample exactly; X-T1 also supplies nonempty Blend-highlight coverage to
-  the end-to-end TIFF comparison.
+- A test-only hardware entry streams GPU X-Trans camera RGB into exact hashes
+  pinned beside each camera fixture and generated from LibRaw before highlights and color. X-T1 and X-T2 must
+  match every RGB16 sample exactly without retaining a second full-frame RGB16
+  image; X-T1 also supplies nonempty Blend-highlight coverage to the end-to-end
+  TIFF comparison.
 - Pinned synthetic output hashes prove that sparse ordered defect correction and
   tiled AAHD remain exact across all four Bayer phases, both tile axes,
-  rectangular edge tiles, a smaller-than-tile image, unequal per-channel black
-  levels, and the production graded-output path without retaining a second
-  full-frame GPU implementation as its oracle.
+  rectangular edge tiles, a smaller-than-tile image, and unequal per-channel
+  black levels without retaining a second full-frame GPU implementation as its
+  oracle. Corrected-v2 color remains covered by the independent pixel oracle
+  and production export comparison.
 - Removing camera white balance from the Leica DNG makes the wrapper reproduce
   LibRaw's four-channel auto-WB pre-multipliers before WebGPU scaling, and the
   final hardware TIFF remains within two codes of production LibRaw.

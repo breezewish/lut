@@ -1062,10 +1062,11 @@ input[type="range"]:disabled {
 }
 .chromatic-range::-webkit-slider-runnable-track {
   height: 0.25rem;
+  background: var(--chromatic-track);
   box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
 }
-input.chromatic-range--temperature::-webkit-slider-runnable-track {
-  background: linear-gradient(
+.chromatic-range--temperature {
+  --chromatic-track: linear-gradient(
     to right,
     #4d82d8,
     #b9c9d9 42%,
@@ -1074,8 +1075,8 @@ input.chromatic-range--temperature::-webkit-slider-runnable-track {
     #d97a33
   );
 }
-input.chromatic-range--tint::-webkit-slider-runnable-track {
-  background: linear-gradient(
+.chromatic-range--tint {
+  --chromatic-track: linear-gradient(
     to right,
     #4f955f,
     #b9c9b8 42%,
@@ -1093,27 +1094,8 @@ input.chromatic-range--tint::-webkit-slider-runnable-track {
 }
 .chromatic-range::-moz-range-track {
   height: 0.25rem;
+  background: var(--chromatic-track);
   box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
-}
-input.chromatic-range--temperature::-moz-range-track {
-  background: linear-gradient(
-    to right,
-    #4d82d8,
-    #b9c9d9 42%,
-    #d6d1c6 50%,
-    #e4ae62 65%,
-    #d97a33
-  );
-}
-input.chromatic-range--tint::-moz-range-track {
-  background: linear-gradient(
-    to right,
-    #4f955f,
-    #b9c9b8 42%,
-    #d6d1c6 50%,
-    #d7a7c7 65%,
-    #b95896
-  );
 }
 .chromatic-range::-moz-range-progress {
   background: transparent;
@@ -1347,6 +1329,16 @@ input.chromatic-range--tint::-moz-range-track {
   font-size: var(--t-xs);
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+.export-progress__file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.export-progress__position {
+  flex: 0 0 auto;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ═══ Filmstrip (bottom photo picker) ══════════════════════════════════════ */

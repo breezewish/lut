@@ -4,11 +4,9 @@ import type {
   ExportResult,
   LookPreviewResult,
   LutDefinition,
-  OutputFormat,
   PreviewResult,
   WorkerCommand,
   WorkerReply,
-  WhiteBalanceValues,
 } from "../types";
 
 type Pending = {
@@ -21,23 +19,29 @@ type PreviewPending = {
   reject: (error: Error) => void;
 };
 
-type RenderBatch = {
-  fileId: string;
-  ev: number;
-  whiteBalance: WhiteBalanceValues;
-  lut: LutDefinition;
-  maxEdge: number;
-  includeBase: boolean;
-  pending: PreviewPending;
-};
-
-type PreviewRenderOptions = Pick<RenderBatch, "maxEdge" | "includeBase">;
-
 type WorkerRequest = WorkerCommand extends infer Command
   ? Command extends { requestId: number }
     ? Omit<Command, "requestId">
     : never
   : never;
+
+type DecodeRequest = Omit<Extract<WorkerRequest, { type: "decode" }>, "type">;
+type RenderRequest = Extract<WorkerRequest, { type: "render" }>;
+type RenderInput = Omit<RenderRequest, "type" | "maxEdge" | "includeBase">;
+type RenderBatch = Omit<RenderRequest, "type"> & { pending: PreviewPending };
+type PreviewRenderOptions = Pick<RenderRequest, "maxEdge" | "includeBase">;
+type RenderLooksRequest = Omit<
+  Extract<WorkerRequest, { type: "render-looks" }>,
+  "type"
+>;
+type ExportRequest = Omit<Extract<WorkerRequest, { type: "export" }>, "type">;
+
+/** Closes transferred preview bitmaps when no UI owns the result. */
+export function releaseTransferredPreview(result: DisplayPreviewResult): void {
+  if (!("lutBitmap" in result)) return;
+  result.baseBitmap?.close();
+  result.lutBitmap.close();
+}
 
 export class ProcessingClient {
   private readonly worker = new Worker(
@@ -66,11 +70,16 @@ export class ProcessingClient {
         return;
       }
       if (data.ok && data.type === "look-preview") {
-        this.lookPreviewListener?.(data.result);
+        if (this.lookPreviewListener) this.lookPreviewListener(data.result);
+        else data.result.bitmap.close();
         return;
       }
       const pending = this.pending.get(data.requestId);
-      if (!pending) return;
+      if (!pending) {
+        if (data.ok && data.type === "preview")
+          releaseTransferredPreview(data.result);
+        return;
+      }
       this.pending.delete(data.requestId);
       if (!data.ok) pending.reject(new Error(data.error));
       else pending.resolve(data);
@@ -112,7 +121,7 @@ export class ProcessingClient {
   }
 
   /** Starts every LUT download concurrently without delaying app startup. */
-  async prepareLuts(luts: LutDefinition[]): Promise<void> {
+  prefetchLuts(luts: LutDefinition[]): void {
     if (this.stoppedError) throw this.stoppedError;
     const requestId = this.nextRequestId++;
     this.worker.postMessage({ requestId, type: "prepare-luts", luts });
@@ -141,35 +150,16 @@ export class ProcessingClient {
     throw new Error("Worker returned an unexpected release response.");
   }
 
-  /** Loads a RAW's embedded thumbnail without decoding its processed Preview. */
-  async loadThumbnail(fileId: string, buffer: ArrayBuffer): Promise<boolean> {
-    const reply = await this.send({ type: "load-thumbnail", fileId, buffer }, [
-      buffer,
-    ]);
-    if (reply.ok && reply.type === "thumbnail-loaded") return reply.found;
-    throw new Error("Worker returned an unexpected thumbnail response.");
-  }
-
-  async decode(
-    fileId: string,
-    buffer: ArrayBuffer,
-    ev: number,
-    whiteBalance: WhiteBalanceValues,
-    lut: LutDefinition,
-  ): Promise<DisplayPreviewResult> {
+  async decode(request: DecodeRequest): Promise<DisplayPreviewResult> {
     this.rejectQueuedRender(
       new Error("Preview render was superseded by a new RAW decode."),
     );
     const reply = await this.send(
       {
         type: "decode",
-        fileId,
-        buffer,
-        ev,
-        whiteBalance,
-        lut,
+        ...request,
       },
-      [buffer],
+      [request.buffer],
     );
     if (reply.ok && reply.type === "preview") {
       performance.mark("lutify:preview-worker", {
@@ -184,10 +174,7 @@ export class ProcessingClient {
   }
 
   render(
-    fileId: string,
-    ev: number,
-    whiteBalance: WhiteBalanceValues,
-    lut: LutDefinition,
+    request: RenderInput,
     options: PreviewRenderOptions = { maxEdge: 1_024, includeBase: true },
   ): Promise<DisplayPreviewResult> {
     if (this.stoppedError) return Promise.reject(this.stoppedError);
@@ -196,10 +183,7 @@ export class ProcessingClient {
       const pending = { resolve, reject };
       if (!this.activeRender) {
         this.startRender({
-          fileId,
-          ev,
-          whiteBalance,
-          lut,
+          ...request,
           ...options,
           pending,
         });
@@ -212,10 +196,7 @@ export class ProcessingClient {
         );
       }
       this.queuedRender = {
-        fileId,
-        ev,
-        whiteBalance,
-        lut,
+        ...request,
         ...options,
         pending,
       };
@@ -223,28 +204,18 @@ export class ProcessingClient {
   }
 
   /** Progressively renders one photo through an interruptible LUT batch. */
-  async renderLooks(
-    fileId: string,
-    ev: number,
-    whiteBalance: WhiteBalanceValues,
-    luts: LutDefinition[],
-    maxEdge: number,
-  ): Promise<number> {
+  async renderLooks(request: RenderLooksRequest): Promise<number> {
     const startedAt = performance.now();
     const reply = await this.send({
       type: "render-looks",
-      fileId,
-      ev,
-      whiteBalance,
-      luts,
-      maxEdge,
+      ...request,
     });
     if (reply.ok && reply.type === "look-previews") {
       performance.mark("lutify:look-preview-batch", {
         detail: {
-          fileId,
-          ev,
-          requested: luts.length,
+          fileId: request.fileId,
+          ev: request.ev,
+          requested: request.luts.length,
           completed: reply.completed,
           durationMs: performance.now() - startedAt,
         },
@@ -254,31 +225,14 @@ export class ProcessingClient {
     throw new Error("Worker returned an unexpected Look preview response.");
   }
 
-  async export(
-    fileId: string,
-    buffer: ArrayBuffer,
-    ev: number,
-    whiteBalance: WhiteBalanceValues,
-    baseEv: number | undefined,
-    lut: LutDefinition,
-    format: OutputFormat,
-  ): Promise<ExportResult> {
+  async export(request: ExportRequest): Promise<ExportResult> {
     this.rejectQueuedRender(
       new Error("Preview render was superseded by full-resolution export."),
     );
-    const reply = await this.send(
-      {
-        type: "export",
-        fileId,
-        buffer,
-        ev,
-        whiteBalance,
-        baseEv,
-        lut,
-        format,
-      },
-      [buffer],
-    );
+    const reply = await this.send({
+      type: "export",
+      ...request,
+    });
     if (reply.ok && reply.type === "export") {
       return {
         bytes: reply.bytes,

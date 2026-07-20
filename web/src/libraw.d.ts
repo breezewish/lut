@@ -12,13 +12,6 @@ declare module "*libraw.js" {
     camera_model: string;
   }
 
-  interface Thumbnail {
-    width: number;
-    height: number;
-    format: "jpeg" | "bitmap" | "unknown";
-    data: Uint8Array<ArrayBuffer>;
-  }
-
   class LibRawInstance {
     open(buffer: Uint8Array, halfSize: boolean): void;
     openPreview(buffer: Uint8Array, maxEdge: number): void;
@@ -31,8 +24,6 @@ declare module "*libraw.js" {
     imageInfo(): DecodedImageInfo;
     imageInfoRetainingDecoder(): DecodedImageInfo;
     discardImage(): void;
-    enableDemosaicCapture(): void;
-    demosaicView(offset: number, length: number): Uint16Array;
     imageView(offset: number, length: number): Uint16Array;
     supportsWebGpuAahd(): boolean;
     supportsWebGpuXtrans(): boolean;
@@ -42,7 +33,9 @@ declare module "*libraw.js" {
     sensorView(offset: number, length: number): Uint16Array;
     sensorTimings(): import("./types").LibRawSensorTimings;
     timings(): import("./types").LibRawDecodeTimings;
-    thumbnailData(): Thumbnail | undefined;
+    thumbnailData():
+      | import("./lib/embedded-thumbnail").EmbeddedThumbnail
+      | undefined;
     xtransCbrtView(): Float32Array;
     usesParallelUnpack(): boolean;
     delete(): void;

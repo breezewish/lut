@@ -11,6 +11,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import type { CSSProperties } from "react";
 import { memo } from "react";
 
+import type { SelectionModifiers } from "../lib/photo-queue";
 import type { QueueItem } from "../types";
 
 function StatusGlyph({ status }: { status: QueueItem["status"] }) {
@@ -38,11 +39,6 @@ const STATUS_LABELS: Record<QueueItem["status"], string> = {
   "export-error": "Failed",
 };
 
-export interface PhotoSelect {
-  additive: boolean;
-  range: boolean;
-}
-
 /**
  * The bottom photo filmstrip. Every imported RAW is a tile; clicking activates
  * it (Cmd/Ctrl-click adds to a multi-selection, Shift-click extends a range).
@@ -61,7 +57,7 @@ export const Filmstrip = memo(function Filmstrip({
   activeId?: string;
   selectedIds: Set<string>;
   exporting: boolean;
-  onSelect: (id: string, modifiers: PhotoSelect) => void;
+  onSelect: (id: string, modifiers: SelectionModifiers) => void;
   onRemove: (id: string) => void;
   onAdd: () => void;
 }) {

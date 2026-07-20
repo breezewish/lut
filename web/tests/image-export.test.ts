@@ -32,6 +32,22 @@ test("streams rendered bands across fixed image strip boundaries", () => {
   expect(encoder.free).not.toHaveBeenCalled();
 });
 
+test("rejects an incomplete final image strip", () => {
+  const encoder: GpuStripImageEncoder = {
+    next_strip_samples: () => 4,
+    write_rendered_strip: vi.fn(),
+    finish: vi.fn(),
+    free: vi.fn(),
+  };
+  const stream = new RenderedImageStream(encoder);
+
+  stream.write(new Uint16Array([1, 2, 3]));
+
+  expect(() => stream.finish(4)).toThrow(
+    "Image stream consumed 0 samples with 3 pending; expected 4.",
+  );
+});
+
 test("batches GPU color independently from image encoder strips", async () => {
   const source = new Uint16Array([1, 2, 3, 4, 5, 6]);
   const sizes = [3, 3, 0];

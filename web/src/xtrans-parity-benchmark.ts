@@ -1,4 +1,5 @@
 import createLibRaw from "./libraw/libraw.js";
+import { createSha256Hasher } from "./lib/hash";
 import { demosaicLibRawXtransTiledWithWgsl } from "./lib/libraw-xtrans";
 import type { SensorImageInfo } from "./lib/sensor-image";
 
@@ -27,6 +28,14 @@ export function mountXtransParity(): void {
 }
 
 async function compare(file: File) {
+  const expectedHash = new URLSearchParams(location.search).get(
+    "expectedDemosaicSha256",
+  );
+  if (!expectedHash || !/^[0-9a-f]{64}$/.test(expectedHash)) {
+    throw new Error(
+      "Fixture has no valid pinned LibRaw X-Trans demosaic hash.",
+    );
+  }
   const bytes = new Uint8Array(await file.arrayBuffer());
   const module = await createLibRaw();
   const sensorRaw = new module.LibRaw();
@@ -45,78 +54,45 @@ async function compare(file: File) {
     sensorRaw.delete();
   }
 
-  const referenceRaw = new module.LibRaw();
-  try {
-    referenceRaw.open(bytes, false);
-    referenceRaw.enableDemosaicCapture();
-    referenceRaw.imageInfo();
-    const reference = referenceRaw.demosaicView(0, info.sampleCount * 3);
-    const highlightClip = Math.trunc(
-      Math.min(...info.demosaicPreMultipliers.slice(0, 3)) * 65535,
-    );
-    let highlightPixelCount = 0;
-    let offset = 0;
-    let differingSamples = 0;
-    let maximumDifference = 0;
-    let maximumDifferenceSample = 0;
-    let actualAtMaximum = 0;
-    let expectedAtMaximum = 0;
-    let samplesOverTwoCodes = 0;
-    let firstDifferenceSample = -1;
-    const differingSamplesByChannel = [0, 0, 0];
-    const result = await demosaicLibRawXtransTiledWithWgsl(
-      mosaic,
-      info,
-      cbrtLut,
-      undefined,
-      (band) => {
-        for (let index = 0; index < band.length; index += 3) {
-          if (
-            reference[offset + index] > highlightClip ||
-            reference[offset + index + 1] > highlightClip ||
-            reference[offset + index + 2] > highlightClip
-          ) {
-            highlightPixelCount += 1;
-          }
+  const hasher = createSha256Hasher();
+  const highlightClip = Math.trunc(
+    Math.min(...info.demosaicPreMultipliers.slice(0, 3)) * 65535,
+  );
+  let highlightPixelCount = 0;
+  let sampleCount = 0;
+  const result = await demosaicLibRawXtransTiledWithWgsl(
+    mosaic,
+    info,
+    cbrtLut,
+    undefined,
+    (band) => {
+      hasher.update(
+        new Uint8Array(band.buffer, band.byteOffset, band.byteLength),
+      );
+      for (let index = 0; index < band.length; index += 3) {
+        if (
+          band[index] > highlightClip ||
+          band[index + 1] > highlightClip ||
+          band[index + 2] > highlightClip
+        ) {
+          highlightPixelCount += 1;
         }
-        for (let index = 0; index < band.length; index += 1) {
-          const difference = Math.abs(band[index] - reference[offset + index]);
-          if (difference !== 0) {
-            if (firstDifferenceSample < 0)
-              firstDifferenceSample = offset + index;
-            differingSamples += 1;
-            differingSamplesByChannel[(offset + index) % 3] += 1;
-          }
-          if (difference > 2) samplesOverTwoCodes += 1;
-          if (difference > maximumDifference) {
-            maximumDifference = difference;
-            maximumDifferenceSample = offset + index;
-            actualAtMaximum = band[index];
-            expectedAtMaximum = reference[offset + index];
-          }
-        }
-        offset += band.length;
-      },
-      "demosaic",
+      }
+      sampleCount += band.length;
+    },
+    "demosaic",
+  );
+  if (sampleCount !== info.sampleCount * 3) {
+    throw new Error(
+      `Rendered ${sampleCount} of ${info.sampleCount * 3} samples.`,
     );
-    if (offset !== reference.length) {
-      throw new Error(`Captured ${offset} of ${reference.length} samples.`);
-    }
-    return {
-      width: info.width,
-      height: info.height,
-      differingSamples,
-      maximumDifference,
-      maximumDifferenceSample,
-      actualAtMaximum,
-      expectedAtMaximum,
-      samplesOverTwoCodes,
-      firstDifferenceSample,
-      differingSamplesByChannel,
-      highlightPixelCount,
-      result,
-    };
-  } finally {
-    referenceRaw.delete();
   }
+  return {
+    width: info.width,
+    height: info.height,
+    expectedHash,
+    actualHash: hasher.digestHex(),
+    highlightPixelCount,
+    result,
+  };
 }

@@ -25,6 +25,12 @@ export interface WebGpuStrip {
   timings: GpuStripTimings;
 }
 
+export interface WebGpuColorRecipe {
+  renderer: WebGpuColorRenderer;
+  ev: number;
+  whiteBalance: Float32Array;
+}
+
 const pipelinePromises = new WeakMap<GPUDevice, Promise<GPUComputePipeline>>();
 
 /** Persistent WebGPU resources for the current parsed LUT. */
@@ -32,6 +38,10 @@ export class WebGpuColorRenderer {
   readonly preferredBatchSamples = 4_000_000;
   private readonly parameters = new ArrayBuffer(96);
   private readonly parameterView = new DataView(this.parameters);
+  private sourceBuffer?: GPUBuffer;
+  private destinationBuffer?: GPUBuffer;
+  private readbackBuffer?: GPUBuffer;
+  private workspaceBytes = 0;
 
   private constructor(
     private readonly runtime: WebGpuRuntime,
@@ -107,24 +117,9 @@ export class WebGpuColorRenderer {
     const pixelCount = source.length / 3;
     const pairCount = Math.ceil(pixelCount / 2);
     const packedBytes = pairCount * 3 * Uint32Array.BYTES_PER_ELEMENT;
-    const buffers: GPUBuffer[] = [];
-    let readbackBuffer: GPUBuffer | undefined;
+    const { sourceBuffer, destinationBuffer, readbackBuffer } =
+      this.ensureWorkspace(packedBytes);
     try {
-      const sourceBuffer = this.runtime.device.createBuffer({
-        size: packedBytes,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      });
-      buffers.push(sourceBuffer);
-      const destinationBuffer = this.runtime.device.createBuffer({
-        size: packedBytes,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-      });
-      buffers.push(destinationBuffer);
-      readbackBuffer = this.runtime.device.createBuffer({
-        size: packedBytes,
-        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-      });
-      buffers.push(readbackBuffer);
       const uploadStartedAt = performance.now();
       writePaddedBuffer(this.runtime.device, sourceBuffer, source, packedBytes);
       this.writeParameters(pixelCount, ev, whiteBalance);
@@ -156,8 +151,7 @@ export class WebGpuColorRenderer {
         },
       };
     } finally {
-      if (readbackBuffer?.mapState === "mapped") readbackBuffer.unmap();
-      for (const buffer of buffers) buffer.destroy();
+      if (readbackBuffer.mapState === "mapped") readbackBuffer.unmap();
     }
   }
 
@@ -216,8 +210,62 @@ export class WebGpuColorRenderer {
     pass.end();
   }
 
+  private ensureWorkspace(size: number): {
+    sourceBuffer: GPUBuffer;
+    destinationBuffer: GPUBuffer;
+    readbackBuffer: GPUBuffer;
+  } {
+    if (
+      size > this.workspaceBytes ||
+      !this.sourceBuffer ||
+      !this.destinationBuffer ||
+      !this.readbackBuffer
+    ) {
+      this.sourceBuffer?.destroy();
+      this.destinationBuffer?.destroy();
+      this.readbackBuffer?.destroy();
+      this.sourceBuffer = undefined;
+      this.destinationBuffer = undefined;
+      this.readbackBuffer = undefined;
+      const created: GPUBuffer[] = [];
+      try {
+        const sourceBuffer = this.runtime.device.createBuffer({
+          size,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+        created.push(sourceBuffer);
+        const destinationBuffer = this.runtime.device.createBuffer({
+          size,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+        });
+        created.push(destinationBuffer);
+        const readbackBuffer = this.runtime.device.createBuffer({
+          size,
+          usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        });
+        created.push(readbackBuffer);
+        this.sourceBuffer = sourceBuffer;
+        this.destinationBuffer = destinationBuffer;
+        this.readbackBuffer = readbackBuffer;
+      } catch (error) {
+        for (const buffer of created) buffer.destroy();
+        this.workspaceBytes = 0;
+        throw error;
+      }
+      this.workspaceBytes = size;
+    }
+    return {
+      sourceBuffer: this.sourceBuffer,
+      destinationBuffer: this.destinationBuffer,
+      readbackBuffer: this.readbackBuffer,
+    };
+  }
+
   destroy(): void {
     this.lutLease.release();
     this.parameterBuffer.destroy();
+    this.sourceBuffer?.destroy();
+    this.destinationBuffer?.destroy();
+    this.readbackBuffer?.destroy();
   }
 }

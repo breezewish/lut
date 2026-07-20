@@ -3,6 +3,8 @@ import type { WhiteBalanceValues } from "../types";
 const D65_CCT = 6504;
 const D65_XY = [0.3127, 0.329] as const;
 const TINT_DUV_PER_STEP = -0.0005;
+export const WHITE_BALANCE_MIN = -100;
+export const WHITE_BALANCE_MAX = 100;
 
 const PLANCK_U = [
   0.20042808258946535, 0.021670127838210658, 0.004941279052065094,
@@ -61,10 +63,10 @@ export function whiteBalanceMatrix({
   if (
     !Number.isFinite(temperature) ||
     !Number.isFinite(tint) ||
-    temperature < -100 ||
-    temperature > 100 ||
-    tint < -100 ||
-    tint > 100
+    temperature < WHITE_BALANCE_MIN ||
+    temperature > WHITE_BALANCE_MAX ||
+    tint < WHITE_BALANCE_MIN ||
+    tint > WHITE_BALANCE_MAX
   ) {
     throw new Error(
       "White balance temperature and tint must be within -100..=100.",

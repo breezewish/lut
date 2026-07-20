@@ -76,20 +76,28 @@ test("batch export continues after an export-time RAW failure", async ({
 }) => {
   test.setTimeout(60_000);
   await page.addInitScript(() => {
-    const original = File.prototype.arrayBuffer;
-    const readCounts = new WeakMap<File, number>();
-    File.prototype.arrayBuffer = function () {
-      const count = (readCounts.get(this) ?? 0) + 1;
-      readCounts.set(this, count);
-      // The queued filmstrip thumbnail and selected Preview consume the first
-      // two reads. Corrupt only the later full-resolution export read.
-      if (this.name === "middle.dng" && count > 2) {
-        return Promise.resolve(
-          new TextEncoder().encode("corrupt at export").buffer,
-        );
-      }
-      return original.call(this);
-    };
+    const original = Worker.prototype.postMessage as (
+      message: unknown,
+      transfer?: Transferable[] | StructuredSerializeOptions,
+    ) => void;
+    Worker.prototype.postMessage = function (
+      this: Worker,
+      message: unknown,
+      transfer?: Transferable[] | StructuredSerializeOptions,
+    ) {
+      const command = message as {
+        type?: string;
+        file?: File;
+        whiteBalance?: { temperature: number; tint: number };
+      };
+      // Sensor-cached exports intentionally do not read the RAW again. Inject
+      // an invalid export-only recipe at the Worker boundary instead.
+      const outgoing =
+        command.type === "export" && command.file?.name === "middle.dng"
+          ? { ...command, whiteBalance: { temperature: 101, tint: 0 } }
+          : message;
+      original.call(this, outgoing, transfer);
+    } as Worker["postMessage"];
   });
   const bytes = await readFile(lossyFixture);
   await page.goto("/");

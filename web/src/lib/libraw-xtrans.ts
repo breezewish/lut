@@ -1,6 +1,6 @@
 import shader from "../demosaic/libraw-xtrans.wgsl?raw";
 import { calculateDemosaicScale, type SensorImageInfo } from "./sensor-image";
-import type { WebGpuColorRenderer } from "./webgpu-color";
+import type { WebGpuColorRecipe } from "./webgpu-color";
 import {
   getWebGpuRuntime,
   type WebGpuRuntime,
@@ -168,12 +168,6 @@ export interface LibRawXtransResult {
   timings: LibRawXtransTimings;
 }
 
-export interface TiledXtransColor {
-  renderer: WebGpuColorRenderer;
-  ev: number;
-  whiteBalance: Float32Array;
-}
-
 export type XtransBandWriter = (
   pixels: Uint16Array<ArrayBuffer>,
 ) => void | Promise<void>;
@@ -185,7 +179,7 @@ export async function demosaicLibRawXtransTiledWithWgsl(
   mosaic: Uint16Array,
   info: SensorImageInfo,
   cbrtLut: Float32Array<ArrayBuffer>,
-  color?: TiledXtransColor,
+  color?: WebGpuColorRecipe,
   writeBand?: XtransBandWriter,
   outputStage: "final" | "demosaic" = "final",
 ): Promise<LibRawXtransResult> {

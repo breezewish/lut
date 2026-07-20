@@ -50,7 +50,9 @@
       "mode": "14-bit lossless compressed X-Trans",
       "width": 6032,
       "height": 4028,
-      "rawBackend": "webgpu-xtrans"
+      "rawBackend": "webgpu-xtrans",
+      "demosaicSha256": "ec69ab9f47070d712c4799c0af9452beaafb6738385f796aaef9fd58efa70650",
+      "minimumHighlights": 0
     },
     {
       "id": "fujifilm-x-t1-xtrans-raf",
@@ -64,7 +66,9 @@
       "width": 4934,
       "height": 3296,
       "rawBackend": "webgpu-xtrans",
-      "sensorCache": false
+      "sensorCache": false,
+      "demosaicSha256": "ed2cad22ab4705ba5343c2eb6e8ba358c8c36aabd63d40a56ecd783500c620c7",
+      "minimumHighlights": 1
     },
     {
       "id": "canon-5d3-lossless-dng",

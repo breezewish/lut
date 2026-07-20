@@ -6,8 +6,10 @@ import initLutify, {
   TiffEncoder,
   WasmLut,
 } from "../wasm/lutify_core.js";
-import { describeProcessingError } from "../lib/errors";
+import { encodeEmbeddedThumbnail } from "../lib/embedded-thumbnail";
+import { describeLibRawError } from "../lib/libraw-error";
 import { loadLutBytes } from "../lib/lut-cache";
+import { OUTPUT_FORMATS } from "../lib/output-formats";
 import {
   type GpuStripImageEncoder,
   RenderedImageStream,
@@ -139,39 +141,9 @@ async function handleCommand(
       context.postMessage(reply);
       return;
     }
-    if (data.type === "load-thumbnail") {
-      const raw = new module.LibRaw();
-      let found = false;
-      try {
-        raw.openPreview(new Uint8Array(data.buffer), PREVIEW_MAX_EDGE);
-        const metadata = raw.metadata();
-        const thumbnail = raw.thumbnailData();
-        const jpeg = thumbnail && (await thumbnailJpeg(thumbnail));
-        if (jpeg) {
-          found = true;
-          postThumbnail(
-            data.requestId,
-            data.fileId,
-            jpeg,
-            metadata.width,
-            metadata.height,
-          );
-        }
-      } finally {
-        raw.delete();
-      }
-      const reply: WorkerReply = {
-        requestId: data.requestId,
-        ok: true,
-        type: "thumbnail-loaded",
-        found,
-      };
-      context.postMessage(reply);
-      return;
-    }
     if (data.type === "decode") {
       const workerStartedAt = performance.now();
-      const openedPreview = await openPreviewRaw(module, data.buffer);
+      const openedPreview = await openPreviewRaw(module!, data.buffer);
       module = openedPreview.module;
       const previewRaw = openedPreview.raw;
       let preview: CachedPreview | undefined;
@@ -190,7 +162,8 @@ async function handleCommand(
         // this entry point.
         const metadata = previewRaw.metadata();
         const thumbnail = previewRaw.thumbnailData();
-        const thumbnailBytes = thumbnail && (await thumbnailJpeg(thumbnail));
+        const thumbnailBytes =
+          thumbnail && (await encodeEmbeddedThumbnail(thumbnail));
         if (thumbnailBytes) {
           postThumbnail(
             data.requestId,
@@ -382,29 +355,35 @@ async function handleCommand(
 
     const workerStartedAt = performance.now();
     const cachedPreview = touchPreview(data.fileId);
+    let exportModule = module!;
+    let input: ArrayBuffer | undefined;
+    const readInput = async () => (input ??= await data.file.arrayBuffer());
     const baseEv =
       data.baseEv ??
       cachedPreview?.baseEv ??
-      (await measureRawBaseEv(module, data.buffer));
+      (await measureRawBaseEv(exportModule, await readInput()));
     const effectiveEv = baseEv + data.ev;
     const whiteBalance = whiteBalanceMatrix(data.whiteBalance);
     const lut = await loadLut(data.lut);
     const cachedSensor = cachedPreview?.sensor;
-    if (cachedSensor) module = cachedSensor.module;
-    let exportRaw = cachedSensor?.raw ?? new module.LibRaw();
+    if (cachedSensor) exportModule = cachedSensor.module;
+    module = exportModule;
+    let exportRaw = cachedSensor?.raw ?? new exportModule.LibRaw();
     let gpuRenderer: WebGpuColorRenderer | undefined;
     try {
       let rawBackend = cachedSensor?.backend;
       let sensor = cachedSensor?.info;
       if (!cachedSensor) {
-        exportRaw.open(new Uint8Array(data.buffer), false);
+        const buffer = await readInput();
+        exportRaw.open(new Uint8Array(buffer), false);
         if (exportRaw.usesParallelUnpack()) {
           const parallelModule = await loadParallelLibRaw();
           const parallelRaw = new parallelModule.LibRaw();
           exportRaw.delete();
+          exportModule = parallelModule;
           module = parallelModule;
           exportRaw = parallelRaw;
-          exportRaw.open(new Uint8Array(data.buffer), false);
+          exportRaw.open(new Uint8Array(buffer), false);
         }
         rawBackend = exportRaw.supportsWebGpuAahd()
           ? "webgpu-aahd"
@@ -417,7 +396,12 @@ async function handleCommand(
         const mosaic = exportRaw.sensorView(0, sensor.sampleCount);
         gpuRenderer = await WebGpuColorRenderer.create(lut);
         const stream = new RenderedImageStream(
-          createImageEncoder(module, data.format, sensor.width, sensor.height),
+          createImageEncoder(
+            exportModule,
+            data.format,
+            sensor.width,
+            sensor.height,
+          ),
         );
         try {
           const demosaic =
@@ -474,7 +458,12 @@ async function handleCommand(
       const rendered = await renderImageInGpuStrips(
         image.sampleCount,
         (offset, length) => exportRaw.imageView(offset, length),
-        createImageEncoder(module, data.format, image.width, image.height),
+        createImageEncoder(
+          exportModule,
+          data.format,
+          image.width,
+          image.height,
+        ),
         gpuRenderer,
         effectiveEv,
         whiteBalance,
@@ -509,14 +498,12 @@ async function handleCommand(
       requestId: data.requestId,
       ok: false,
       error: module
-        ? describeRuntimeError(error, module)
+        ? describeLibRawError(error, module)
         : "The local processing engine could not start. Reload the page to retry.",
     };
     context.postMessage(reply);
   }
 }
-
-const JPEG_QUALITY = 95;
 
 function createImageEncoder(
   module: LibRawModule,
@@ -526,7 +513,8 @@ function createImageEncoder(
 ): GpuStripImageEncoder {
   if (format === "tiff") return new TiffEncoder(width, height);
 
-  const encoder = new module.JpegEncoder(width, height, JPEG_QUALITY);
+  const quality = OUTPUT_FORMATS.jpeg.jpegQuality;
+  const encoder = new module.JpegEncoder(width, height, quality);
   return {
     next_strip_samples: () => encoder.nextStripSamples(),
     write_rendered_strip: (pixels) => encoder.writeRenderedStrip(pixels),
@@ -563,42 +551,6 @@ function postThumbnail(
     result: { fileId, jpeg, width, height },
   };
   context.postMessage(reply, [jpeg.buffer]);
-}
-
-async function thumbnailJpeg(thumbnail: {
-  format: "jpeg" | "bitmap" | "unknown";
-  width: number;
-  height: number;
-  data: Uint8Array<ArrayBuffer>;
-}): Promise<Uint8Array<ArrayBuffer> | undefined> {
-  if (thumbnail.format === "jpeg") return thumbnail.data;
-  if (thumbnail.format !== "bitmap") return undefined;
-  if (thumbnail.data.length !== thumbnail.width * thumbnail.height * 3) {
-    throw new Error("The embedded camera thumbnail has invalid RGB data.");
-  }
-  const rgba = new Uint8ClampedArray(thumbnail.width * thumbnail.height * 4);
-  for (
-    let source = 0, destination = 0;
-    source < thumbnail.data.length;
-    source += 3, destination += 4
-  ) {
-    rgba[destination] = thumbnail.data[source];
-    rgba[destination + 1] = thumbnail.data[source + 1];
-    rgba[destination + 2] = thumbnail.data[source + 2];
-    rgba[destination + 3] = 255;
-  }
-  const canvas = new OffscreenCanvas(thumbnail.width, thumbnail.height);
-  const context = canvas.getContext("2d");
-  if (!context) {
-    throw new Error("The embedded camera thumbnail could not be encoded.");
-  }
-  context.putImageData(
-    new ImageData(rgba, thumbnail.width, thumbnail.height),
-    0,
-    0,
-  );
-  const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.8 });
-  return new Uint8Array(await blob.arrayBuffer());
 }
 
 function releaseAllPreviews(): void {
@@ -715,23 +667,6 @@ async function createCachedPreviewSource(
     source.free();
   }
   return WebGpuPreviewSource.create(pixels, sourceWidth, sourceHeight);
-}
-
-function describeRuntimeError(
-  error: unknown,
-  module: Awaited<ReturnType<typeof createLibRaw>>,
-): string {
-  if (typeof error !== "object" || error === null || !("excPtr" in error)) {
-    return describeProcessingError(error);
-  }
-  try {
-    const [type, message] = module.getExceptionMessage(error);
-    return describeProcessingError(new Error(`LibRaw ${type}: ${message}`));
-  } catch {
-    return describeProcessingError(error);
-  } finally {
-    module.decrementExceptionRefcount(error);
-  }
 }
 
 async function renderCached(

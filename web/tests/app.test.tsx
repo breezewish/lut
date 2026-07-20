@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -24,11 +25,17 @@ const MANIFEST = {
 };
 
 function bitmap(value: number): ImageBitmap {
-  return { width: 1, height: 1, value } as unknown as ImageBitmap;
+  return {
+    width: 1,
+    height: 1,
+    value,
+    close: vi.fn(),
+  } as unknown as ImageBitmap;
 }
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   localStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -234,6 +241,12 @@ test("deduplicates one input batch and accepts drops after the queue is populate
   expect(secondButton).toHaveAttribute("aria-current", "true");
   expect(secondButton).toHaveAttribute("aria-pressed", "true");
   expect(firstButton).toHaveAttribute("aria-pressed", "false");
+
+  fireEvent.click(screen.getByRole("button", { name: "Remove first.dng" }));
+  expect(screen.getByText("Removed first.dng")).toBeVisible();
+  fireEvent.change(input!, { target: { files: [second] } });
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(screen.getByRole("button", { name: /^first\.dng/ })).toBeVisible();
 });
 
 test("selects the first photo and preloads later filmstrip thumbnails", async () => {
@@ -245,15 +258,32 @@ test("selects the first photo and preloads later filmstrip thumbnails", async ()
 
   class FilmstripThumbnailWorker {
     static instance: FilmstripThumbnailWorker;
+    static thumbnailCommands: Command[] = [];
     readonly commands: Command[] = [];
+    readonly thumbnailWorker: boolean;
     onmessage: ((event: MessageEvent) => void) | null = null;
     onerror: ((event: ErrorEvent) => void) | null = null;
 
-    constructor() {
-      FilmstripThumbnailWorker.instance = this;
+    constructor(url: URL) {
+      this.thumbnailWorker = String(url).includes("thumbnail.worker");
+      if (!this.thumbnailWorker) FilmstripThumbnailWorker.instance = this;
     }
 
     postMessage(command: Command) {
+      if (this.thumbnailWorker) {
+        FilmstripThumbnailWorker.thumbnailCommands.push(command);
+        this.reply(command, {
+          requestId: command.requestId,
+          ok: true,
+          result: {
+            fileId: command.fileId,
+            jpeg: new Uint8Array([1, 2, 3]),
+            width: 3,
+            height: 4,
+          },
+        });
+        return;
+      }
       this.commands.push(command);
       if (command.type === "decode") {
         this.reply(command, {
@@ -271,26 +301,6 @@ test("selects the first photo and preloads later filmstrip thumbnails", async ()
             decodeCount: 1,
             timings: {},
           },
-        });
-        return;
-      }
-      if (command.type === "load-thumbnail") {
-        this.reply(command, {
-          requestId: command.requestId,
-          ok: true,
-          type: "thumbnail",
-          result: {
-            fileId: command.fileId,
-            jpeg: new Uint8Array([1, 2, 3]),
-            width: 3,
-            height: 4,
-          },
-        });
-        this.reply(command, {
-          requestId: command.requestId,
-          ok: true,
-          type: "thumbnail-loaded",
-          found: true,
         });
         return;
       }
@@ -354,9 +364,7 @@ test("selects the first photo and preloads later filmstrip thumbnails", async ()
 
   await waitFor(() => {
     expect(
-      FilmstripThumbnailWorker.instance.commands
-        .filter(({ type }) => type === "load-thumbnail")
-        .map(({ fileId }) => fileId),
+      FilmstripThumbnailWorker.thumbnailCommands.map(({ fileId }) => fileId),
     ).toEqual(["second.dng:6:2", "third.dng:5:3"]);
   });
   await waitFor(() => {
@@ -576,111 +584,117 @@ test("renders the main preview only after the adjustment recipe changes", async 
   await new Promise((resolve) => window.setTimeout(resolve, 260));
   expect(mainRenders()).toEqual([]);
 
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const advancePreviewClock = async (milliseconds = 16) => {
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => vi.advanceTimersByTime(milliseconds));
+    await act(async () => {
+      await Promise.resolve();
+    });
+  };
   const exposure = screen.getByRole("slider", { name: "Exposure" });
   fireEvent.pointerDown(exposure);
-  await new Promise((resolve) => window.setTimeout(resolve, 100));
+  await advancePreviewClock(100);
   expect(mainRenders()).toEqual([]);
   fireEvent.input(exposure, {
     target: { value: "1" },
   });
   expect(exportButton).toBeDisabled();
-  await waitFor(() =>
-    expect(mainRenders()[0]).toEqual(
-      expect.objectContaining({
-        type: "render",
-        ev: 1,
-        maxEdge: 256,
-        includeBase: true,
-      }),
-    ),
+  await advancePreviewClock();
+  expect(mainRenders()[0]).toEqual(
+    expect.objectContaining({
+      type: "render",
+      ev: 1,
+      maxEdge: 256,
+      includeBase: true,
+    }),
   );
   fireEvent.input(exposure, { target: { value: "2" } });
   expect(mainRenders()).toHaveLength(1);
   RecipeWorker.instance.replyToRender(0);
-  await waitFor(() =>
-    expect(mainRenders()[1]).toEqual(
-      expect.objectContaining({
-        type: "render",
-        ev: 2,
-        maxEdge: 256,
-        includeBase: true,
-      }),
-    ),
+  await advancePreviewClock();
+  expect(mainRenders()[1]).toEqual(
+    expect.objectContaining({
+      type: "render",
+      ev: 2,
+      maxEdge: 256,
+      includeBase: true,
+    }),
   );
   RecipeWorker.instance.replyToRender(1);
   fireEvent.pointerUp(exposure);
   expect(exportButton).toBeDisabled();
-  await waitFor(() =>
-    expect(mainRenders()[2]).toEqual(
-      expect.objectContaining({
-        type: "render",
-        ev: 2,
-        maxEdge: 1024,
-        includeBase: true,
-      }),
-    ),
+  await advancePreviewClock(0);
+  expect(mainRenders()[2]).toEqual(
+    expect.objectContaining({
+      type: "render",
+      ev: 2,
+      maxEdge: 1024,
+      includeBase: true,
+    }),
   );
   RecipeWorker.instance.replyToRender(2);
-  await waitFor(() => expect(paintedRedValues.slice(-2)).toEqual([102, 103]));
+  await advancePreviewClock(0);
+  expect(paintedRedValues.slice(-2)).toEqual([102, 103]);
   expect(exportButton).toBeEnabled();
 
   fireEvent.pointerDown(exposure);
   fireEvent.input(exposure, { target: { value: "1" } });
-  await waitFor(() =>
-    expect(mainRenders()[3]).toEqual(
-      expect.objectContaining({ ev: 1, maxEdge: 256 }),
-    ),
+  await advancePreviewClock();
+  expect(mainRenders()[3]).toEqual(
+    expect.objectContaining({ ev: 1, maxEdge: 256 }),
   );
   fireEvent.input(exposure, { target: { value: "2" } });
   fireEvent.pointerUp(exposure);
   RecipeWorker.instance.replyToRender(3);
-  await waitFor(() =>
-    expect(mainRenders()[4]).toEqual(
-      expect.objectContaining({ ev: 2, maxEdge: 1024 }),
-    ),
+  await advancePreviewClock();
+  expect(mainRenders()[4]).toEqual(
+    expect.objectContaining({ ev: 2, maxEdge: 1024 }),
   );
   RecipeWorker.instance.replyToRender(4);
-  await waitFor(() => expect(exportButton).toBeEnabled());
+  await advancePreviewClock(0);
+  expect(exportButton).toBeEnabled();
 
   fireEvent.pointerDown(exposure);
   fireEvent.input(exposure, { target: { value: "1" } });
-  await waitFor(() =>
-    expect(mainRenders()[5]).toEqual(
-      expect.objectContaining({ ev: 1, maxEdge: 256 }),
-    ),
+  await advancePreviewClock();
+  expect(mainRenders()[5]).toEqual(
+    expect.objectContaining({ ev: 1, maxEdge: 256 }),
   );
   RecipeWorker.instance.replyToRender(5);
-  await waitFor(() =>
-    expect(mainRenders()[6]).toEqual(
-      expect.objectContaining({ ev: 1, maxEdge: 1024 }),
-    ),
+  await advancePreviewClock(80);
+  expect(mainRenders()[6]).toEqual(
+    expect.objectContaining({ ev: 1, maxEdge: 1024 }),
   );
   RecipeWorker.instance.replyToRender(6);
   fireEvent.pointerUp(exposure);
-  await waitFor(() => expect(exportButton).toBeEnabled());
+  await advancePreviewClock(0);
+  expect(exportButton).toBeEnabled();
 
   fireEvent.click(screen.getByRole("button", { name: "Second Look" }));
-  await waitFor(() =>
-    expect(mainRenders()[7]).toEqual(
-      expect.objectContaining({
-        lut: expect.objectContaining({ id: "second-look" }),
-        maxEdge: 256,
-        includeBase: false,
-      }),
-    ),
+  await advancePreviewClock(0);
+  expect(mainRenders()[7]).toEqual(
+    expect.objectContaining({
+      lut: expect.objectContaining({ id: "second-look" }),
+      maxEdge: 256,
+      includeBase: false,
+    }),
   );
   RecipeWorker.instance.replyToRender(7);
-  await waitFor(() =>
-    expect(mainRenders()[8]).toEqual(
-      expect.objectContaining({
-        lut: expect.objectContaining({ id: "second-look" }),
-        maxEdge: 1024,
-        includeBase: false,
-      }),
-    ),
+  await advancePreviewClock(0);
+  expect(mainRenders()[8]).toEqual(
+    expect.objectContaining({
+      lut: expect.objectContaining({ id: "second-look" }),
+      maxEdge: 1024,
+      includeBase: false,
+    }),
   );
   RecipeWorker.instance.replyToRender(8);
-  await waitFor(() => expect(exportButton).toBeEnabled());
+  await advancePreviewClock(0);
+  expect(exportButton).toBeEnabled();
+  vi.useRealTimers();
 
   const temperature = screen.getByRole("slider", {
     name: "White balance temperature",
@@ -733,8 +747,10 @@ test("reuses a decoded photo when switching back to it", async () => {
     onmessage: ((event: MessageEvent) => void) | null = null;
     onerror: ((event: ErrorEvent) => void) | null = null;
 
-    constructor() {
-      CachedPhotoWorker.instance = this;
+    constructor(url: URL) {
+      if (!String(url).includes("thumbnail.worker")) {
+        CachedPhotoWorker.instance = this;
+      }
     }
 
     postMessage(command: Command) {
@@ -1010,6 +1026,7 @@ test("rerenders every look thumbnail after exposure changes", async () => {
     { id: "fuji-classic-negative" },
   ]);
   await waitFor(() => expect(thumbnailBatches(1)).toHaveLength(2));
+  expect(container.querySelectorAll(".look__thumb canvas")).toHaveLength(2);
   expect(thumbnailBatches(1)[1].luts?.map(({ id }) => id)).toEqual([
     "second-look",
   ]);

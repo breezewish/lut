@@ -11,7 +11,7 @@ Let users correct capture white balance before applying a Look, without leaving 
 - A compact White Balance section follows Exposure. Temperature uses a blue-to-amber track; Tint uses a green-to-magenta track.
 - One reset returns both axes to zero.
 - Adjustments apply to every selected photo and identify mixed values.
-- Preview, Look thumbnails, browser TIFF export, native CLI, and C API use the same recipe.
+- Preview, Look thumbnails, browser TIFF and JPEG export, native CLI, and C API use the same recipe.
 
 ## Non-goals
 

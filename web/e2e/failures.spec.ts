@@ -125,9 +125,11 @@ test("an invalid manifest keeps an imported RAW out of the fake preview state", 
   await expect(
     page.getByRole("region", { name: "Processing controls" }),
   ).toHaveCount(0);
-  await expect(page.getByRole("status")).toContainText(
-    "Built-in looks unavailable. Reload to retry.",
-  );
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: "Built-in looks unavailable. Reload to retry." }),
+  ).toBeVisible();
   await expect(page.getByLabel("Base preview")).toHaveCount(0);
   await expect(page.getByLabel("LUT preview")).toHaveCount(0);
   await expect(

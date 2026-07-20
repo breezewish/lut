@@ -16,7 +16,7 @@ import {
   createAahdTiles,
   type AahdTile,
 } from "./aahd-tiles";
-import type { WebGpuColorRenderer } from "./webgpu-color";
+import type { WebGpuColorRecipe } from "./webgpu-color";
 import { getWebGpuRuntime } from "./webgpu-runtime";
 
 export interface LibRawAahdTimings {
@@ -127,12 +127,6 @@ interface Runtime {
   pipelines: Partial<Record<EntryPoint, GPUComputePipeline>>;
 }
 
-export interface TiledAahdColor {
-  renderer: WebGpuColorRenderer;
-  ev: number;
-  whiteBalance: Float32Array;
-}
-
 interface SparsePreprocessingResult {
   corrected: Uint16Array<ArrayBuffer>;
   defects: Uint32Array<ArrayBuffer>;
@@ -175,7 +169,7 @@ let cachedTiledWorkspace: Workspace | undefined;
 export async function demosaicLibRawAahdTiledWithWgsl(
   mosaic: Uint16Array,
   info: SensorImageInfo,
-  color?: TiledAahdColor,
+  color?: WebGpuColorRecipe,
   writeBand?: TiledAahdBandWriter,
 ): Promise<LibRawAahdResult> {
   validateInput(mosaic, info);

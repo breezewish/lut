@@ -1,12 +1,26 @@
+import { readFile } from "node:fs/promises";
+
 import { expect, test } from "@playwright/test";
 
-const fixtures = [
-  ["Fujifilm X-T2", "fujifilm-x-t2.RAF", 6032, 4028, 0],
-  ["Fujifilm X-T1", "fujifilm-x-t1.RAF", 4934, 3296, 1],
-] as const;
+interface XtransFixture {
+  camera: string;
+  file: string;
+  width: number;
+  height: number;
+  rawBackend?: string;
+  demosaicSha256?: string;
+  minimumHighlights?: number;
+}
 
-for (const [camera, file, width, height, minimumHighlights] of fixtures)
-  test(`WebGPU X-Trans demosaic matches LibRaw for ${camera}`, async ({
+const manifest = JSON.parse(
+  await readFile("tests/fixtures/webgpu-camera-matrix.json", "utf8"),
+) as { fixtures: XtransFixture[] };
+const fixtures = manifest.fixtures.filter(
+  (fixture) => fixture.rawBackend === "webgpu-xtrans",
+);
+
+for (const fixture of fixtures)
+  test(`WebGPU X-Trans demosaic matches LibRaw for ${fixture.camera}`, async ({
     page,
   }, testInfo) => {
     test.skip(
@@ -14,10 +28,13 @@ for (const [camera, file, width, height, minimumHighlights] of fixtures)
       "Set XTRANS_PARITY_E2E=1 to run the hardware X-Trans parity suite.",
     );
     test.setTimeout(5 * 60_000);
-    await page.goto("/?xtransParity=1");
+    expect(fixture.demosaicSha256).toMatch(/^[0-9a-f]{64}$/);
+    await page.goto(
+      `/?xtransParity=1&expectedDemosaicSha256=${fixture.demosaicSha256}`,
+    );
     await page
       .getByLabel("X-Trans RAW fixture")
-      .setInputFiles(`tests/fixtures/webgpu-camera-matrix/${file}`);
+      .setInputFiles(`tests/fixtures/webgpu-camera-matrix/${fixture.file}`);
     await expect
       .poll(() => page.locator("body").getAttribute("data-benchmark-status"), {
         timeout: 5 * 60_000,
@@ -39,11 +56,10 @@ for (const [camera, file, width, height, minimumHighlights] of fixtures)
       body: JSON.stringify(report, null, 2),
       contentType: "application/json",
     });
-    expect(report.width).toBe(width);
-    expect(report.height).toBe(height);
-    expect(report.maximumDifference).toBeLessThanOrEqual(2);
-    expect(report.differingSamples).toBe(0);
+    expect(report.width).toBe(fixture.width);
+    expect(report.height).toBe(fixture.height);
+    expect(report.actualHash).toBe(report.expectedHash);
     expect(report.highlightPixelCount).toBeGreaterThanOrEqual(
-      minimumHighlights,
+      fixture.minimumHighlights ?? 0,
     );
   });

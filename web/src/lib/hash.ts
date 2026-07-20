@@ -6,6 +6,19 @@ export function sha256Hex(bytes: ArrayBuffer | Uint8Array): string {
   return bytesToHex(sha256(new Uint8Array(bytes)));
 }
 
+/** Incrementally hashes large streamed outputs without retaining every chunk. */
+export function createSha256Hasher() {
+  const hasher = sha256.create();
+  return {
+    update(bytes: Uint8Array): void {
+      hasher.update(bytes);
+    },
+    digestHex(): string {
+      return bytesToHex(hasher.digest());
+    },
+  };
+}
+
 /** Uses native asynchronous SHA-256 when available, with the portable
  * implementation preserving identical behavior on non-secure origins. */
 export async function sha256HexAsync(

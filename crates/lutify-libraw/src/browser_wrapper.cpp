@@ -214,15 +214,6 @@ public:
     preview_resize_ms_ = 0;
   }
 
-  void enable_demosaic_capture() {
-    capture_demosaic_ = true;
-    demosaic_capture_.clear();
-  }
-
-  const std::vector<std::uint16_t> &demosaic_capture() const {
-    return demosaic_capture_;
-  }
-
   bool has_legacy_fuji_geometry() const {
     return libraw_internal_data.internal_output_params.fuji_width != 0;
   }
@@ -313,9 +304,6 @@ private:
   double color_finished_at_ = 0;
   double preview_resize_ms_ = 0;
   unsigned preview_max_edge_ = 0;
-  bool capture_demosaic_ = false;
-  std::vector<std::uint16_t> demosaic_capture_;
-
   static std::size_t oriented_index(unsigned row, unsigned col,
                                     unsigned width, unsigned height,
                                     int flip) {
@@ -512,18 +500,6 @@ private:
 
   static void finish_demosaic(void *raw) {
     auto *processor = static_cast<TimedLibRaw *>(raw);
-    if (processor->capture_demosaic_) {
-      const std::size_t pixels =
-          static_cast<std::size_t>(processor->imgdata.sizes.width) *
-          processor->imgdata.sizes.height;
-      processor->demosaic_capture_.resize(pixels * 3);
-      for (std::size_t index = 0; index < pixels; ++index) {
-        for (unsigned channel = 0; channel < 3; ++channel) {
-          processor->demosaic_capture_[index * 3 + channel] =
-              processor->imgdata.image[index][channel];
-        }
-      }
-    }
     processor->demosaic_finished_at_ = emscripten_get_now();
   }
 
@@ -756,20 +732,6 @@ public:
   }
 
   void discard_image() { clear_image(); }
-
-  void enable_demosaic_capture() { processor_.enable_demosaic_capture(); }
-
-  val demosaic_view(std::size_t offset, std::size_t length) const {
-    const auto &capture = processor_.demosaic_capture();
-    if (capture.empty()) {
-      throw std::runtime_error(
-          "LibRaw demosaic capture must be enabled before image_info()");
-    }
-    if (offset > capture.size() || length > capture.size() - offset) {
-      throw std::runtime_error("LibRaw demosaic view exceeds the captured image");
-    }
-    return val(typed_memory_view(length, capture.data() + offset));
-  }
 
   bool supports_webgpu_aahd() {
     require_opened();
@@ -1360,9 +1322,6 @@ EMSCRIPTEN_BINDINGS(lutify_libraw) {
       .function("imageInfoRetainingDecoder",
                 &BrowserLibRaw::image_info_retaining_decoder)
       .function("discardImage", &BrowserLibRaw::discard_image)
-      .function("enableDemosaicCapture",
-                &BrowserLibRaw::enable_demosaic_capture)
-      .function("demosaicView", &BrowserLibRaw::demosaic_view)
       .function("supportsWebGpuAahd", &BrowserLibRaw::supports_webgpu_aahd)
       .function("supportsWebGpuXtrans",
                 &BrowserLibRaw::supports_webgpu_xtrans)

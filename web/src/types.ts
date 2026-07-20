@@ -189,12 +189,6 @@ export type WorkerCommand =
     }
   | {
       requestId: number;
-      type: "load-thumbnail";
-      fileId: string;
-      buffer: ArrayBuffer;
-    }
-  | {
-      requestId: number;
       type: "decode";
       fileId: string;
       buffer: ArrayBuffer;
@@ -225,7 +219,7 @@ export type WorkerCommand =
       requestId: number;
       type: "export";
       fileId: string;
-      buffer: ArrayBuffer;
+      file: File;
       ev: number;
       whiteBalance: WhiteBalanceValues;
       baseEv?: number;
@@ -249,12 +243,6 @@ export type WorkerReply =
       requestId: number;
       ok: true;
       type: "released";
-    }
-  | {
-      requestId: number;
-      ok: true;
-      type: "thumbnail-loaded";
-      found: boolean;
     }
   | {
       requestId: number;
