@@ -153,7 +153,7 @@ test("the Look catalog groups camera families and keeps selection stable", async
   });
   const catalog = page.getByRole("group", { name: "Built-in looks" });
   await expect(catalog.getByRole("group", { name: "Fujifilm" })).toContainText(
-    "Classic Negative",
+    "NC | Classic Neg.",
   );
   await expect(catalog.getByRole("group", { name: "Nikon" })).toContainText(
     "RED Film Bias",
@@ -165,10 +165,12 @@ test("the Look catalog groups camera families and keeps selection stable", async
     .getByRole("button")
     .first()
     .getAttribute("aria-label");
-  await catalog.getByRole("button", { name: "PROVIA", exact: true }).click();
-  await expect(page.getByLabel("PROVIA preview")).toBeVisible();
+  await catalog
+    .getByRole("button", { name: "STD | Provia", exact: true })
+    .click();
+  await expect(page.getByLabel("STD | Provia preview")).toBeVisible();
   await expect(
-    catalog.getByRole("button", { name: "PROVIA", exact: true }),
+    catalog.getByRole("button", { name: "STD | Provia", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
   await expect(catalog.getByRole("button").first()).toHaveAccessibleName(
     firstLook!,

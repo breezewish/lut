@@ -46,7 +46,7 @@ test("a mismatched LUT fails explicitly and the RAW can be retried", async ({
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
 
   await expect(page.getByRole("alert")).toContainText(
-    "LUT integrity check failed for Classic Negative.",
+    "LUT integrity check failed: NC | Classic Neg.",
   );
   await expect(
     page.getByRole("button", { name: "Export selected" }),
@@ -69,7 +69,7 @@ test("a missing LUT fails without leaving the RAW in decoding", async ({
   await page.locator('input[type="file"]').setInputFiles(linearFixture);
 
   await expect(page.getByRole("alert")).toContainText(
-    "Could not load LUT Classic Negative.",
+    "Could not load LUT: NC | Classic Neg.",
   );
   await expect(page.getByText("Decoding preview…")).toHaveCount(0);
   await expect(

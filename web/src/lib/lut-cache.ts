@@ -16,11 +16,11 @@ export async function loadLutBytes(
     cache: "force-cache",
     credentials: "same-origin",
   });
-  if (!response.ok) throw new Error(`Could not load LUT ${lut.name}.`);
+  if (!response.ok) throw new Error(`Could not load LUT: ${lut.name}`);
   const bytes = new Uint8Array(await response.arrayBuffer());
   const actual = await sha256HexAsync(bytes);
   if (actual !== lut.sha256) {
-    throw new Error(`LUT integrity check failed for ${lut.name}.`);
+    throw new Error(`LUT integrity check failed: ${lut.name}`);
   }
   return bytes;
 }

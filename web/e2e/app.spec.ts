@@ -144,7 +144,7 @@ test("keeps canvases mounted and visible while interaction frames arrive", async
     name: "Base preview",
     exact: true,
   });
-  const lutPreview = page.getByLabel("Classic Negative preview");
+  const lutPreview = page.getByLabel("NC | Classic Neg. preview");
   await expect(basePreview).toBeVisible({ timeout: 20_000 });
   await expect(lutPreview).toBeVisible();
   const processing = page.getByRole("status", {
@@ -238,11 +238,11 @@ test("keeps canvases mounted and visible while interaction frames arrive", async
   await lutPreview.evaluate((canvas: HTMLCanvasElement) => {
     canvas.dataset.continuityToken = "look";
   });
-  await page.getByRole("button", { name: "PROVIA", exact: true }).click();
+  await page.getByRole("button", { name: "STD | Provia", exact: true }).click();
   await page.waitForTimeout(100);
   await expect(processing).toBeVisible();
 
-  const proviaPreview = page.getByLabel("PROVIA preview");
+  const proviaPreview = page.getByLabel("STD | Provia preview");
   expect(await proviaPreview.count()).toBe(1);
   expect(await proviaPreview.isVisible()).toBe(true);
   await expect(proviaPreview).toHaveAttribute("data-continuity-token", "look");
@@ -339,26 +339,26 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
   await expect(exportSelected).toBeEnabled();
 
   const classicNegativePreview = await page
-    .getByLabel("Classic Negative preview")
+    .getByLabel("NC | Classic Neg. preview")
     .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
-  await page.getByRole("button", { name: "PROVIA", exact: true }).click();
-  await expect(page.getByLabel("PROVIA preview")).toBeVisible();
+  await page.getByRole("button", { name: "STD | Provia", exact: true }).click();
+  await expect(page.getByLabel("STD | Provia preview")).toBeVisible();
   await expect
     .poll(() =>
       page
-        .getByLabel("PROVIA preview")
+        .getByLabel("STD | Provia preview")
         .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
     )
     .not.toBe(classicNegativePreview);
   await expect(comparison).toHaveAttribute("data-decode-count", "1");
 
   await page
-    .getByRole("button", { name: "Classic Negative", exact: true })
+    .getByRole("button", { name: "NC | Classic Neg.", exact: true })
     .click();
   await expect
     .poll(() =>
       page
-        .getByLabel("Classic Negative preview")
+        .getByLabel("NC | Classic Neg. preview")
         .evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
     )
     .toBe(classicNegativePreview);
@@ -1047,15 +1047,15 @@ test("supports stable look discovery and keyboard-accessible comparison modes", 
   });
 
   await expect(page.getByRole("searchbox", { name: "Look" })).toBeVisible();
-  await page.getByRole("searchbox", { name: "Look" }).fill("PROVIA");
-  await page.getByRole("button", { name: "PROVIA", exact: true }).click();
-  await expect(page.getByLabel("PROVIA preview")).toBeVisible();
+  await page.getByRole("searchbox", { name: "Look" }).fill("STD");
+  await page.getByRole("button", { name: "STD | Provia", exact: true }).click();
+  await expect(page.getByLabel("STD | Provia preview")).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "PROVIA", exact: true }),
+    page.getByRole("button", { name: "STD | Provia", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
 
   const lookPreview = page.getByRole("img", {
-    name: "PROVIA preview",
+    name: "STD | Provia preview",
     exact: true,
   });
   const comparison = page.locator(".compare");

@@ -93,7 +93,7 @@ Desktop presentation is a stable editing shell: document actions and active came
 
 Below 560px, both preview canvases remain mounted in the selected Wipe or Split comparison. Narrow-viewport controls enforce 44px hit targets even when a browser does not expose the coarse-pointer media feature.
 
-The Look control exposes the complete stable thumbnail grid with text filtering. Manifest groups are source-provenance camera families and render as visible sticky headings; LUT names remain the transform names. Selection never reorders the catalog, so users can compare adjacent transforms without losing spatial context.
+The Look control exposes the complete stable thumbnail grid with text filtering. Manifest groups are source-provenance camera families and render as visible sticky headings. Each manifest name is the complete user-facing label and search term; camera-native looks include their in-camera short label, while technical transforms do not invent one. Selection never reorders the catalog, so users can compare adjacent transforms without losing spatial context.
 
 Output contains one primary action. It exports the active photo when selection is singular and changes to the selected-photo count for a multi-selection. Queue selection and preview readiness are exposed through ARIA state, and each rendered canvas is identified as an image.
 

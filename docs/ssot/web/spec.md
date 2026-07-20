@@ -62,7 +62,7 @@ The workspace is a full-width, full-height editing application identified as LUT
 
 The comparison toolbar offers Wipe and Split modes. Wipe overlays Base and Look with a draggable, keyboard-adjustable divider. Split places the complete Base and Look frames side by side.
 
-Look selection uses a stable searchable thumbnail catalog grouped under visible source camera-family headings from the LUT manifest. Each tile previews the active photo with that Look at the active EV. The compact output color-space warning states that the exported TIFF must be checked before production use.
+Look selection uses a stable searchable thumbnail catalog grouped under visible source camera-family headings from the LUT manifest. Camera-native looks begin with the uppercase short label photographers see in-camera, such as `STD | Provia` and `NC | Classic Neg.`; technical transforms remain unprefixed. Each tile previews the active photo with that Look at the active EV. The compact output color-space warning states that the exported TIFF must be checked before production use.
 
 ## Privacy and assumptions
 

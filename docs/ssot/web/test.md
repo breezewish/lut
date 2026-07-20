@@ -93,7 +93,7 @@
 - Duplicate files in one chooser action are ignored, drag and drop decodes the file, remove plus undo restores it, and choosing a LUT keeps the stable catalog order.
 - At mobile width, the empty-state chooser and Add RAW action are visible before any processing controls or export action.
 - A processed RAW exposes Wipe and Split comparison controls; the Wipe divider supports pointer and keyboard adjustment without changing the preview recipe.
-- Look discovery uses a stable searchable thumbnail grid with visible source camera-family groups, strictly filters by family or Look name with an explicit empty state, and explains the V-Gamut/V-Log context inline.
+- Look discovery uses a stable searchable thumbnail grid with visible source camera-family groups, shows in-camera short labels on camera-native Looks, strictly filters by family, short label, or Look name with an explicit empty state, and explains the V-Gamut/V-Log context inline.
 - Below 560px both comparison buffers remain available, and the comparison switch plus visible application actions have at least 44px hit targets.
 - Switching between Light and Dark modes updates the complete application shell and persists the chosen theme across reloads without changing preview pixels.
 - At a short desktop height, wheel scrolling brings the selected-file export action into the viewport.

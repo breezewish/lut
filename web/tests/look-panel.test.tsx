@@ -43,7 +43,7 @@ test("groups interleaved looks by camera family without changing their order", (
         {
           id: "fuji-classic-negative",
           group: "Fujifilm",
-          name: "Classic Negative",
+          name: "NC | Classic Neg.",
           file: "classic-negative.ralut",
           sha256: "00",
         },
@@ -57,7 +57,7 @@ test("groups interleaved looks by camera family without changing their order", (
         {
           id: "fuji-provia",
           group: "Fujifilm",
-          name: "PROVIA",
+          name: "STD | Provia",
           file: "provia.ralut",
           sha256: "00",
         },
@@ -79,7 +79,7 @@ test("groups interleaved looks by camera family without changing their order", (
     within(fujifilm)
       .getAllByRole("button")
       .map((button) => button.textContent),
-  ).toEqual(["Classic Negative", "PROVIA"]);
+  ).toEqual(["NC | Classic Neg.", "STD | Provia"]);
   expect(
     within(leica).getByRole("button", { name: "Natural" }),
   ).toBeInTheDocument();
@@ -91,7 +91,7 @@ test("filters strictly by camera family or Look name", () => {
     {
       id: "fuji-classic-negative",
       group: "Fujifilm",
-      name: "Classic Negative",
+      name: "NC | Classic Neg.",
       file: "classic-negative.ralut",
       sha256: "00",
     },
@@ -119,6 +119,23 @@ test("filters strictly by camera family or Look name", () => {
   ).toBeInTheDocument();
   expect(
     within(container).queryByRole("group", { name: "Fujifilm" }),
+  ).not.toBeInTheDocument();
+
+  rerender(
+    <LookPanel
+      looks={looks}
+      activeId="fuji-classic-negative"
+      onChoose={() => {}}
+      thumbs={new Map()}
+      query="NC"
+      onQuery={() => {}}
+    />,
+  );
+  expect(
+    within(container).getByRole("button", { name: "NC | Classic Neg." }),
+  ).toBeInTheDocument();
+  expect(
+    within(container).queryByRole("group", { name: "Nikon" }),
   ).not.toBeInTheDocument();
 
   rerender(
