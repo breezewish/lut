@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { compareRgb16Tiffs } from "./tiff";
 
@@ -23,7 +23,6 @@ test("tiled AAHD streams repeated aligned RGB16 exports", async ({
   );
   test.setTimeout((process.env.WEBGPU_SOFTWARE === "1" ? 12 : 5) * 60_000);
   const nativeOutput = testInfo.outputPath("sony-native.tif");
-  await nativeExport(fixture, nativeOutput);
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(fixture);
   await expect(
@@ -54,6 +53,7 @@ test("tiled AAHD streams repeated aligned RGB16 exports", async ({
     expect(timings.libraw.totalMs).toBe(0);
     runs.push(timings);
   }
+  await nativeExport(fixture, nativeOutput, runs[0].effectiveEv);
   const nativeTiff = await readFile(nativeOutput);
   const comparisons = [];
   for (const browserOutput of browserOutputs) {
@@ -95,7 +95,6 @@ test("tiled AAHD aligns on a second Bayer camera", async ({
   test.setTimeout(3 * 60_000);
 
   const nativeOutput = testInfo.outputPath("leica-native.tif");
-  await nativeExport(secondCameraFixture, nativeOutput);
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(secondCameraFixture);
   await expect(
@@ -106,6 +105,11 @@ test("tiled AAHD aligns on a second Bayer camera", async ({
   const browserDownload = await downloadPromise;
   const browserOutput = await browserDownload.path();
   expect(browserOutput).not.toBeNull();
+  await nativeExport(
+    secondCameraFixture,
+    nativeOutput,
+    await latestEffectiveEv(page),
+  );
 
   const comparison = compareRgb16Tiffs(
     await readFile(browserOutput!),
@@ -131,7 +135,6 @@ test("tiled AAHD matches LibRaw auto WB", async ({ page }, testInfo) => {
   const fixturePath = testInfo.outputPath("leica-m8-no-camera-wb.dng");
   const nativeOutput = testInfo.outputPath("leica-m8-no-camera-wb-native.tif");
   await writeFile(fixturePath, modified);
-  await nativeExport(fixturePath, nativeOutput);
   const file = {
     name: "leica-m8-no-camera-wb.dng",
     mimeType: "image/x-adobe-dng",
@@ -147,6 +150,7 @@ test("tiled AAHD matches LibRaw auto WB", async ({ page }, testInfo) => {
   await page.getByRole("button", { name: "Export selected" }).click();
   const browserOutput = await (await downloadPromise).path();
   expect(browserOutput).not.toBeNull();
+  await nativeExport(fixturePath, nativeOutput, await latestEffectiveEv(page));
 
   const comparison = compareRgb16Tiffs(
     await readFile(browserOutput!),
@@ -169,7 +173,6 @@ test("rotated Bayer keeps LibRaw geometry and required GPU color", async ({
   const fixturePath = testInfo.outputPath("leica-m8-rotated.dng");
   const nativeOutput = testInfo.outputPath("leica-m8-rotated-native.tif");
   await writeFile(fixturePath, modified);
-  await nativeExport(fixturePath, nativeOutput);
 
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(fixturePath);
@@ -190,6 +193,7 @@ test("rotated Bayer keeps LibRaw geometry and required GPU color", async ({
   );
   expect(timings.rawBackend).toBe("libraw");
   expect(timings.colorBackend).toBe("webgpu");
+  await nativeExport(fixturePath, nativeOutput, timings.effectiveEv);
 
   const comparison = compareRgb16Tiffs(
     await readFile(browserOutput!),
@@ -199,15 +203,32 @@ test("rotated Bayer keeps LibRaw geometry and required GPU color", async ({
   expect(comparison.maxCodeDifference).toBeLessThanOrEqual(1);
 });
 
-async function nativeExport(input: string, output: string): Promise<void> {
+async function nativeExport(
+  input: string,
+  output: string,
+  ev: number,
+): Promise<void> {
   await execFileAsync(resolve("target/release/lutify"), [
     input,
     output,
     "--lut",
     classicNegative,
+    "--ev",
+    String(ev),
     "--color",
     "never",
   ]);
+}
+
+async function latestEffectiveEv(page: Page) {
+  return page.evaluate(
+    () =>
+      (
+        performance
+          .getEntriesByName("lutify:export-worker")
+          .at(-1) as PerformanceMark
+      ).detail.effectiveEv as number,
+  );
 }
 
 function withoutDngAsShotNeutral(source: Buffer): Buffer {

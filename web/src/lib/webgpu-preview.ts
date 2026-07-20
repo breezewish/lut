@@ -1,4 +1,10 @@
 import shader from "./preview-transform.wgsl?raw";
+import autoExposureShader from "./auto-exposure.wgsl?raw";
+import {
+  AUTO_EXPOSURE_HISTOGRAM_BINS,
+  AUTO_EXPOSURE_ZONE_COUNT,
+  resolveMatrixAutoExposure,
+} from "./auto-exposure";
 import type { GpuLut } from "./webgpu-color";
 import {
   createCheckedComputePipeline,
@@ -31,6 +37,7 @@ export function prepareWebGpuPreview(): Promise<{
 type PreviewSourceState = {
   runtime: WebGpuRuntime;
   buffer: GPUBuffer;
+  autoExposure?: Promise<number>;
 };
 
 const previewSourceStates = new WeakMap<
@@ -79,6 +86,18 @@ export class WebGpuPreviewSource {
         cause: error,
       });
     }
+  }
+
+  /** Measures this retained linear source once on WebGPU and caches its base EV. */
+  measureAutoExposure(): Promise<number> {
+    const state = getPreviewSourceState(this);
+    state.autoExposure ??= measureAutoExposure(
+      state.runtime,
+      state.buffer,
+      this.width,
+      this.height,
+    );
+    return state.autoExposure;
   }
 
   /** Releases this photo's RGB16 GPU source. */
@@ -449,6 +468,86 @@ async function createPipeline(): Promise<{
     "WebGPU preview shader",
   );
   return { runtime, pipeline };
+}
+
+const AUTO_EXPOSURE_STATISTIC_COUNT =
+  AUTO_EXPOSURE_ZONE_COUNT * 2 + AUTO_EXPOSURE_HISTOGRAM_BINS;
+let autoExposurePipelinePromise: Promise<GPUComputePipeline> | undefined;
+
+async function measureAutoExposure(
+  runtime: WebGpuRuntime,
+  source: GPUBuffer,
+  width: number,
+  height: number,
+): Promise<number> {
+  runtime.assertAvailable();
+  autoExposurePipelinePromise ??= createCheckedComputePipeline(
+    runtime.device,
+    autoExposureShader,
+    "WebGPU automatic exposure shader",
+  );
+  const pipeline = await autoExposurePipelinePromise;
+  const statisticsBytes =
+    AUTO_EXPOSURE_STATISTIC_COUNT * Uint32Array.BYTES_PER_ELEMENT;
+  const buffers: GPUBuffer[] = [];
+  try {
+    const statistics = runtime.device.createBuffer({
+      size: statisticsBytes,
+      usage:
+        GPUBufferUsage.STORAGE |
+        GPUBufferUsage.COPY_SRC |
+        GPUBufferUsage.COPY_DST,
+    });
+    buffers.push(statistics);
+    const parameters = runtime.device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    buffers.push(parameters);
+    const readback = runtime.device.createBuffer({
+      size: statisticsBytes,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
+    buffers.push(readback);
+    runtime.device.queue.writeBuffer(
+      parameters,
+      0,
+      new Uint32Array([width, height, width * height, 0]),
+    );
+    const bindGroup = runtime.device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: source } },
+        { binding: 1, resource: { buffer: statistics } },
+        { binding: 2, resource: { buffer: parameters } },
+      ],
+    });
+    const commands = runtime.device.createCommandEncoder();
+    commands.clearBuffer(statistics);
+    const pass = commands.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(Math.ceil((width * height) / 256));
+    pass.end();
+    commands.copyBufferToBuffer(statistics, 0, readback, 0, statisticsBytes);
+    runtime.device.queue.submit([commands.finish()]);
+    await readback.mapAsync(GPUMapMode.READ);
+    try {
+      const values = new Uint32Array(readback.getMappedRange());
+      return resolveMatrixAutoExposure({
+        zoneLuminanceSums: values.subarray(0, AUTO_EXPOSURE_ZONE_COUNT),
+        zoneCounts: values.subarray(
+          AUTO_EXPOSURE_ZONE_COUNT,
+          AUTO_EXPOSURE_ZONE_COUNT * 2,
+        ),
+        histogram: values.subarray(AUTO_EXPOSURE_ZONE_COUNT * 2),
+      }).ev;
+    } finally {
+      readback.unmap();
+    }
+  } finally {
+    for (const buffer of buffers) buffer.destroy();
+  }
 }
 
 function previewDimensions(

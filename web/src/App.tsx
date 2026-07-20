@@ -727,6 +727,7 @@ export default function App() {
       setSourceTick((tick) => tick + 1);
       updateItem(active.id, {
         status: "ready",
+        baseEv: result.baseEv,
         camera: result.metadata.camera || "Unknown camera",
         dimensions: `${result.metadata.width} × ${result.metadata.height}`,
       });
@@ -1143,11 +1144,20 @@ export default function App() {
             item.id,
             await item.file.arrayBuffer(),
             item.ev,
+            item.baseEv,
             lut,
           );
           tiff = exported.tiff;
+          if (item.baseEv === undefined) {
+            updateItem(item.id, { baseEv: exported.baseEv });
+          }
           performance.mark("lutify:export-worker", {
-            detail: exported.timings,
+            detail: {
+              ...exported.timings,
+              baseEv: exported.baseEv,
+              userEv: item.ev,
+              effectiveEv: exported.baseEv + item.ev,
+            },
           });
         } catch (error) {
           const message =

@@ -94,7 +94,7 @@ fn render_base(rgb: vec3f) -> vec3f {
     -0.008564928 * rgb.x + (-0.15327258 * rgb.y + 1.161839 * rgb.z),
   );
   let luminance = 0.2126 * linear.x + (0.7152 * linear.y + 0.0722 * linear.z);
-  let scale = select(1.0, 1.18 / (0.18 + luminance), luminance > 0.0);
+  let scale = select(1.0, 1.0 / (1.0 + luminance), luminance > 0.0);
   let display = max(linear * scale, vec3f(0.0));
   return vec3f(srgb_oetf(display.x), srgb_oetf(display.y), srgb_oetf(display.z));
 }

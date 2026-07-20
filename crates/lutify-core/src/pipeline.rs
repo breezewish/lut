@@ -29,7 +29,7 @@ impl ColorPipeline {
     /// Returns [`LutifyError::InvalidExposure`] when EV is not finite or is
     /// outside the supported range.
     pub fn new(ev: f32, lut: Lut3d) -> Result<Self> {
-        if !ev.is_finite() || !(-8.0..=8.0).contains(&ev) {
+        if !ev.is_finite() || !(-12.0..=12.0).contains(&ev) {
             return Err(LutifyError::InvalidExposure);
         }
         Ok(Self {
@@ -218,8 +218,8 @@ mod tests {
     #[test]
     fn exposure_supports_both_documented_boundaries() {
         let lut = Lut3d::parse(IDENTITY_2).unwrap();
-        let minimum = ColorPipeline::new(-8.0, lut.clone()).unwrap();
-        let maximum = ColorPipeline::new(8.0, lut).unwrap();
+        let minimum = ColorPipeline::new(-12.0, lut.clone()).unwrap();
+        let maximum = ColorPipeline::new(12.0, lut).unwrap();
         let pixels = [32_768; 3];
         let minimum_linear = minimum.input_pixel(&pixels);
         let maximum_linear = maximum.input_pixel(&pixels);
@@ -252,7 +252,7 @@ mod tests {
             LutifyError::InvalidExposure
         );
         assert_eq!(
-            ColorPipeline::new(8.1, lut.clone()).unwrap_err(),
+            ColorPipeline::new(12.1, lut.clone()).unwrap_err(),
             LutifyError::InvalidExposure
         );
         let pipeline = ColorPipeline::new(0.0, lut).unwrap();

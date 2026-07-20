@@ -9,7 +9,7 @@ pub enum LutifyError {
     InvalidPixelCount { actual: usize, expected: usize },
     #[error("image dimensions exceed the supported address space")]
     ImageTooLarge,
-    #[error("EV must be finite and within -8..=8")]
+    #[error("EV must be finite and within -12..=12")]
     InvalidExposure,
     #[error("preview max edge must be non-zero")]
     InvalidPreviewSize,

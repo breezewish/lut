@@ -35,7 +35,7 @@ float lutify_encode_v_log(float linear);
  * Renders one corrected-v2 16-bit RGB TIFF.
  *
  * pixels contains width * height * 3 interleaved RGB16 samples in the pinned
- * LibRaw ProPhoto D65 Linear basis. ev must be finite and within [-8, 8].
+ * LibRaw ProPhoto D65 Linear basis. ev must be finite and within [-12, 12].
  * cube contains one UTF-8 3D CUBE document.
  * On success, the caller owns result.buffer and must release it exactly once
  * with lutify_free_buffer. On failure, result.buffer is all zeroes.

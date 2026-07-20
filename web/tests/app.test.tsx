@@ -206,6 +206,7 @@ test("renders the main preview only after the exposure recipe changes", async ()
               type: "preview",
               result: {
                 fileId: command.fileId,
+                baseEv: 1.25,
                 width: command.maxEdge ?? 1,
                 height: command.maxEdge ?? 1,
                 base:
@@ -219,6 +220,7 @@ test("renders the main preview only after the exposure recipe changes", async ()
                   previewBackend: "webgpu",
                   libraw: {},
                   previewSourceMs: 0,
+                  autoExposureMs: 0,
                   lutLoadMs: 0,
                   previewColorMs: 0,
                   workerTotalMs: 0,
@@ -433,6 +435,7 @@ test("reuses a decoded photo when switching back to it", async () => {
           type: "preview",
           result: {
             fileId: command.fileId,
+            baseEv: 1.25,
             width: 1,
             height: 1,
             base:
@@ -446,6 +449,7 @@ test("reuses a decoded photo when switching back to it", async () => {
               previewBackend: "webgpu",
               libraw: {},
               previewSourceMs: 0,
+              autoExposureMs: 0,
               lutLoadMs: 0,
               previewColorMs: 0,
               workerTotalMs: 0,
@@ -569,6 +573,7 @@ test("rerenders every look thumbnail after exposure changes", async () => {
               type: "preview",
               result: {
                 fileId: command.fileId,
+                baseEv: 1.25,
                 width: 1,
                 height: 1,
                 base:
@@ -582,6 +587,7 @@ test("rerenders every look thumbnail after exposure changes", async () => {
                   previewBackend: "webgpu",
                   libraw: {},
                   previewSourceMs: 0,
+                  autoExposureMs: 0,
                   lutLoadMs: 0,
                   previewColorMs: 0,
                   workerTotalMs: 0,

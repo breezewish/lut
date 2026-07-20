@@ -70,6 +70,7 @@ class ControlledWorker {
 function preview(fileId: string, value: number): PreviewResult {
   return {
     fileId,
+    baseEv: 1.25,
     width: 1,
     height: 1,
     base: new Uint8Array([value, value, value, 255]),
@@ -80,6 +81,7 @@ function preview(fileId: string, value: number): PreviewResult {
       previewBackend: "webgpu",
       libraw: exportTimings.libraw,
       previewSourceMs: 10,
+      autoExposureMs: 5,
       lutLoadMs: 0,
       previewColorMs: 11,
       workerTotalMs: 66,
@@ -330,7 +332,7 @@ test("export rejects an unsent render instead of dispatching stale exposure", as
     () => "resolved",
     () => "rejected",
   );
-  const exporting = client.export("one", new ArrayBuffer(1), 0.3, lut);
+  const exporting = client.export("one", new ArrayBuffer(1), 0.3, 1.25, lut);
 
   expect(
     ControlledWorker.instance.messages.map((message) => message.type),
@@ -345,7 +347,11 @@ test("export rejects an unsent render instead of dispatching stale exposure", as
     result: preview("one", 10),
   });
   const exportCommand = ControlledWorker.instance.messages[1];
-  expect(exportCommand).toMatchObject({ type: "export" });
+  expect(exportCommand).toMatchObject({
+    type: "export",
+    ev: 0.3,
+    baseEv: 1.25,
+  });
   expect(exportCommand).not.toHaveProperty("rawBackend");
   expect(exportCommand).not.toHaveProperty("colorBackend");
   expect(exportCommand).not.toHaveProperty("validateGpu");
@@ -356,11 +362,16 @@ test("export rejects an unsent render instead of dispatching stale exposure", as
     type: "export",
     fileId: "one",
     tiff,
+    baseEv: 1.25,
     timings: exportTimings,
   });
 
   await expect(rendering).resolves.toMatchObject({ fileId: "one" });
-  await expect(exporting).resolves.toEqual({ tiff, timings: exportTimings });
+  await expect(exporting).resolves.toEqual({
+    tiff,
+    baseEv: 1.25,
+    timings: exportTimings,
+  });
   client.dispose();
 });
 

@@ -40,6 +40,7 @@ void previewGpuPreparation.catch(() => undefined);
 
 type CachedPreview = {
   fileId: string;
+  baseEv: number;
   metadata: PreviewResult["metadata"];
   timings: PreviewResult["timings"];
   source: WebGpuPreviewSource;
@@ -134,7 +135,9 @@ async function handleCommand(
     }
     if (data.type === "decode") {
       const workerStartedAt = performance.now();
-      let previewRaw = new module.LibRaw();
+      const openedPreview = await openPreviewRaw(module, data.buffer);
+      module = openedPreview.module;
+      const previewRaw = openedPreview.raw;
       let preview: CachedPreview | undefined;
       let retainPreviewRaw = false;
       let sensorCache:
@@ -149,7 +152,6 @@ async function handleCommand(
         // orientation, then discards pixels that cannot reach the 1024px
         // cache before highlight and color conversion. Export never calls
         // this entry point.
-        previewRaw.openPreview(new Uint8Array(data.buffer), PREVIEW_MAX_EDGE);
         const metadata = previewRaw.metadata();
         const thumbnail = previewRaw.thumbnailData();
         if (thumbnail?.format === "jpeg") {
@@ -160,14 +162,6 @@ async function handleCommand(
             result: { fileId: data.fileId, jpeg: thumbnail.data },
           };
           context.postMessage(reply, [thumbnail.data.buffer]);
-        }
-        if (previewRaw.usesParallelUnpack()) {
-          const parallelModule = await loadParallelLibRaw();
-          const parallelRaw = new parallelModule.LibRaw();
-          previewRaw.delete();
-          module = parallelModule;
-          previewRaw = parallelRaw;
-          previewRaw.openPreview(new Uint8Array(data.buffer), PREVIEW_MAX_EDGE);
         }
         const sensorBackend = previewRaw.supportsWebGpuAahd()
           ? "webgpu-aahd"
@@ -200,9 +194,13 @@ async function handleCommand(
           image.width,
           image.height,
         );
+        const autoExposureStartedAt = performance.now();
+        const baseEv = await source.measureAutoExposure();
+        const autoExposureMs = performance.now() - autoExposureStartedAt;
         previewRaw.discardImage();
         preview = {
           fileId: data.fileId,
+          baseEv,
           source,
           metadata: {
             camera: [metadata.camera_make, metadata.camera_model]
@@ -215,6 +213,7 @@ async function handleCommand(
             previewBackend: "webgpu",
             libraw,
             previewSourceMs: 0,
+            autoExposureMs,
             lutLoadMs: 0,
             previewColorMs: 0,
             workerTotalMs: 0,
@@ -336,8 +335,14 @@ async function handleCommand(
     }
 
     const workerStartedAt = performance.now();
+    const cachedPreview = touchPreview(data.fileId);
+    const baseEv =
+      data.baseEv ??
+      cachedPreview?.baseEv ??
+      (await measureRawBaseEv(module, data.buffer));
+    const effectiveEv = baseEv + data.ev;
     const lut = await loadLut(data.lut);
-    const cachedSensor = touchPreview(data.fileId)?.sensor;
+    const cachedSensor = cachedPreview?.sensor;
     if (cachedSensor) module = cachedSensor.module;
     let exportRaw = cachedSensor?.raw ?? new module.LibRaw();
     let gpuRenderer: WebGpuColorRenderer | undefined;
@@ -373,14 +378,14 @@ async function handleCommand(
               ? await demosaicLibRawAahdTiledWithWgsl(
                   mosaic,
                   sensor,
-                  { renderer: gpuRenderer, ev: data.ev },
+                  { renderer: gpuRenderer, ev: effectiveEv },
                   (pixels) => stream.write(pixels),
                 )
               : await demosaicLibRawXtransTiledWithWgsl(
                   mosaic,
                   sensor,
                   new Float32Array(exportRaw.xtransCbrtView()),
-                  { renderer: gpuRenderer, ev: data.ev },
+                  { renderer: gpuRenderer, ev: effectiveEv },
                   (pixels) => stream.write(pixels),
                 );
           const rendered = stream.finish(sensor.sampleCount * 3);
@@ -390,6 +395,7 @@ async function handleCommand(
             type: "export",
             fileId: data.fileId,
             tiff: rendered.bytes,
+            baseEv,
             timings: {
               libraw: cachedSensor
                 ? sensorDecodeTimings(ZERO_SENSOR_TIMINGS)
@@ -423,7 +429,7 @@ async function handleCommand(
         (offset, length) => exportRaw.imageView(offset, length),
         new TiffEncoder(image.width, image.height),
         gpuRenderer,
-        data.ev,
+        effectiveEv,
       );
       const timings: ExportTimings = {
         libraw: exportRaw.timings(),
@@ -442,6 +448,7 @@ async function handleCommand(
         type: "export",
         fileId: data.fileId,
         tiff: rendered.bytes,
+        baseEv,
         timings,
       };
       context.postMessage(reply, [rendered.bytes.buffer]);
@@ -482,6 +489,44 @@ function loadParallelLibRaw(): Promise<LibRawModule> {
     ({ default: create }) => create(),
   );
   return parallelRuntime;
+}
+
+async function openPreviewRaw(
+  module: LibRawModule,
+  buffer: ArrayBuffer,
+): Promise<{ module: LibRawModule; raw: LibRawInstance }> {
+  let raw = new module.LibRaw();
+  try {
+    raw.openPreview(new Uint8Array(buffer), PREVIEW_MAX_EDGE);
+    if (!raw.usesParallelUnpack()) return { module, raw };
+
+    const parallelModule = await loadParallelLibRaw();
+    const parallelRaw = new parallelModule.LibRaw();
+    raw.delete();
+    raw = parallelRaw;
+    raw.openPreview(new Uint8Array(buffer), PREVIEW_MAX_EDGE);
+    return { module: parallelModule, raw };
+  } catch (error) {
+    raw.delete();
+    throw error;
+  }
+}
+
+async function measureRawBaseEv(
+  module: LibRawModule,
+  buffer: ArrayBuffer,
+): Promise<number> {
+  const opened = await openPreviewRaw(module, buffer);
+  const raw = opened.raw;
+  let source: WebGpuPreviewSource | undefined;
+  try {
+    const image = raw.imageInfo();
+    source = await createCachedPreviewSource(raw, image.width, image.height);
+    return await source.measureAutoExposure();
+  } finally {
+    source?.free();
+    raw.delete();
+  }
 }
 
 function sensorDecodeTimings(
@@ -595,10 +640,15 @@ async function renderCached(
     previewLutId = lut.id;
   }
   const startedAt = performance.now();
-  const preview = await previewRenderer.render(ev, maxEdge, includeBase);
+  const preview = await previewRenderer.render(
+    cached.baseEv + ev,
+    maxEdge,
+    includeBase,
+  );
   const previewColorMs = performance.now() - startedAt;
   return {
     fileId,
+    baseEv: cached.baseEv,
     width: preview.width,
     height: preview.height,
     base: preview.base,
@@ -720,6 +770,7 @@ async function postBitmapPreview(
     type: "preview",
     result: {
       fileId: result.fileId,
+      baseEv: result.baseEv,
       width: result.width,
       height: result.height,
       baseBitmap,

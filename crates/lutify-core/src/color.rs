@@ -36,10 +36,11 @@ pub(crate) fn render_base_preview(linear_libraw_prophoto: [f32; 3]) -> [u8; 3] {
         0.7152f32.mul_add(linear_srgb[1], 0.0722 * linear_srgb[2]),
     );
 
-    // A luminance-only shoulder keeps the neutral axis and preserves hue much
-    // better than applying a non-linear curve independently to wide-gamut RGB.
+    // A neutral Reinhard shoulder keeps 18% gray near its expected display
+    // value after automatic exposure while compressing HDR values without
+    // changing hue through independent channel curves.
     let scale = if luminance > 0.0 {
-        1.18 / (0.18 + luminance)
+        1.0 / (1.0 + luminance)
     } else {
         1.0
     };

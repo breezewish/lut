@@ -68,7 +68,7 @@ def render_base(linear_prophoto: list[float]) -> list[float]:
         coefficient * channel
         for coefficient, channel in zip((0.2126, 0.7152, 0.0722), linear_srgb)
     )
-    scale = 1.18 / (0.18 + luminance) if luminance > 0.0 else 1.0
+    scale = 1.0 / (1.0 + luminance) if luminance > 0.0 else 1.0
     return [srgb_oetf(max(channel * scale, 0.0)) for channel in linear_srgb]
 
 

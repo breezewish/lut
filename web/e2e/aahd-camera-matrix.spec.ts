@@ -39,14 +39,6 @@ for (const fixture of manifest.fixtures) {
 
     const path = resolve(fixtureRoot, fixture.file);
     const nativeOutput = testInfo.outputPath(`${fixture.id}-native.tif`);
-    await execFileAsync(resolve("target/release/lutify"), [
-      path,
-      nativeOutput,
-      "--lut",
-      classicNegative,
-      "--color",
-      "never",
-    ]);
     const webGpuOutput = await exportSelected(page, path);
     const previewTimings = await page.evaluate(
       () =>
@@ -64,6 +56,16 @@ for (const fixture of manifest.fixtures) {
             .at(-1) as PerformanceMark
         ).detail,
     );
+    await execFileAsync(resolve("target/release/lutify"), [
+      path,
+      nativeOutput,
+      "--lut",
+      classicNegative,
+      "--ev",
+      String(timings.effectiveEv),
+      "--color",
+      "never",
+    ]);
     const adapterInfo = await page.evaluate(async () => {
       const adapter = await navigator.gpu.requestAdapter({
         powerPreference: "high-performance",

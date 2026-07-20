@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 
@@ -7,6 +8,9 @@ import { expect, test } from "@playwright/test";
 
 const execFileAsync = promisify(execFile);
 const linearFixture = resolve("tests/fixtures/linear.dng");
+const viteCli = fileURLToPath(
+  new URL("bin/vite.js", import.meta.resolve("vite/package.json")),
+);
 
 test("rebuilding assets keeps a live development server usable", async ({
   page,
@@ -14,14 +18,7 @@ test("rebuilding assets keeps a live development server usable", async ({
   const origin = "http://127.0.0.1:42733";
   const server = spawn(
     process.execPath,
-    [
-      resolve("node_modules/vite/bin/vite.js"),
-      "--host",
-      "127.0.0.1",
-      "--port",
-      "42733",
-      "--strictPort",
-    ],
+    [viteCli, "--host", "127.0.0.1", "--port", "42733", "--strictPort"],
     { stdio: "ignore" },
   );
 

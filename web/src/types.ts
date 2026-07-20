@@ -13,6 +13,8 @@ export interface QueueItem {
   status: QueueStatus;
   /** Exposure compensation applied to this photo, in EV. */
   ev: number;
+  /** Scene-dependent automatic exposure measured once from the linear Preview. */
+  baseEv?: number;
   /** Selected built-in look for this photo. */
   lutId: string;
   camera?: string;
@@ -71,6 +73,7 @@ export interface PreviewTimings {
   previewBackend: "webgpu";
   libraw: LibRawDecodeTimings;
   previewSourceMs: number;
+  autoExposureMs: number;
   lutLoadMs: number;
   previewColorMs: number;
   workerTotalMs: number;
@@ -105,11 +108,13 @@ export interface ExportTimings {
 
 export interface ExportResult {
   tiff: Uint8Array;
+  baseEv: number;
   timings: ExportTimings;
 }
 
 export interface PreviewResult {
   fileId: string;
+  baseEv: number;
   width: number;
   height: number;
   base?: Uint8Array<ArrayBuffer>;
@@ -197,6 +202,7 @@ export type WorkerCommand =
       fileId: string;
       buffer: ArrayBuffer;
       ev: number;
+      baseEv?: number;
       lut: LutDefinition;
     };
 
@@ -254,6 +260,7 @@ export type WorkerReply =
       type: "export";
       fileId: string;
       tiff: Uint8Array;
+      baseEv: number;
       timings: ExportTimings;
     }
   | {

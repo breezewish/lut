@@ -6,6 +6,7 @@
 - Frozen non-clipped pixels decoded by pinned LibRaw directly to linear sRGB match the corrected transform from its ProPhoto D65 output within two code values.
 - A strict CUBE parser validates axis order, domain, scientific notation, finite values, sample count, and a non-affine LUT's distinct outputs for all six tetrahedral branches and their shared boundaries.
 - Corrected preview applies EV, including both supported boundaries, to both Base and LUT views while preserving the requested aspect ratio.
+- Matrix automatic exposure maps a uniform 2% linear scene to 18% gray, caps p99 highlights at 6.0 linear, and leaves an all-black source at zero EV.
 - The browser preview source requests only contributing decoded rows, retains exactly the pixels used at the requested display size, and rejects incomplete or inconsistent rows.
 - The completed browser preview source can move exactly once into WebGPU ownership, after which the Rust source reports its missing pixels instead of retaining a duplicate allocation.
 - TIFF export produces a readable uncompressed RGB16 image with the requested dimensions.

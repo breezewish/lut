@@ -366,6 +366,15 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
   await exportSelected.click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/fuji-classic-negative\.tif$/);
+  const effectiveEv = await page.evaluate(
+    () =>
+      (
+        performance
+          .getEntriesByName("lutify:export-worker")
+          .at(-1) as PerformanceMark
+      ).detail.effectiveEv as number,
+  );
+  expect(Number.isFinite(effectiveEv)).toBe(true);
 
   const nativeOutput = test.info().outputPath("native.tif");
   await execFileAsync("cargo", [
@@ -379,7 +388,7 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
     "--lut",
     classicNegative,
     "--ev",
-    "1",
+    String(effectiveEv),
   ]);
   const browserOutput = await download.path();
   expect(browserOutput).not.toBeNull();
@@ -505,6 +514,12 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
   );
   expect([browserLinear.width, browserLinear.height]).toEqual([64, 48]);
   expect([browserLossy.width, browserLossy.height]).toEqual([256, 168]);
+  const [linearEffectiveEv, lossyEffectiveEv] = await page.evaluate(() =>
+    performance
+      .getEntriesByName("lutify:export-worker")
+      .slice(-2)
+      .map((entry) => (entry as PerformanceMark).detail.effectiveEv as number),
+  );
 
   const nativeLinearPath = test.info().outputPath("batch-linear-native.tif");
   const nativeLossyPath = test.info().outputPath("batch-lossy-native.tif");
@@ -514,6 +529,8 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
       nativeLinearPath,
       "--lut",
       classicNegative,
+      "--ev",
+      String(linearEffectiveEv),
       "--color",
       "never",
     ]),
@@ -522,6 +539,8 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
       nativeLossyPath,
       "--lut",
       classicNegative,
+      "--ev",
+      String(lossyEffectiveEv),
       "--color",
       "never",
     ]),
@@ -712,6 +731,14 @@ test("all built-in LUTs match optimized native RGB16 exports", async ({
     await page.getByRole("button", { name: "Export selected" }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe(`linear-${look.id}.tif`);
+    const effectiveEv = await page.evaluate(
+      () =>
+        (
+          performance
+            .getEntriesByName("lutify:export-worker")
+            .at(-1) as PerformanceMark
+        ).detail.effectiveEv as number,
+    );
 
     const nativeOutput = test.info().outputPath(`${look.id}.tif`);
     await execFileAsync(nativeLutify, [
@@ -720,7 +747,7 @@ test("all built-in LUTs match optimized native RGB16 exports", async ({
       "--lut",
       resolve("vendor/V-Log-Alchemy/Luts", look.file),
       "--ev",
-      "0",
+      String(effectiveEv),
       "--color",
       "never",
     ]);
@@ -833,6 +860,7 @@ test("export failures retain the preview, allow retry, and release it on removal
           type: "preview",
           result: {
             fileId: command.fileId,
+            baseEv: 1.25,
             width: 1,
             height: 1,
             base: new Uint8Array([32, 32, 32, 255]),
@@ -843,6 +871,7 @@ test("export failures retain the preview, allow retry, and release it on removal
               previewBackend: "webgpu",
               libraw: {},
               previewSourceMs: 0,
+              autoExposureMs: 0,
               lutLoadMs: 0,
               previewColorMs: 0,
               workerTotalMs: 0,

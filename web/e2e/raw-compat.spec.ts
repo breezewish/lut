@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { compareRgb16Tiffs } from "./tiff";
 
@@ -23,14 +23,6 @@ test("a real camera CFA DNG matches the native full-resolution export", async ({
   );
   test.setTimeout(120_000);
   const nativeOutput = test.info().outputPath("leica-m8-native.tif");
-  const nativeExport = execFileAsync(resolve("target/release/lutify"), [
-    realDng,
-    nativeOutput,
-    "--lut",
-    classicNegative,
-    "--color",
-    "never",
-  ]);
 
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(realDng);
@@ -60,7 +52,17 @@ test("a real camera CFA DNG matches the native full-resolution export", async ({
   const download = await downloadPromise;
   const browserOutput = await download.path();
   expect(browserOutput).not.toBeNull();
-  await nativeExport;
+  const effectiveEv = await latestEffectiveEv(page);
+  await execFileAsync(resolve("target/release/lutify"), [
+    realDng,
+    nativeOutput,
+    "--lut",
+    classicNegative,
+    "--ev",
+    String(effectiveEv),
+    "--color",
+    "never",
+  ]);
 
   const comparison = compareRgb16Tiffs(
     await readFile(browserOutput!),
@@ -221,6 +223,7 @@ test("a full-resolution Sony ARW export matches the native pipeline", async ({
   expect(Date.now() - startedAt).toBeLessThan(30_000);
   const browserOutput = await download.path();
   expect(browserOutput).not.toBeNull();
+  const effectiveEv = await latestEffectiveEv(page);
 
   await execFileAsync(resolve("target/release/lutify"), [
     sonyArw,
@@ -228,7 +231,7 @@ test("a full-resolution Sony ARW export matches the native pipeline", async ({
     "--lut",
     classicNegative,
     "--ev",
-    "1.5",
+    String(effectiveEv),
     "--color",
     "never",
   ]);
@@ -240,3 +243,14 @@ test("a full-resolution Sony ARW export matches the native pipeline", async ({
   expect([comparison.width, comparison.height]).toEqual([6_240, 4_168]);
   expect(comparison.maxCodeDifference).toBeLessThanOrEqual(1);
 });
+
+async function latestEffectiveEv(page: Page) {
+  return page.evaluate(
+    () =>
+      (
+        performance
+          .getEntriesByName("lutify:export-worker")
+          .at(-1) as PerformanceMark
+      ).detail.effectiveEv as number,
+  );
+}

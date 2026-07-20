@@ -6,11 +6,17 @@ The decoder accepts camera RAW bytes and either returns a three-channel RGB16 im
 
 ## Corrected-v2
 
-Exposure multiplies linear RGB by `2^EV`. The Base path converts ProPhoto D65 to linear sRGB, applies one luminance-only shoulder, clamps negative display values, and applies the sRGB transfer function.
+Exposure multiplies linear RGB by `2^EV`. The shared computation API accepts finite EV in `[-12, 12]`. The Base path converts ProPhoto D65 to linear sRGB, applies the hue-preserving luminance scale `1 / (1 + Y)`, clamps negative display values, and applies the sRGB transfer function.
 
 The LUT path applies the fixed ProPhoto D65 to V-Gamut D65 matrix, Panasonic's piecewise V-Log formula including its negative-capable linear branch, lookup-domain clamping, and tetrahedral interpolation. Red is the fastest-changing CUBE axis. Camera-Match Boost is disabled.
 
 Preview produces RGBA8. Export produces an uncompressed interleaved RGB16 TIFF. Corrected quantization clamps to `[0,1]`, scales by 65535, and rounds to nearest.
+
+## Browser automatic exposure
+
+The browser derives one baseline EV from the display-sized linear RGB16 source before its first processed preview. It divides the image into a 7 × 7 matrix, meters luminance in the corrected linear-sRGB basis, emphasizes the center with a Gaussian weight, reduces zones above the zone p90, and slightly raises zones below the zone p10. The weighted scene luminance targets 18% gray. A max-RGB p99 histogram limits the exposed highlight to 6.0 linear, and gain is bounded to `[0.1, 100]`.
+
+The user EV is a relative adjustment. Preview and export use `baseline EV + user EV`. The baseline is image-derived rather than copied from capture metadata, because shutter speed, aperture, and ISO describe acquisition but do not determine a useful output brightness after RAW normalization.
 
 ## LUT contract
 

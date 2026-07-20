@@ -159,7 +159,10 @@ export class ProcessingClient {
     );
     if (reply.ok && reply.type === "preview") {
       performance.mark("lutify:preview-worker", {
-        detail: reply.result.timings,
+        detail: {
+          ...reply.result.timings,
+          baseEv: reply.result.baseEv,
+        },
       });
       return reply.result;
     }
@@ -230,6 +233,7 @@ export class ProcessingClient {
     fileId: string,
     buffer: ArrayBuffer,
     ev: number,
+    baseEv: number | undefined,
     lut: LutDefinition,
   ): Promise<ExportResult> {
     this.rejectQueuedRender(
@@ -241,12 +245,17 @@ export class ProcessingClient {
         fileId,
         buffer,
         ev,
+        baseEv,
         lut,
       },
       [buffer],
     );
     if (reply.ok && reply.type === "export") {
-      return { tiff: reply.tiff, timings: reply.timings };
+      return {
+        tiff: reply.tiff,
+        baseEv: reply.baseEv,
+        timings: reply.timings,
+      };
     }
     throw new Error("Worker returned an unexpected export response.");
   }
