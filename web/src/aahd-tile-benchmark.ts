@@ -10,7 +10,7 @@ const CFA_PHASES = [
   [2, 1, 1, 0],
 ];
 
-/** Runs opt-in hardware seam fixtures without loading the product UI. */
+/** Runs portable WebGPU seam fixtures without loading the product UI. */
 export function mountAahdTileBenchmark(): void {
   document.body.dataset.benchmarkStatus = "running";
   void runFixtures()

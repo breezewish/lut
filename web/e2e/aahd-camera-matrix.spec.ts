@@ -33,7 +33,7 @@ for (const fixture of manifest.fixtures) {
   test(`GPU export aligns ${fixture.camera}`, async ({ page }, testInfo) => {
     test.skip(
       process.env.WEBGPU_CAMERA_MATRIX_E2E !== "1",
-      "Run npm run test:webgpu-camera-matrix on a hardware WebGPU runner.",
+      "Run npm run test:webgpu-hardware on a non-fallback WebGPU adapter.",
     );
     test.setTimeout(5 * 60_000);
 

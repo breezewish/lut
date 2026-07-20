@@ -7,9 +7,11 @@ import createRegularLibRaw from "../web/src/libraw/libraw.js";
 import createLibRaw from "./libraw-node-runtime.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-await promisify(execFile)("python3", [
-  resolve(root, "tests/fixtures/make_packed_dng.py"),
-]);
+await Promise.all(
+  ["make_packed_dng.py", "make_xtrans_dng.py"].map((script) =>
+    promisify(execFile)("python3", [resolve(root, "tests/fixtures", script)]),
+  ),
+);
 const fixtures = [
   {
     name: "Sony ILME-FX30 ARW",
@@ -84,7 +86,60 @@ const fixtures = [
     webGpuXtrans: false,
     parallelUnpack: true,
   },
+  {
+    name: "Synthetic 16-bit X-Trans DNG",
+    path: "tests/fixtures/xtrans-16.dng",
+    width: 516,
+    height: 516,
+    sensorType: "xtrans",
+    cfaSize: 6,
+    cfa: [
+      0, 2, 1, 2, 0, 1, 1, 1, 0, 1, 1, 2, 1, 1, 2, 1, 1, 0, 2, 0, 1, 0, 2, 1, 1,
+      1, 2, 1, 1, 0, 1, 1, 0, 1, 1, 2,
+    ],
+    blackLevels: [0, 0, 0, 0],
+    whiteLevel: 16383,
+    demosaicScaleRange: 16383,
+    orientation: 0,
+    whiteBalance: [1, 1, 1, 0],
+    demosaicPreMultipliers: [1, 1, 1, 1],
+    xyzToCamera: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    sum: 2177799256,
+    samples: [0, 3496, 1883, 3676, 9780, 8940],
+    webGpuAahd: false,
+    webGpuXtrans: true,
+    parallelUnpack: false,
+  },
 ];
+if (process.env.NIKON_Z6_NEF_FIXTURE) {
+  fixtures.push({
+    name: "Nikon Z 6 NEF",
+    path: process.env.NIKON_Z6_NEF_FIXTURE,
+    width: 6064,
+    height: 4040,
+    sensorType: "bayer",
+    cfaSize: 2,
+    cfa: [0, 1, 3, 2],
+    blackLevels: [1008, 1008, 1008, 1008],
+    whiteLevel: 16383,
+    demosaicScaleRange: 15375,
+    orientation: 0,
+    whiteBalance: [1.189453125, 1, 2.119140625, 1],
+    demosaicPreMultipliers: [
+      0.5612903237342834, 0.4718894064426422, 1, 0.4718894064426422,
+    ],
+    xyzToCamera: [
+      0.9943000078201294, -0.32690000534057617, -0.08389999717473984,
+      -0.5322999954223633, 1.3269000053405762, 0.22589999437332153,
+      -0.11980000138282776, 0.20829999446868896, 0.7556999921798706, 0, 0, 0,
+    ],
+    sum: 54021549694,
+    samples: [3482, 3746, 3624, 3888, 4743, 1406],
+    webGpuAahd: true,
+    webGpuXtrans: false,
+    parallelUnpack: false,
+  });
+}
 if (process.env.XTRANS_FIXTURE) {
   fixtures.push({
     name: "Fujifilm X-T1 RAF",

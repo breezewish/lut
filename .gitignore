@@ -7,6 +7,7 @@
 /playwright-report/
 /tests/fixtures/webgpu-camera-matrix/
 /tests/fixtures/packed-12.dng
+/tests/fixtures/xtrans-16.dng
 /web/public/luts/
 /web/src/libraw/
 /web/src/wasm/

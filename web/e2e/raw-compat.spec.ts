@@ -19,7 +19,7 @@ test("a real camera CFA DNG matches the native full-resolution export", async ({
 }) => {
   test.skip(
     process.env.WEBGPU_HARDWARE !== "1",
-    "Full-resolution Bayer export runs on the hardware WebGPU release gate.",
+    "Run npm run test:webgpu-hardware for full-resolution Bayer parity.",
   );
   test.setTimeout(120_000);
   const nativeOutput = test.info().outputPath("leica-m8-native.tif");
@@ -77,7 +77,7 @@ test("a full-resolution Sony ARW export matches the native pipeline", async ({
 }) => {
   test.skip(
     process.env.WEBGPU_HARDWARE !== "1",
-    "Full-resolution Bayer export runs on the hardware WebGPU release gate.",
+    "Run npm run test:webgpu-hardware for full-resolution Bayer parity.",
   );
   test.setTimeout(120_000);
   const nativeOutput = test.info().outputPath("sony-fx30-native.tif");

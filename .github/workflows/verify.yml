@@ -73,19 +73,19 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - uses: actions/cache@v4
+        with:
+          path: tests/fixtures/webgpu-camera-matrix
+          key: camera-fixtures-${{ hashFiles('tests/fixtures/webgpu-camera-matrix.json') }}
+
       - run: npm ci
       - run: cargo install wasm-pack --version 0.13.1 --locked
       - run: rustup target add wasm32-unknown-unknown
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run build
-      - run: npm run test:e2e:prepared
+      - run: npm run test:e2e:ci:prepared
       - name: Verify WebGPU production paths with SwiftShader
-        run: |
-          VITE_ENABLE_TEST_ENTRIES=1 npm run bundle:test
-          AAHD_TILE_E2E=1 WEBGPU_PREVIEW_E2E=1 PLAYWRIGHT_HTTP_PORT=46731 \
-            npx playwright test web/e2e/aahd-tile.spec.ts \
-              web/e2e/webgpu-preview-correctness.spec.ts \
-              --project=chromium --retries=0
+        run: npm run test:webgpu-software:prepared
       - run: npm run bundle:pages
       - run: npm run test:pages:prepared
       - if: github.event_name == 'push'

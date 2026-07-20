@@ -16,9 +16,20 @@ const fixtureRoot = resolve(
   process.env.WEBGPU_CAMERA_FIXTURE_DIR ??
     join(root, "tests/fixtures/webgpu-camera-matrix"),
 );
+const requestedIds = process.argv.slice(2);
+const fixturesById = new Map(
+  manifest.fixtures.map((fixture) => [fixture.id, fixture]),
+);
+const fixtures = requestedIds.length
+  ? requestedIds.map((id) => {
+      const fixture = fixturesById.get(id);
+      if (!fixture) throw new Error(`Unknown camera fixture ID: ${id}`);
+      return fixture;
+    })
+  : manifest.fixtures;
 
 await mkdir(fixtureRoot, { recursive: true });
-for (const fixture of manifest.fixtures) {
+for (const fixture of fixtures) {
   if (fixture.file !== basename(fixture.file)) {
     throw new Error(`Fixture ${fixture.id} has an invalid file name.`);
   }

@@ -21,13 +21,17 @@ decoder that the browser build explicitly enables.
 Sony ARW belong to the pinned `vendor/LibRaw-Wasm` submodule.
 `packed-12.dng` is generated and ignored by `make_packed_dng.py`; the sensor
 harness uses it to prove exact non-byte-aligned packed DNG unpack parity.
+`xtrans-16.dng` is generated and ignored by `make_xtrans_dng.py`; the sensor
+harness uses its bounded 6 × 6 CFA to verify WebGPU X-Trans routing.
 
 `webgpu-camera-matrix.json` pins CC0 Bayer RAW files from Nikon, Panasonic, and
-Fujifilm plus matched full-resolution lossless and lossy DNG conversions from a
-Canon EOS 5D Mark III. `npm run test:webgpu-camera-matrix` downloads them from
-raw.pixls.us, verifies their byte lengths and SHA-256 digests, and then compares
-every RGB16 TIFF channel from the production LibRaw and WebGPU exports.
-The downloaded files live in the ignored `webgpu-camera-matrix/` directory and
-are never committed. Fujifilm X-A5 is deliberately used instead of the more
-common X-Trans models because the experimental AAHD backend supports Bayer CFA
-inputs only.
+Fujifilm, two generations of Fujifilm X-Trans RAW, and matched full-resolution
+lossless and lossy DNG conversions from a Canon EOS 5D Mark III. Default CI
+downloads only the Nikon NEF by fixture ID and verifies its exact bytes, LibRaw
+sensor output, and WebGPU AAHD route. `npm run test:webgpu-hardware` downloads
+the complete matrix, rejects a fallback adapter, and compares every RGB16 TIFF
+channel from the production WebGPU exports with native LibRaw.
+
+Downloaded files live in the ignored `webgpu-camera-matrix/` directory and are
+never committed. Passing one or more manifest IDs to
+`prepare-webgpu-camera-fixtures.mjs` prepares only those fixtures.
