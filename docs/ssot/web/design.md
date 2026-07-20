@@ -26,7 +26,7 @@ The exposure slider remains an uncontrolled native input while the pointer moves
 
 Look previews are submitted as one Worker command as soon as the main recipe settles. The selected Look renders first because its LUT is already parsed for the main preview. Remaining LUTs render in byte-readiness order, allowing HTTP transfer, integrity verification, WASM parsing, GPU work, transfer, and Canvas publication to overlap as a pipeline. The Worker checks main-preview priority between each 132px LUT render, creates its `ImageBitmap` off the main thread, and transfers every completed thumbnail immediately. Displayed tiles and completed tiles are distinct state: a new EV starts an empty completion set without clearing the canvases, then each result replaces one old tile in a low-priority React transition. Memoized comparison, Look, and filmstrip surfaces do not reconcile for unrelated EV state commits. A preempted batch resumes with only missing LUTs, so interaction cannot accumulate thumbnail work or repeat completed tiles.
 
-The WebGPU implementation evaluates the canonical Preview transfer directly. Export retains its independent exact floating-point processing path. Transferred RGBA8 results are reinterpreted directly as clamped Canvas views instead of copied into another complete preview allocation. Export receives a fresh transferable RAW buffer, but strict compressed Bayer and X-Trans routes reuse the cached sensor mosaic instead of unpacking it again. Other routes decode on demand. A stateful Rust WASM encoder requests and copies only the next approximately 1 MB LibRaw view, so JavaScript never owns a complete decoded RGB16 image and the separate color WASM receives no second complete allocation.
+The WebGPU implementation evaluates the canonical Preview transfer directly. Export retains its independent exact floating-point processing path. Transferred RGBA8 results are reinterpreted directly as clamped Canvas views instead of copied into another complete preview allocation. Export receives a fresh transferable RAW buffer, but strict compressed Bayer and X-Trans routes reuse the cached sensor mosaic instead of unpacking it again. Other routes decode on demand. A format-specific stateful encoder requests only the next approximately 1 MB RGB16 band. Rust owns TIFF strip and directory writing. The existing pinned libjpeg-turbo build owns JPEG RGB8 conversion and scanline compression at fixed quality 95. JavaScript never owns a complete decoded RGB16 or RGB8 export image, and JPEG never creates a full-resolution Canvas.
 
 The production Export route asks LibRaw whether the opened RAW satisfies the
 strict WebGPU Bayer AAHD or X-Trans contract before choosing a demosaic stage. LibRaw
@@ -45,8 +45,8 @@ back into one CPU plane for exact row-order refinement; that scan emits one
 packed four-bit direction plane consumed directly by every tile in the second
 sweep. Exact YUV rounding uses one dispatch with explicit storage round trips.
 Each selected core passes directly into corrected-v2 exposure and LUT
-processing. Two fixed output readbacks overlap bounded transfer with TIFF
-prediction and Deflate; a separate scratch readback supports the compact exact
+processing. Two fixed output readbacks overlap bounded transfer with output
+encoding; a separate scratch readback supports the compact exact
 Blend-highlight transform.
 
 Standard X-Trans export keeps LibRaw unpacking, crop metadata, black levels,
@@ -58,7 +58,7 @@ cross explicit storage boundaries because WGSL permits contraction while the
 pinned LibRaw build forbids it. The same rule applies to the final Lab terms.
 The bounded workspace is at most 179 MB for the verified camera matrix, with no
 full decoded RGB image in JavaScript. Blend highlight reconstruction, ProPhoto
-conversion, corrected-v2 color, readback, and TIFF writing remain on the
+conversion, corrected-v2 color, readback, and output encoding remain on the
 streamed tile route.
 
 Preview intentionally retains LibRaw's display-sized X-Trans path. A lazy
@@ -72,10 +72,10 @@ may differ slightly from export under its existing display-space quality
 contract.
 
 RAWs outside the WebGPU demosaic contracts complete demosaic and
-geometry in LibRaw, then enter the same required WebGPU color and bounded TIFF
+geometry in LibRaw, then enter the same required WebGPU color and bounded export
 path. Device failures never select the LibRaw route.
 
-Successful preview and export replies carry monotonic diagnostic timings. The LibRaw wrapper records input copy, open, unpack, preprocessing, preview resizing, demosaic, postprocessing, RGB conversion, and RGB16 creation at the real processing seams. File selection, file reading, embedded JPEG publication, initial processed frames, Canvas drawing, TIFF encoding, and Blob construction publish named Performance marks for opt-in production-path benchmarks. These diagnostics do not change the selected algorithm or image data.
+Successful preview and export replies carry monotonic diagnostic timings. The LibRaw wrapper records input copy, open, unpack, preprocessing, preview resizing, demosaic, postprocessing, RGB conversion, and RGB16 creation at the real processing seams. File selection, file reading, embedded JPEG publication, initial processed frames, Canvas drawing, output encoding, and Blob construction publish named Performance marks for opt-in production-path benchmarks. These diagnostics do not change the selected algorithm or image data.
 
 Queue removal sends a serialized release command for that photo and frees its GPU source plus any retained sensor mosaic; clearing the final item or the entire queue also frees the shared renderer workspace. Decode and export failures are separate queue states: only decode failure makes the RAW ineligible, while export failure retains the preview and allows another full-resolution attempt.
 
@@ -89,7 +89,7 @@ The Canvas element fills its image well independently of its pixel buffer dimens
 
 Wipe and Split are presentation-only views of the existing Canvas buffers. Wipe stacks both panes and updates one CSS clipping variable while its divider moves, without copying pixels, scheduling Worker work, or entering React on every pointer frame. Split places two complete frames side by side. File selection resets the divider to center.
 
-Desktop presentation is a stable editing shell: document actions and active camera metadata live in the 48px top toolbar, comparison dominates the center canvas, adjustments occupy the right inspector, and photos form a resizable bottom filmstrip. The filmstrip itself communicates queue size, so it has no separate count label. Exposure remains fixed above the internally scrolling Look grid. Output is only the final export button, leaving maximum height for visual Look selection; export progress uses the button and completion uses the shared toast layer. The unverified output assumption moves to a compact amber toolbar status rather than consuming inspector space. Queue status is conveyed per-item by an icon and fill. Empty states omit editing and export controls. At narrow widths the workspace stacks comparison above the inspector and reduces filmstrip height. Desktop controls use 30–36px bodies and 6px radii; coarse-pointer actions expand to 44px targets. Add, recovery, and destructive row actions remain visible on touch layouts.
+Desktop presentation is a stable editing shell: document actions and active camera metadata live in the 48px top toolbar, comparison dominates the center canvas, adjustments occupy the right inspector, and photos form a resizable bottom filmstrip. The filmstrip itself communicates queue size, so it has no separate count label. Exposure remains fixed above the internally scrolling Look grid. Output contains a standard TIFF/JPEG selector followed by one primary export button, leaving maximum height for visual Look selection; export progress uses the button and completion uses the shared toast layer. The selector describes TIFF as 16-bit and JPEG as Quality 95. The unverified output assumption moves to a compact amber toolbar status rather than consuming inspector space. Queue status is conveyed per-item by an icon and fill. Empty states omit editing and export controls. At narrow widths the workspace stacks comparison above the inspector and reduces filmstrip height. Desktop controls use 30–36px bodies and 6px radii; coarse-pointer actions expand to 44px targets. Add, recovery, and destructive row actions remain visible on touch layouts.
 
 Each import batch replaces the selection with its first newly added photo. After that photo reaches a usable Preview, the main thread reads each remaining file once and sends one low-cost thumbnail command at a time. The Worker opens the RAW only far enough to extract its camera-embedded thumbnail, passes JPEG data through or locally encodes an RGB bitmap, then releases the decoder immediately. These requests never change the active photo, populate the processed Preview cache, or delay the first selected Preview behind background work.
 
@@ -97,10 +97,10 @@ Below 560px, both preview canvases remain mounted in the selected Wipe or Split 
 
 The Look control exposes the complete stable thumbnail grid with text filtering. Manifest groups are source-provenance camera families and render as visible sticky headings. Each manifest name is the complete user-facing label and search term; camera-native looks include their in-camera short label, while technical transforms do not invent one. Selection never reorders the catalog, so users can compare adjacent transforms without losing spatial context.
 
-Output contains one primary action. It exports the active photo when selection is singular and changes to the selected-photo count for a multi-selection. Queue selection and preview readiness are exposed through ARIA state, and each rendered canvas is identified as an image.
+Output contains one format choice and one primary action. The action exports the active photo when selection is singular and changes to the selected-photo count for a multi-selection. Queue selection, format, and preview readiness are exposed through ARIA state, and each rendered canvas is identified as an image.
 
 Both export actions derive from one readiness condition: the selected file has a usable processed preview and its rendered recipe key exactly matches the visible file, EV, and LUT. Decode and rerender transitions therefore cannot start an export with an unreviewed recipe or overwrite a decode failure with a concurrent export failure.
 
-Batch export has one mutable operation state: the current index, total, and file name. Stop requests are checked after the active file finishes, preserving the single-worker execution model. Per-file failures update that queue item and do not abort remaining eligible files. The main thread streams completed uncompressed TIFFs into pass-through ZIP entries, preserving the fast single-file encoding path and avoiding another contiguous archive copy. The final ZIP chunks remain in memory because portable browser downloads require a Blob; direct filesystem streaming is not assumed.
+Batch export has one mutable operation state: the current index, total, and file name. Stop requests are checked after the active file finishes, preserving the single-worker execution model. Per-file failures update that queue item and do not abort remaining eligible files. The selected format remains fixed for the operation. The main thread streams completed TIFF or JPEG files into pass-through ZIP entries, preserving the fast single-file encoding path and avoiding another contiguous archive copy. The final ZIP chunks remain in memory because portable browser downloads require a Blob; direct filesystem streaming is not assumed.
 
-While that serial operation is active, import, queue selection, exposure, and look controls are disabled. The export therefore has one immutable target list and recipe, and interactive preview commands cannot be inserted between batch files.
+While that serial operation is active, import, queue selection, exposure, look, and format controls are disabled. The export therefore has one immutable target list, recipe, and format, and interactive preview commands cannot be inserted between batch files.

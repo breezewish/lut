@@ -9,7 +9,8 @@
 - Changing EV keeps the previous Look canvases visible, regenerates every 132px thumbnail for the current photo in one interruptible selected-Look-first batch, replaces each tile in place as it completes, resumes only missing tiles after preemption, and restores the cached set when switching away and back to the same EV.
 - App startup conditionally revalidates the manifest and starts all hash-versioned LUT requests concurrently; unchanged hashes use the browser HTTP cache, changed hashes produce new request URLs, and thumbnails publish in LUT-readiness order without a fixed idle delay.
 - Returning to any of six recently decoded photos avoids another file read or RAW decode; the three most recent restore their EV, Look, comparison `ImageBitmap` objects, and thumbnails in the selection render without resizing unchanged Canvas backing stores.
-- The single Output action stays disabled while the active RAW is decoding or its visible EV/LUT recipe is waiting to render, then exports one TIFF or a selected-photo ZIP only when that exact processed preview is ready.
+- Output defaults to 16-bit TIFF, switches to Quality 95 JPEG through its labeled format selector, and keeps its single action disabled while the active RAW is decoding or its visible EV/LUT recipe is waiting to render.
+- A full-resolution JPEG download has the `.jpg` name, valid image dimensions, and quality-95 quantization tables.
 - A real camera RAW displays its labeled embedded JPEG before the processed preview replaces it.
 - Decode, rerender, and export issue only same-origin static GET requests; no photo data is uploaded.
 - A populated queue accepts another drop, and duplicate files in the same drop event create only one queue entry.
@@ -23,7 +24,7 @@
 - Root and repository-path production bundles become cross-origin isolated through the scoped same-origin service worker before starting the application, and Chromium, Firefox, and WebKit complete the browser smoke journey.
 - A non-secure remote HTTP origin that cannot expose WebGPU rejects RAW processing with the required compatibility error.
 - Every built-in LUT produces browser WASM RGB16 output within one code value of the optimized native corrected-v2 export.
-- Two selected RAW files make the single Output action export separately named RGB16 TIFF entries in one ZIP while locking import, queue selection, EV, and LUT controls; each extracted TIFF matches its independent native export within one code value, proving isolated sequential processing state.
+- Two selected RAW files make the single Output action export separately named entries in the chosen format in one ZIP while locking import, queue selection, EV, LUT, and format controls; TIFF entries match their independent native exports within one code value, proving isolated sequential processing state.
 - A rapid file-selection race leaves only the final selected file and its preview active.
 - A mixed-success batch continues past a decode that fails during export, includes both successful files, and reports the failed file.
 - A full-resolution export failure announces its concrete error, keeps the processed preview visible, remains retryable, and removing that final queue item sends a Worker clear command before returning to the empty state.

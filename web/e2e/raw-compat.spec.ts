@@ -48,7 +48,7 @@ test("a real camera CFA DNG matches the native full-resolution export", async ({
   expect(preview.maximum - preview.minimum).toBeGreaterThan(32);
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
+  await page.getByRole("button", { name: "Export selected as TIFF" }).click();
   const download = await downloadPromise;
   const browserOutput = await download.path();
   expect(browserOutput).not.toBeNull();
@@ -218,7 +218,7 @@ test("a full-resolution Sony ARW export matches the native pipeline", async ({
 
   const startedAt = Date.now();
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
+  await page.getByRole("button", { name: "Export selected as TIFF" }).click();
   const download = await downloadPromise;
   expect(Date.now() - startedAt).toBeLessThan(30_000);
   const browserOutput = await download.path();

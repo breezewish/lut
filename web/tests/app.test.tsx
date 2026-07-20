@@ -507,7 +507,7 @@ test("renders the main preview only after the exposure recipe changes", async ()
     target: { files: [raw] },
   });
   const exportButton = await screen.findByRole("button", {
-    name: "Export selected",
+    name: "Export selected as TIFF",
   });
   expect(exportButton).toBeDisabled();
   await waitFor(() =>
@@ -730,7 +730,13 @@ test("reuses a decoded photo when switching back to it", async () => {
   expect(screen.getByLabelText("Current document")).toHaveTextContent(
     "first.dngTest Camera1 × 1",
   );
-  expect(screen.getByLabelText("Output")).toHaveTextContent("Export photo");
+  expect(screen.getByLabelText("Output")).toHaveTextContent("Export TIFF");
+  const format = screen.getByLabelText("Export format");
+  expect(format).toHaveValue("tiff");
+  fireEvent.change(format, { target: { value: "jpeg" } });
+  expect(
+    screen.getByRole("button", { name: "Export selected as JPEG" }),
+  ).toHaveTextContent("Export JPEG");
   expect(screen.getByLabelText("Output")).not.toHaveTextContent("Camera");
   expect(screen.queryByText("2 photos")).toBeNull();
 

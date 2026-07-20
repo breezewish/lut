@@ -214,7 +214,7 @@ test("keeps painting fresh frames during continuous EV input", async ({
   });
 
   await expect(
-    page.getByRole("button", { name: "Export selected" }),
+    page.getByRole("button", { name: "Export selected as TIFF" }),
   ).toBeEnabled({ timeout: 5_000 });
   const baseFrames = await page.evaluate(
     () =>
@@ -582,7 +582,7 @@ test("progressively paints a LUT change without blocking the interface", async (
     )
     .toBe(true);
   await expect(
-    page.getByRole("button", { name: "Export selected" }),
+    page.getByRole("button", { name: "Export selected as TIFF" }),
   ).toBeEnabled();
   const endedAt = await page.evaluate(() => performance.now());
 
@@ -880,7 +880,7 @@ async function measure(page: Page, change: () => Promise<void>) {
     )
     .toBe(true);
   await expect(
-    page.getByRole("button", { name: "Export selected" }),
+    page.getByRole("button", { name: "Export selected as TIFF" }),
   ).toBeEnabled();
   const draws = await page.evaluate(
     () => (window as Window & { previewDraws?: Draw[] }).previewDraws ?? [],

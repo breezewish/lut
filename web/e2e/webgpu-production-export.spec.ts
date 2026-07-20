@@ -35,7 +35,7 @@ test("SwiftShader runs the production WebGPU AAHD export path", async ({
     page.getByRole("button", { name: /packed-12\.dng.*Ready/ }),
   ).toBeVisible({ timeout: 30_000 });
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
+  await page.getByRole("button", { name: "Export selected as TIFF" }).click();
   const browserOutput = await (await downloadPromise).path();
   expect(browserOutput).not.toBeNull();
 

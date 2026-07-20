@@ -75,7 +75,9 @@ test("records phased production Worker performance", async ({
             `Browser export failed: ${await page.getByRole("alert").textContent()}`,
           );
         });
-      await page.getByRole("button", { name: "Export selected" }).click();
+      await page
+        .getByRole("button", { name: "Export selected as TIFF" })
+        .click();
       const download = await Promise.race([
         downloadPromise,
         exportErrorPromise,

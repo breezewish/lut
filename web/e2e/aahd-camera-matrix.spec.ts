@@ -125,7 +125,9 @@ for (const fixture of manifest.fixtures) {
 async function exportSelected(page: Page, fixture: string) {
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles(fixture);
-  const exportButton = page.getByRole("button", { name: "Export selected" });
+  const exportButton = page.getByRole("button", {
+    name: "Export selected as TIFF",
+  });
   await expect(exportButton).toBeEnabled({ timeout: 60_000 });
   const downloadPromise = page.waitForEvent("download");
   await exportButton.click();

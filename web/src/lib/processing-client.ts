@@ -4,6 +4,7 @@ import type {
   ExportResult,
   LookPreviewResult,
   LutDefinition,
+  OutputFormat,
   PreviewResult,
   WorkerCommand,
   WorkerReply,
@@ -244,6 +245,7 @@ export class ProcessingClient {
     ev: number,
     baseEv: number | undefined,
     lut: LutDefinition,
+    format: OutputFormat,
   ): Promise<ExportResult> {
     this.rejectQueuedRender(
       new Error("Preview render was superseded by full-resolution export."),
@@ -256,12 +258,13 @@ export class ProcessingClient {
         ev,
         baseEv,
         lut,
+        format,
       },
       [buffer],
     );
     if (reply.ok && reply.type === "export") {
       return {
-        tiff: reply.tiff,
+        bytes: reply.bytes,
         baseEv: reply.baseEv,
         timings: reply.timings,
       };

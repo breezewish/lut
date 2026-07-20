@@ -7,6 +7,8 @@ export type QueueStatus =
   | "decode-error"
   | "export-error";
 
+export type OutputFormat = "tiff" | "jpeg";
+
 export interface QueueItem {
   id: string;
   file: File;
@@ -87,7 +89,7 @@ export interface ExportTimings {
   sensorCacheBytes?: number;
   colorBackend: "webgpu";
   colorProcessingMs: number;
-  tiffEncodingMs: number;
+  encodingMs: number;
   workerTotalMs: number;
   gpuInputPreparationMs?: number;
   gpuExecutionAndReadbackMs?: number;
@@ -107,7 +109,7 @@ export interface ExportTimings {
 }
 
 export interface ExportResult {
-  tiff: Uint8Array;
+  bytes: Uint8Array;
   baseEv: number;
   timings: ExportTimings;
 }
@@ -210,6 +212,7 @@ export type WorkerCommand =
       ev: number;
       baseEv?: number;
       lut: LutDefinition;
+      format: OutputFormat;
     };
 
 export type WorkerReply =
@@ -271,7 +274,7 @@ export type WorkerReply =
       ok: true;
       type: "export";
       fileId: string;
-      tiff: Uint8Array;
+      bytes: Uint8Array;
       baseEv: number;
       timings: ExportTimings;
     }

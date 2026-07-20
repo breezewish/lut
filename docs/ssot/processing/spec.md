@@ -10,7 +10,7 @@ Exposure multiplies linear RGB by `2^EV`. The shared computation API accepts fin
 
 The LUT path applies the fixed ProPhoto D65 to V-Gamut D65 matrix, Panasonic's piecewise V-Log formula including its negative-capable linear branch, lookup-domain clamping, and tetrahedral interpolation. Red is the fastest-changing CUBE axis. Camera-Match Boost is disabled.
 
-Preview produces RGBA8. Export produces an uncompressed interleaved RGB16 TIFF. Corrected quantization clamps to `[0,1]`, scales by 65535, and rounds to nearest.
+Preview produces RGBA8. Export produces either an uncompressed interleaved RGB16 TIFF or an 8-bit JPEG at quality 95. Corrected RGB16 quantization clamps to `[0,1]`, scales by 65535, and rounds to nearest. JPEG input rounds each RGB16 code to the nearest RGB8 code before standard JPEG color conversion and compression.
 
 ## Browser automatic exposure
 

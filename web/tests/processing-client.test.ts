@@ -35,7 +35,7 @@ const exportTimings: ExportTimings = {
   rawBackend: "libraw",
   colorBackend: "webgpu",
   colorProcessingMs: 10,
-  tiffEncodingMs: 11,
+  encodingMs: 11,
   workerTotalMs: 66,
 };
 
@@ -332,7 +332,14 @@ test("export rejects an unsent render instead of dispatching stale exposure", as
     () => "resolved",
     () => "rejected",
   );
-  const exporting = client.export("one", new ArrayBuffer(1), 0.3, 1.25, lut);
+  const exporting = client.export(
+    "one",
+    new ArrayBuffer(1),
+    0.3,
+    1.25,
+    lut,
+    "tiff",
+  );
 
   expect(
     ControlledWorker.instance.messages.map((message) => message.type),
@@ -351,24 +358,25 @@ test("export rejects an unsent render instead of dispatching stale exposure", as
     type: "export",
     ev: 0.3,
     baseEv: 1.25,
+    format: "tiff",
   });
   expect(exportCommand).not.toHaveProperty("rawBackend");
   expect(exportCommand).not.toHaveProperty("colorBackend");
   expect(exportCommand).not.toHaveProperty("validateGpu");
-  const tiff = new Uint8Array([1, 2, 3]);
+  const bytes = new Uint8Array([1, 2, 3]);
   ControlledWorker.instance.reply({
     requestId: exportCommand.requestId,
     ok: true,
     type: "export",
     fileId: "one",
-    tiff,
+    bytes,
     baseEv: 1.25,
     timings: exportTimings,
   });
 
   await expect(rendering).resolves.toMatchObject({ fileId: "one" });
   await expect(exporting).resolves.toEqual({
-    tiff,
+    bytes,
     baseEv: 1.25,
     timings: exportTimings,
   });

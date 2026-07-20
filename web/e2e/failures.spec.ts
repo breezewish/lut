@@ -25,7 +25,7 @@ test("export waits until the selected preview matches the visible recipe", async
   ]);
 
   const exportSelected = page.getByRole("button", {
-    name: "Export selected",
+    name: "Export selected as TIFF",
   });
   await expect(exportSelected).toBeDisabled();
 
@@ -49,7 +49,7 @@ test("a mismatched LUT fails explicitly and the RAW can be retried", async ({
     "LUT integrity check failed: NC | Classic Neg.",
   );
   await expect(
-    page.getByRole("button", { name: "Export selected" }),
+    page.getByRole("button", { name: "Export selected as TIFF" }),
   ).toBeDisabled();
   await expect(page.getByText("Decoding preview…")).toHaveCount(0);
 
@@ -73,7 +73,7 @@ test("a missing LUT fails without leaving the RAW in decoding", async ({
   );
   await expect(page.getByText("Decoding preview…")).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Export selected" }),
+    page.getByRole("button", { name: "Export selected as TIFF" }),
   ).toBeDisabled();
 });
 
@@ -106,7 +106,7 @@ test("a hash-valid malformed compact LUT reports its parser error", async ({
     "CUBE declares 0 samples; expected 8",
   );
   await expect(
-    page.getByRole("button", { name: "Export selected" }),
+    page.getByRole("button", { name: "Export selected as TIFF" }),
   ).toBeDisabled();
 });
 

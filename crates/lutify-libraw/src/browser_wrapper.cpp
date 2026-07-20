@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <new>
@@ -14,6 +15,7 @@
 #include <emscripten/bind.h>
 #include <emscripten/emscripten.h>
 
+#include "jpeglib.h"
 #include "libraw/libraw.h"
 
 namespace {
@@ -53,6 +55,140 @@ public:
   SpatialBlackLevelsUnsupported()
       : std::runtime_error(
             "Spatially varying RAW black levels are not supported") {}
+};
+
+struct JpegErrorManager {
+  jpeg_error_mgr base;
+  std::array<char, JMSG_LENGTH_MAX> message{};
+};
+
+[[noreturn]] void fail_jpeg(j_common_ptr codec) {
+  auto *error = reinterpret_cast<JpegErrorManager *>(codec->err);
+  error->base.format_message(codec, error->message.data());
+  throw std::runtime_error(std::string("JPEG encoding failed: ") +
+                           error->message.data());
+}
+
+class BrowserJpegEncoder {
+public:
+  BrowserJpegEncoder(unsigned width, unsigned height, int quality)
+      : height_(height) {
+    if (width == 0 || height == 0) {
+      throw std::runtime_error("JPEG dimensions must be positive");
+    }
+    if (width > JPEG_MAX_DIMENSION || height > JPEG_MAX_DIMENSION) {
+      throw std::runtime_error("JPEG dimensions exceed the format limit");
+    }
+    if (quality < 1 || quality > 100) {
+      throw std::runtime_error("JPEG quality must be between 1 and 100");
+    }
+    const auto row_samples = static_cast<std::size_t>(width) * 3;
+    const auto row_bytes = row_samples * sizeof(std::uint16_t);
+    if (row_samples / 3 != width ||
+        row_bytes / sizeof(std::uint16_t) != row_samples) {
+      throw std::runtime_error("JPEG row size overflowed");
+    }
+    row_samples_ = row_samples;
+    rows_per_strip_ = std::max<std::size_t>(1, 1'000'000 / row_bytes);
+
+    codec_.err = jpeg_std_error(&error_.base);
+    error_.base.error_exit = fail_jpeg;
+    try {
+      jpeg_create_compress(&codec_);
+      created_ = true;
+      jpeg_mem_dest(&codec_, &output_, &output_size_);
+      codec_.image_width = width;
+      codec_.image_height = height;
+      codec_.input_components = 3;
+      codec_.in_color_space = JCS_RGB;
+      jpeg_set_defaults(&codec_);
+      jpeg_set_quality(&codec_, quality, TRUE);
+      jpeg_start_compress(&codec_, TRUE);
+    } catch (...) {
+      if (created_) jpeg_destroy_compress(&codec_);
+      std::free(output_);
+      created_ = false;
+      output_ = nullptr;
+      throw;
+    }
+  }
+
+  ~BrowserJpegEncoder() {
+    if (created_) jpeg_destroy_compress(&codec_);
+    std::free(output_);
+  }
+
+  BrowserJpegEncoder(const BrowserJpegEncoder &) = delete;
+  BrowserJpegEncoder &operator=(const BrowserJpegEncoder &) = delete;
+
+  std::size_t next_strip_samples() const {
+    if (finished_ || codec_.next_scanline == height_) return 0;
+    const auto remaining_rows = height_ - codec_.next_scanline;
+    return std::min<std::size_t>(remaining_rows, rows_per_strip_) *
+           row_samples_;
+  }
+
+  void write_rendered_strip(const val &source) {
+    const val uint16_array = val::global("Uint16Array");
+    if (!source.instanceof(uint16_array)) {
+      throw std::runtime_error("JPEG input must be a Uint16Array");
+    }
+    const auto samples = source["length"].as<std::size_t>();
+    const auto expected = next_strip_samples();
+    if (samples != expected) {
+      throw std::runtime_error("JPEG strip contains " +
+                               std::to_string(samples) +
+                               " samples; expected " +
+                               std::to_string(expected));
+    }
+
+    rgb16_.resize(samples);
+    val(typed_memory_view(rgb16_.size(), rgb16_.data()))
+        .call<void>("set", source);
+    rgb8_.resize(samples);
+    std::transform(rgb16_.begin(), rgb16_.end(), rgb8_.begin(),
+                   [](std::uint16_t value) {
+                     return static_cast<std::uint8_t>((value + 128) / 257);
+                   });
+
+    const auto rows = static_cast<JDIMENSION>(samples / row_samples_);
+    scanlines_.resize(rows);
+    for (JDIMENSION row = 0; row < rows; ++row) {
+      scanlines_[row] =
+          rgb8_.data() + static_cast<std::size_t>(row) * row_samples_;
+    }
+    const auto written =
+        jpeg_write_scanlines(&codec_, scanlines_.data(), rows);
+    if (written != rows) {
+      throw std::runtime_error("JPEG encoder did not consume every scanline");
+    }
+  }
+
+  val finish() {
+    if (finished_) throw std::runtime_error("JPEG encoder is already finished");
+    if (codec_.next_scanline != height_) {
+      throw std::runtime_error("JPEG encoder still expects pixels");
+    }
+    jpeg_finish_compress(&codec_);
+    finished_ = true;
+    const val bytes = val::global("Uint8Array").new_(output_size_);
+    bytes.call<void>("set", val(typed_memory_view(output_size_, output_)));
+    return bytes;
+  }
+
+private:
+  jpeg_compress_struct codec_{};
+  JpegErrorManager error_{};
+  unsigned char *output_ = nullptr;
+  unsigned long output_size_ = 0;
+  std::vector<std::uint16_t> rgb16_;
+  std::vector<std::uint8_t> rgb8_;
+  std::vector<JSAMPROW> scanlines_;
+  std::size_t row_samples_ = 0;
+  std::size_t rows_per_strip_ = 0;
+  unsigned height_ = 0;
+  bool created_ = false;
+  bool finished_ = false;
 };
 
 class TimedLibRaw final : public LibRaw {
@@ -1204,6 +1340,13 @@ private:
 } // namespace
 
 EMSCRIPTEN_BINDINGS(lutify_libraw) {
+  emscripten::class_<BrowserJpegEncoder>("JpegEncoder")
+      .constructor<unsigned, unsigned, int>()
+      .function("nextStripSamples", &BrowserJpegEncoder::next_strip_samples)
+      .function("writeRenderedStrip",
+                &BrowserJpegEncoder::write_rendered_strip)
+      .function("finish", &BrowserJpegEncoder::finish);
+
   emscripten::class_<BrowserLibRaw>("LibRaw")
       .constructor<>()
       .function("open", &BrowserLibRaw::open)

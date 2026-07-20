@@ -20,6 +20,28 @@ const classicNegative = resolve(
 );
 const execFileAsync = promisify(execFile);
 
+function firstJpegQuantizationTable(bytes: Uint8Array): Uint8Array {
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) {
+    throw new Error("JPEG start-of-image marker is missing");
+  }
+  let offset = 2;
+  while (offset + 4 <= bytes.length) {
+    while (bytes[offset] === 0xff) offset += 1;
+    const marker = bytes[offset];
+    offset += 1;
+    if (marker === 0xd9 || marker === 0xda) break;
+    const length = (bytes[offset] << 8) | bytes[offset + 1];
+    if (length < 2 || offset + length > bytes.length) break;
+    if (marker === 0xdb) {
+      const precision = bytes[offset + 2] >> 4;
+      if (precision !== 0) throw new Error("Expected an 8-bit JPEG table");
+      return bytes.slice(offset + 3, offset + 67);
+    }
+    offset += length;
+  }
+  throw new Error("JPEG quantization table is missing");
+}
+
 test("identifies the application as LUTify", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveTitle("LUTify");
@@ -224,7 +246,7 @@ test("keeps canvases mounted and visible while interaction frames arrive", async
     .not.toBe(previousLut);
 
   await expect(
-    page.getByRole("button", { name: "Export selected" }),
+    page.getByRole("button", { name: "Export selected as TIFF" }),
   ).toBeEnabled();
   await expect(processing).toHaveCount(0);
   const currentLut = await lutPreview.evaluate((canvas: HTMLCanvasElement) =>
@@ -297,7 +319,7 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
     page.getByRole("button", { name: /linear\.dng.*Ready/ }),
   ).toHaveAttribute("aria-current", "true");
   await expect(
-    page.getByRole("button", { name: "Export selected" }),
+    page.getByRole("button", { name: "Export selected as TIFF" }),
   ).toHaveAttribute("data-variant", "primary");
   const baseBeforeExposure = await page
     .getByLabel("Base preview")
@@ -334,7 +356,7 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
   await expect(exposureValue).toHaveValue("1");
   await expect(comparison).toHaveAttribute("data-decode-count", "1");
   const exportSelected = page.getByRole("button", {
-    name: "Export selected",
+    name: "Export selected as TIFF",
   });
   await expect(exportSelected).toBeEnabled();
 
@@ -436,6 +458,95 @@ test("decodes, re-renders exposure, and exports a local RAW", async ({
   );
 });
 
+test("exports a full-resolution Quality 95 JPEG", async ({ page }) => {
+  test.setTimeout(30_000);
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(linearFixture);
+  await expect(page.getByLabel("Base preview")).toBeVisible({
+    timeout: 20_000,
+  });
+
+  await page.getByLabel("Export format").selectOption("jpeg");
+  const exportButton = page.getByRole("button", {
+    name: "Export selected as JPEG",
+  });
+  await expect(exportButton).toHaveText("Export JPEG");
+
+  const downloadPromise = page.waitForEvent("download");
+  await exportButton.click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/fuji-classic-negative\.jpg$/);
+  const path = await download.path();
+  expect(path).not.toBeNull();
+  const bytes = await readFile(path!);
+  expect(bytes.subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8]));
+  expect(bytes.subarray(-2)).toEqual(Buffer.from([0xff, 0xd9]));
+
+  const dimensions = await page.evaluate(async (jpeg) => {
+    const bitmap = await createImageBitmap(
+      new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }),
+    );
+    const result = [bitmap.width, bitmap.height];
+    bitmap.close();
+    return result;
+  }, Array.from(bytes));
+  expect(dimensions[0]).toBeGreaterThan(0);
+  expect(dimensions[1]).toBeGreaterThan(0);
+
+  const luminanceTable = firstJpegQuantizationTable(bytes);
+  expect(luminanceTable[0]).toBe(2);
+  expect(Math.max(...luminanceTable)).toBe(12);
+  await expect(page.getByText("Exported 1 of 1 as JPEG.")).toBeVisible();
+});
+
+test("batch export applies JPEG to every ZIP entry", async ({ page }) => {
+  const [linearBytes, lossyBytes] = await Promise.all([
+    readFile(linearFixture),
+    readFile(lossyFixture),
+  ]);
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles([
+    {
+      name: "linear.dng",
+      mimeType: "image/x-adobe-dng",
+      buffer: linearBytes,
+    },
+    {
+      name: "lossy.dng",
+      mimeType: "image/x-adobe-dng",
+      buffer: lossyBytes,
+    },
+  ]);
+  await expect(page.getByLabel("Base preview")).toBeVisible({
+    timeout: 20_000,
+  });
+  await page
+    .getByRole("button", { name: /^lossy\.dng/ })
+    .click({ modifiers: ["Control"] });
+  await expect(
+    page.getByRole("button", { name: /lossy\.dng.*Ready/ }),
+  ).toHaveAttribute("aria-current", "true", { timeout: 20_000 });
+  const format = page.getByLabel("Export format");
+  await format.selectOption("jpeg");
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export 2 photos as JPEG" }).click();
+  await expect(format).toBeDisabled();
+  const download = await downloadPromise;
+  const path = await download.path();
+  expect(path).not.toBeNull();
+  const archive = unzipSync(new Uint8Array(await readFile(path!)));
+  expect(Object.keys(archive).sort()).toEqual([
+    "linear-fuji-classic-negative.jpg",
+    "lossy-fuji-classic-negative.jpg",
+  ]);
+  for (const bytes of Object.values(archive)) {
+    expect(bytes.subarray(0, 2)).toEqual(new Uint8Array([0xff, 0xd8]));
+    expect(bytes.subarray(-2)).toEqual(new Uint8Array([0xff, 0xd9]));
+  }
+  await expect(page.getByText("Exported 2 of 2 as JPEG.")).toBeVisible();
+});
+
 test("batch export produces one ZIP and corrupt input fails clearly", async ({
   page,
 }) => {
@@ -477,11 +588,11 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
     page.getByRole("button", { name: /lossy\.dng.*Ready/ }),
   ).toHaveAttribute("aria-current", "true", { timeout: 20_000 });
   await expect(
-    page.getByRole("button", { name: "Export 2 photos" }),
+    page.getByRole("button", { name: "Export 2 photos as TIFF" }),
   ).toHaveAttribute("data-variant", "primary");
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export 2 photos" }).click();
+  await page.getByRole("button", { name: "Export 2 photos as TIFF" }).click();
   await expect(
     page.getByRole("button", { name: "Add RAW files" }).first(),
   ).toBeDisabled();
@@ -581,7 +692,7 @@ test("batch export produces one ZIP and corrupt input fails clearly", async ({
     page.getByRole("button", { name: "Add RAW files" }).first(),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Export selected" }),
+    page.getByRole("button", { name: "Export selected as TIFF" }),
   ).toBeDisabled();
 });
 
@@ -628,7 +739,7 @@ test("batch export continues after a corrupt file without contaminating later ou
   ).toHaveAttribute("aria-current", "true", { timeout: 20_000 });
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export 2 photos" }).click();
+  await page.getByRole("button", { name: "Export 2 photos as TIFF" }).click();
   const download = await downloadPromise;
   const archivePath = await download.path();
   expect(archivePath).not.toBeNull();
@@ -645,7 +756,7 @@ test("batch export continues after a corrupt file without contaminating later ou
     decodeRgb16Tiff(Buffer.from(archive["after-fuji-classic-negative.tif"]))
       .width,
   ).toBe(256);
-  await expect(page.getByText("Exported 2 of 2.")).toBeVisible();
+  await expect(page.getByText("Exported 2 of 2 as TIFF.")).toBeVisible();
   await expect(
     page.getByRole("button", { name: /broken\.dng.*Failed/ }),
   ).toBeVisible();
@@ -691,7 +802,7 @@ test("batch export stops after the active file", async ({ page }) => {
   ).toHaveAttribute("aria-current", "true", { timeout: 20_000 });
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export 3 photos" }).click();
+  await page.getByRole("button", { name: "Export 3 photos as TIFF" }).click();
   await page.getByRole("button", { name: /Stop after current/ }).click();
 
   const download = await downloadPromise;
@@ -702,7 +813,7 @@ test("batch export stops after the active file", async ({ page }) => {
   expect(completed).toBeGreaterThan(0);
   expect(completed).toBeLessThan(3);
   await expect(
-    page.getByText(`Stopped after ${completed} of 3 exports.`),
+    page.getByText(`Stopped after ${completed} of 3 TIFF exports.`),
   ).toBeVisible();
 });
 
@@ -730,7 +841,7 @@ test("all built-in LUTs match optimized native RGB16 exports", async ({
     await expect(page.getByLabel(`${look.name} preview`)).toBeVisible();
 
     const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export selected" }).click();
+    await page.getByRole("button", { name: "Export selected as TIFF" }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe(`linear-${look.id}.tif`);
     const effectiveEv = await page.evaluate(
@@ -825,7 +936,7 @@ test("decodes and exports a Sigma X3F photo", async ({ page }) => {
   await expect(page.getByText("SIGMA DP1")).toBeVisible();
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
+  await page.getByRole("button", { name: "Export selected as TIFF" }).click();
   const download = await downloadPromise;
   const output = await download.path();
   expect(output).not.toBeNull();
@@ -968,7 +1079,7 @@ test("export failures retain the preview, allow retry, and release it on removal
   });
   await expect(page.getByLabel("Base preview")).toBeVisible();
 
-  await page.getByRole("button", { name: "Export selected" }).click();
+  await page.getByRole("button", { name: "Export selected as TIFF" }).click();
   await expect(
     page.getByRole("button", { name: /retry\.dng.*Failed/ }),
   ).toBeVisible();
@@ -977,10 +1088,10 @@ test("export failures retain the preview, allow retry, and release it on removal
   );
   await expect(page.getByLabel("Base preview")).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Export selected" }),
+    page.getByRole("button", { name: "Export selected as TIFF" }),
   ).toBeEnabled();
 
-  await page.getByRole("button", { name: "Export selected" }).click();
+  await page.getByRole("button", { name: "Export selected as TIFF" }).click();
   await expect
     .poll(() =>
       page.evaluate(
@@ -1010,7 +1121,9 @@ test("short desktop viewports keep export in view", async ({ page }) => {
     timeout: 20_000,
   });
 
-  const exportButton = page.getByRole("button", { name: "Export selected" });
+  const exportButton = page.getByRole("button", {
+    name: "Export selected as TIFF",
+  });
   await expect(exportButton).toBeInViewport();
 });
 

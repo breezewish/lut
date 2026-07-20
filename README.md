@@ -1,6 +1,6 @@
 # LUTify
 
-LUTify is a private, static browser color lab. It decodes camera RAW files locally, compares a neutral base rendering with a built-in V-Log Alchemy look, and exports 16-bit TIFF files without uploading photos.
+LUTify is a private, static browser color lab. It decodes camera RAW files locally, compares a neutral base rendering with a built-in V-Log Alchemy look, and exports 16-bit TIFF or Quality 95 JPEG files without uploading photos.
 
 ## Product behavior
 
@@ -8,12 +8,12 @@ LUTify is a private, static browser color lab. It decodes camera RAW files local
 - See the embedded camera JPEG first, then a display-sized WebGPU preview.
 - Compare `Base` and `LUT` views on the same screen.
 - Choose one of 27 pinned V-Log Alchemy creative looks and adjust exposure from -4 to +4 EV.
-- Export one TIFF or a sequential batch as a ZIP.
+- Export one TIFF or JPEG, or a sequential batch as a ZIP.
 - Keep all RAW bytes, decoded pixels, and output files in the browser.
 
 The base view converts LibRaw ProPhoto D65 Linear to linear sRGB, applies a neutral luminance shoulder, then applies the sRGB transfer function. The LUT view applies exposure, the fixed ProPhoto D65 to V-Gamut D65 matrix, negative-preserving V-Log, domain-boundary clamping, and tetrahedral interpolation.
 
-The source CUBE files do not declare their output gamut or transfer function. LUTify therefore labels the display assumption in the UI and does not attach a misleading ICC profile to TIFF exports.
+The source CUBE files do not declare their output gamut or transfer function. LUTify therefore labels the display assumption in the UI and does not attach a misleading ICC profile to exported files.
 
 ## Upstream provenance
 

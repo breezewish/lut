@@ -27,7 +27,7 @@ test("imports, previews, and exports from the HTTPS production bundle", async ({
   });
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
+  await page.getByRole("button", { name: "Export selected as TIFF" }).click();
   const download = await downloadPromise;
   const outputPath = await download.path();
   expect(outputPath).not.toBeNull();

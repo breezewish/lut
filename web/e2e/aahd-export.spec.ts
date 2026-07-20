@@ -33,7 +33,7 @@ test("tiled AAHD streams repeated aligned RGB16 exports", async ({
   const samples = Number(process.env.AAHD_EXPORT_SAMPLES ?? "5");
   for (let sample = 0; sample < samples; sample += 1) {
     const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export selected" }).click();
+    await page.getByRole("button", { name: "Export selected as TIFF" }).click();
     const download = await downloadPromise;
     const browserOutput = await download.path();
     expect(browserOutput).not.toBeNull();
@@ -101,7 +101,7 @@ test("tiled AAHD aligns on a second Bayer camera", async ({
     page.getByRole("button", { name: /leica-m8\.dng.*Ready/ }),
   ).toBeVisible({ timeout: 30_000 });
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
+  await page.getByRole("button", { name: "Export selected as TIFF" }).click();
   const browserDownload = await downloadPromise;
   const browserOutput = await browserDownload.path();
   expect(browserOutput).not.toBeNull();
@@ -147,7 +147,7 @@ test("tiled AAHD matches LibRaw auto WB", async ({ page }, testInfo) => {
     page.getByRole("button", { name: /leica-m8-no-camera-wb\.dng.*Ready/ }),
   ).toBeVisible({ timeout: 30_000 });
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
+  await page.getByRole("button", { name: "Export selected as TIFF" }).click();
   const browserOutput = await (await downloadPromise).path();
   expect(browserOutput).not.toBeNull();
   await nativeExport(fixturePath, nativeOutput, await latestEffectiveEv(page));
@@ -180,7 +180,7 @@ test("rotated Bayer keeps LibRaw geometry and required GPU color", async ({
     page.getByRole("button", { name: /leica-m8-rotated\.dng.*Ready/ }),
   ).toBeVisible({ timeout: 30_000 });
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export selected" }).click();
+  await page.getByRole("button", { name: "Export selected as TIFF" }).click();
   const browserOutput = await (await downloadPromise).path();
   expect(browserOutput).not.toBeNull();
   const timings = await page.evaluate(

@@ -1,15 +1,15 @@
 import { expect, test, vi } from "vitest";
 
 import {
-  type GpuStripTiffEncoder,
-  RenderedTiffStream,
-  renderTiffInGpuStrips,
-} from "../src/lib/tiff-export";
+  type GpuStripImageEncoder,
+  RenderedImageStream,
+  renderImageInGpuStrips,
+} from "../src/lib/image-export";
 
-test("streams rendered bands across fixed TIFF strip boundaries", () => {
+test("streams rendered bands across fixed image strip boundaries", () => {
   const sizes = [6, 6, 0];
   const writes: Uint16Array[] = [];
-  const encoder: GpuStripTiffEncoder = {
+  const encoder: GpuStripImageEncoder = {
     next_strip_samples: () => sizes[0],
     write_rendered_strip: (pixels) => {
       writes.push(new Uint16Array(pixels));
@@ -18,7 +18,7 @@ test("streams rendered bands across fixed TIFF strip boundaries", () => {
     finish: () => new Uint8Array([73, 73, 42, 0]),
     free: vi.fn(),
   };
-  const stream = new RenderedTiffStream(encoder);
+  const stream = new RenderedImageStream(encoder);
 
   stream.write(new Uint16Array([1, 2, 3, 4]));
   stream.write(new Uint16Array([5, 6, 7, 8, 9, 10, 11, 12]));
@@ -30,7 +30,7 @@ test("streams rendered bands across fixed TIFF strip boundaries", () => {
   expect(encoder.free).not.toHaveBeenCalled();
 });
 
-test("batches GPU color independently from TIFF compression strips", async () => {
+test("batches GPU color independently from image encoder strips", async () => {
   const source = new Uint16Array([1, 2, 3, 4, 5, 6]);
   const sizes = [3, 3, 0];
   const writes: Uint16Array[] = [];
@@ -45,7 +45,7 @@ test("batches GPU color independently from TIFF compression strips", async () =>
       },
     })),
   };
-  const encoder: GpuStripTiffEncoder = {
+  const encoder: GpuStripImageEncoder = {
     next_strip_samples: () => sizes[0],
     write_rendered_strip: (pixels) => {
       writes.push(new Uint16Array(pixels));
@@ -55,7 +55,7 @@ test("batches GPU color independently from TIFF compression strips", async () =>
     free: vi.fn(),
   };
 
-  const rendered = await renderTiffInGpuStrips(
+  const rendered = await renderImageInGpuStrips(
     source.length,
     (offset, length) => source.subarray(offset, offset + length),
     encoder,
@@ -79,7 +79,7 @@ test("batches GPU color independently from TIFF compression strips", async () =>
 
 test("rejects a GPU batch that does not cover its source", async () => {
   const free = vi.fn();
-  const encoder: GpuStripTiffEncoder = {
+  const encoder: GpuStripImageEncoder = {
     next_strip_samples: () => 3,
     write_rendered_strip: vi.fn(),
     finish: vi.fn(),
@@ -87,7 +87,7 @@ test("rejects a GPU batch that does not cover its source", async () => {
   };
 
   await expect(
-    renderTiffInGpuStrips(
+    renderImageInGpuStrips(
       3,
       () => new Uint16Array([1, 2, 3]),
       encoder,

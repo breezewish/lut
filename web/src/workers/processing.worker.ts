@@ -8,7 +8,11 @@ import initLutify, {
 } from "../wasm/lutify_core.js";
 import { describeProcessingError } from "../lib/errors";
 import { loadLutBytes } from "../lib/lut-cache";
-import { RenderedTiffStream, renderTiffInGpuStrips } from "../lib/tiff-export";
+import {
+  type GpuStripImageEncoder,
+  RenderedImageStream,
+  renderImageInGpuStrips,
+} from "../lib/image-export";
 import { demosaicLibRawAahdTiledWithWgsl } from "../lib/libraw-aahd";
 import { demosaicLibRawXtransTiledWithWgsl } from "../lib/libraw-xtrans";
 import type { SensorImageInfo } from "../lib/sensor-image";
@@ -22,6 +26,7 @@ import type {
   ExportTimings,
   LibRawDecodeTimings,
   LutDefinition,
+  OutputFormat,
   PreviewResult,
   WorkerCommand,
   WorkerReply,
@@ -389,8 +394,8 @@ async function handleCommand(
       if (rawBackend && sensor) {
         const mosaic = exportRaw.sensorView(0, sensor.sampleCount);
         gpuRenderer = await WebGpuColorRenderer.create(lut);
-        const stream = new RenderedTiffStream(
-          new TiffEncoder(sensor.width, sensor.height),
+        const stream = new RenderedImageStream(
+          createImageEncoder(module, data.format, sensor.width, sensor.height),
         );
         try {
           const demosaic =
@@ -414,7 +419,7 @@ async function handleCommand(
             ok: true,
             type: "export",
             fileId: data.fileId,
-            tiff: rendered.bytes,
+            bytes: rendered.bytes,
             baseEv,
             timings: {
               libraw: cachedSensor
@@ -425,7 +430,7 @@ async function handleCommand(
               sensorCacheBytes: cachedSensor?.bytes,
               colorBackend: "webgpu",
               colorProcessingMs: demosaic.timings.colorMs,
-              tiffEncodingMs: rendered.tiffEncodingMs,
+              encodingMs: rendered.encodingMs,
               workerTotalMs: performance.now() - workerStartedAt,
               gpuExecutionAndReadbackMs: demosaic.timings.totalMs,
               webGpuDemosaic: {
@@ -444,10 +449,10 @@ async function handleCommand(
 
       const image = exportRaw.imageInfo();
       gpuRenderer = await WebGpuColorRenderer.create(lut);
-      const rendered = await renderTiffInGpuStrips(
+      const rendered = await renderImageInGpuStrips(
         image.sampleCount,
         (offset, length) => exportRaw.imageView(offset, length),
-        new TiffEncoder(image.width, image.height),
+        createImageEncoder(module, data.format, image.width, image.height),
         gpuRenderer,
         effectiveEv,
       );
@@ -456,7 +461,7 @@ async function handleCommand(
         rawBackend: "libraw",
         colorBackend: "webgpu",
         colorProcessingMs: rendered.colorProcessingMs,
-        tiffEncodingMs: rendered.tiffEncodingMs,
+        encodingMs: rendered.encodingMs,
         workerTotalMs: performance.now() - workerStartedAt,
         gpuInputPreparationMs: rendered.gpuInputPreparationMs,
         gpuExecutionAndReadbackMs: rendered.gpuExecutionAndReadbackMs,
@@ -467,7 +472,7 @@ async function handleCommand(
         ok: true,
         type: "export",
         fileId: data.fileId,
-        tiff: rendered.bytes,
+        bytes: rendered.bytes,
         baseEv,
         timings,
       };
@@ -486,6 +491,31 @@ async function handleCommand(
     };
     context.postMessage(reply);
   }
+}
+
+const JPEG_QUALITY = 95;
+
+function createImageEncoder(
+  module: LibRawModule,
+  format: OutputFormat,
+  width: number,
+  height: number,
+): GpuStripImageEncoder {
+  if (format === "tiff") return new TiffEncoder(width, height);
+
+  const encoder = new module.JpegEncoder(width, height, JPEG_QUALITY);
+  return {
+    next_strip_samples: () => encoder.nextStripSamples(),
+    write_rendered_strip: (pixels) => encoder.writeRenderedStrip(pixels),
+    finish: () => {
+      try {
+        return encoder.finish();
+      } finally {
+        encoder.delete();
+      }
+    },
+    free: () => encoder.delete(),
+  };
 }
 
 const ZERO_SENSOR_TIMINGS = {

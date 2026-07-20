@@ -126,6 +126,19 @@ if (imageView.includes("new_(") || imageView.includes('call<void>("set"')) {
     "LibRaw image_view unexpectedly copies RGB16 into JavaScript.",
   );
 }
+const jpegStart = browserWrapper.indexOf("class BrowserJpegEncoder");
+const jpegEnd = browserWrapper.indexOf("class TimedLibRaw", jpegStart);
+const jpegEncoder = browserWrapper.slice(jpegStart, jpegEnd);
+if (jpegStart === -1 || jpegEnd === -1) {
+  throw new Error("Missing browser JPEG encoder implementation.");
+}
+if (
+  !jpegEncoder.includes("1'000'000 / row_bytes") ||
+  !jpegEncoder.includes("jpeg_write_scanlines") ||
+  !worker.includes("new module.JpegEncoder")
+) {
+  throw new Error("JPEG export no longer preserves bounded scanline encoding.");
+}
 if (
   !compareStage.includes("pixels.buffer") ||
   compareStage.includes("clamped.set(pixels)")
@@ -136,5 +149,5 @@ if (
 }
 
 console.log(
-  "Verified zero-copy LibRaw and Canvas views, row-only preview, and GPU-only strip TIFF bindings.",
+  "Verified zero-copy LibRaw and Canvas views, row-only preview, and bounded TIFF/JPEG export bindings.",
 );

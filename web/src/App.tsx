@@ -44,6 +44,7 @@ import { ProcessingClient } from "./lib/processing-client";
 import type {
   DisplayPreviewResult,
   LutManifest,
+  OutputFormat,
   PreviewResult,
   QueueItem,
 } from "./types";
@@ -58,6 +59,14 @@ const FILMSTRIP_THUMB_WIDTH = 220;
 const GPU_EXPOSURE_PREVIEW_INTERVAL_MS = 16;
 const EXPOSURE_SETTLE_DELAY_MS = 80;
 const UI_PREVIEW_CACHE_LIMIT = 3;
+
+const OUTPUT_FORMATS: Record<
+  OutputFormat,
+  { label: string; extension: string; mime: string }
+> = {
+  tiff: { label: "TIFF", extension: "tif", mime: "image/tiff" },
+  jpeg: { label: "JPEG", extension: "jpg", mime: "image/jpeg" },
+};
 
 const PANEL_MIN = 240;
 const PANEL_MAX = 560;
@@ -268,6 +277,7 @@ export default function App() {
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<ExportProgress>();
   const [exportSummary, setExportSummary] = useState<string>();
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>("tiff");
   const [queueUndo, setQueueUndo] = useState<QueueUndo>();
   const [lookQuery, setLookQuery] = useState("");
   const [compareMode, setCompareMode] = useState<CompareMode>("wipe");
@@ -1145,6 +1155,7 @@ export default function App() {
     const targets = eligibleSelected;
     if (!manifest || exporting || targets.length === 0) return;
     const single = targets.length === 1;
+    const output = OUTPUT_FORMATS[outputFormat];
     setExporting(true);
     setGlobalError(undefined);
     setExportSummary(undefined);
@@ -1195,7 +1206,7 @@ export default function App() {
           fileName: item.file.name,
         });
         updateItem(item.id, { status: "exporting", error: undefined });
-        let tiff: Uint8Array | undefined;
+        let image: Uint8Array | undefined;
         try {
           const exported = await client.export(
             item.id,
@@ -1203,8 +1214,9 @@ export default function App() {
             item.ev,
             item.baseEv,
             lut,
+            outputFormat,
           );
-          tiff = exported.tiff;
+          image = exported.bytes;
           if (item.baseEv === undefined) {
             updateItem(item.id, { baseEv: exported.baseEv });
           }
@@ -1227,23 +1239,23 @@ export default function App() {
           setGlobalError(message);
         }
 
-        if (tiff) {
-          if (!(tiff.buffer instanceof ArrayBuffer)) {
+        if (image) {
+          if (!(image.buffer instanceof ArrayBuffer)) {
             throw new Error(
-              "The TIFF encoder returned unsupported shared memory.",
+              "The image encoder returned unsupported shared memory.",
             );
           }
           const outputBytes = new Uint8Array(
-            tiff.buffer,
-            tiff.byteOffset,
-            tiff.byteLength,
+            image.buffer,
+            image.byteOffset,
+            image.byteLength,
           );
           const base = item.file.name.replace(/\.[^.]+$/, "") || "image";
           const stem = `${base}-${lut.id}`;
-          let outputName = `${stem}.tif`;
+          let outputName = `${stem}.${output.extension}`;
           let suffix = 2;
           while (outputNames.has(outputName)) {
-            outputName = `${stem}-${suffix}.tif`;
+            outputName = `${stem}-${suffix}.${output.extension}`;
             suffix += 1;
           }
           outputNames.add(outputName);
@@ -1269,7 +1281,7 @@ export default function App() {
       if (outputNames.size > 0) {
         const blob = new Blob(
           singleOutput ? [singleOutput.bytes] : archiveChunks,
-          { type: single ? "image/tiff" : "application/zip" },
+          { type: single ? output.mime : "application/zip" },
         );
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement("a");
@@ -1282,8 +1294,8 @@ export default function App() {
       const detail = failed.length > 0 ? ` Failed: ${failed.join(", ")}.` : "";
       setExportSummary(
         stopped
-          ? `Stopped after ${outputNames.size} of ${targets.length} exports.${detail}`
-          : `Exported ${outputNames.size} of ${targets.length}.${detail}`,
+          ? `Stopped after ${outputNames.size} of ${targets.length} ${output.label} exports.${detail}`
+          : `Exported ${outputNames.size} of ${targets.length} as ${output.label}.${detail}`,
       );
     } catch (error) {
       setGlobalError(error instanceof Error ? error.message : String(error));
@@ -1433,8 +1445,8 @@ export default function App() {
           {active && manifest?.contract.outputStatus === "unverified" && (
             <span
               className="header__warning"
-              aria-label="Unverified output color space. Check the exported TIFF before production use."
-              title="Built-in looks do not declare an output color space. Check the exported TIFF before production use."
+              aria-label="Unverified output color space. Check the exported file before production use."
+              title="Built-in looks do not declare an output color space. Check the exported file before production use."
             >
               <TriangleAlert size={13} aria-hidden="true" />
               <span>Unverified output</span>
@@ -1503,8 +1515,7 @@ export default function App() {
               <h2 className="empty__title">Start with a camera RAW</h2>
               <p className="empty__copy">
                 Drop photos anywhere to compare a neutral rendering against a
-                curated look, then export a{" "}
-                <span style={{ whiteSpace: "nowrap" }}>16-bit TIFF</span>.
+                curated look, then export a 16-bit TIFF or Quality 95 JPEG.
               </p>
               <Button onClick={() => fileInput.current?.click()}>
                 <FolderOpen size={17} aria-hidden="true" /> Choose RAW files
@@ -1682,6 +1693,20 @@ export default function App() {
               </div>
 
               <div className="panel panel--output" aria-label="Output">
+                <label className="output-format">
+                  <span>Format</span>
+                  <select
+                    aria-label="Export format"
+                    value={outputFormat}
+                    disabled={exporting}
+                    onChange={(event) =>
+                      setOutputFormat(event.currentTarget.value as OutputFormat)
+                    }
+                  >
+                    <option value="tiff">TIFF · 16-bit</option>
+                    <option value="jpeg">JPEG · Quality 95</option>
+                  </select>
+                </label>
                 {exporting && exportProgress && exportProgress.total > 1 ? (
                   <Button
                     size="block"
@@ -1704,8 +1729,8 @@ export default function App() {
                     variant="primary"
                     aria-label={
                       eligibleSelected.length > 1
-                        ? `Export ${eligibleSelected.length} photos`
-                        : "Export selected"
+                        ? `Export ${eligibleSelected.length} photos as ${OUTPUT_FORMATS[outputFormat].label}`
+                        : `Export selected as ${OUTPUT_FORMATS[outputFormat].label}`
                     }
                     onClick={() => void exportSelected()}
                     disabled={!canExport}
@@ -1722,8 +1747,8 @@ export default function App() {
                     {exporting
                       ? "Exporting…"
                       : eligibleSelected.length > 1
-                        ? `Export ${eligibleSelected.length} photos`
-                        : "Export photo"}
+                        ? `Export ${eligibleSelected.length} ${OUTPUT_FORMATS[outputFormat].label} files`
+                        : `Export ${OUTPUT_FORMATS[outputFormat].label}`}
                   </Button>
                 )}
               </div>

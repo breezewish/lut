@@ -14,7 +14,7 @@ LUTify gives photographers a fast way to inspect and apply the curated V-Log Alc
 
 ## Users
 
-The primary user has one or more camera RAW files and wants to compare a restrained neutral rendering against a creative look before exporting edit-ready 16-bit TIFF files.
+The primary user has one or more camera RAW files and wants to compare a restrained neutral rendering against a creative look before exporting edit-ready 16-bit TIFF or convenient Quality 95 JPEG files.
 
 ## Core experience
 

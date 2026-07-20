@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { RenderedTiffStream, type GpuStripTiffEncoder } from "./tiff-export";
+import { RenderedImageStream, type GpuStripImageEncoder } from "./image-export";
 
-class TestEncoder implements GpuStripTiffEncoder {
+class TestEncoder implements GpuStripImageEncoder {
   readonly strips: Uint16Array[] = [];
 
   constructor(private readonly stripSizes: number[]) {}
@@ -22,10 +22,10 @@ class TestEncoder implements GpuStripTiffEncoder {
   free(): void {}
 }
 
-describe("RenderedTiffStream", () => {
+describe("RenderedImageStream", () => {
   it("joins bands only at an encoder strip boundary", () => {
     const encoder = new TestEncoder([4, 4]);
-    const stream = new RenderedTiffStream(encoder);
+    const stream = new RenderedImageStream(encoder);
 
     stream.write(new Uint16Array([1, 2, 3]));
     stream.write(new Uint16Array([4, 5, 6, 7, 8]));
@@ -40,12 +40,12 @@ describe("RenderedTiffStream", () => {
 
   it("rejects an incomplete final strip", () => {
     const encoder = new TestEncoder([4]);
-    const stream = new RenderedTiffStream(encoder);
+    const stream = new RenderedImageStream(encoder);
 
     stream.write(new Uint16Array([1, 2, 3]));
 
     expect(() => stream.finish(4)).toThrow(
-      "TIFF stream consumed 0 samples with 3 pending; expected 4.",
+      "Image stream consumed 0 samples with 3 pending; expected 4.",
     );
   });
 });

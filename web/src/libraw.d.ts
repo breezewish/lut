@@ -48,8 +48,20 @@ declare module "*libraw.js" {
     delete(): void;
   }
 
+  class JpegEncoderInstance {
+    nextStripSamples(): number;
+    writeRenderedStrip(pixels: Uint16Array): void;
+    finish(): Uint8Array<ArrayBuffer>;
+    delete(): void;
+  }
+
   interface LibRawModule {
     LibRaw: new () => LibRawInstance;
+    JpegEncoder: new (
+      width: number,
+      height: number,
+      quality: number,
+    ) => JpegEncoderInstance;
     getExceptionMessage: (exception: unknown) => [string, string];
     decrementExceptionRefcount: (exception: unknown) => void;
   }

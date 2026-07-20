@@ -119,7 +119,7 @@ test("batch export continues after an export-time RAW failure", async ({
   ).toHaveAttribute("aria-current", "true", { timeout: 20_000 });
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export 3 photos" }).click();
+  await page.getByRole("button", { name: "Export 3 photos as TIFF" }).click();
   const download = await downloadPromise;
   const archivePath = await download.path();
   expect(archivePath).not.toBeNull();
@@ -129,7 +129,7 @@ test("batch export continues after an export-time RAW failure", async ({
     "third-fuji-classic-negative.tif",
   ]);
   await expect(
-    page.getByText("Exported 2 of 3. Failed: middle.dng."),
+    page.getByText("Exported 2 of 3 as TIFF. Failed: middle.dng."),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: /middle\.dng.*Failed/ }),

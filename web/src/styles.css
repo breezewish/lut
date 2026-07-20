@@ -1149,6 +1149,39 @@ input[type="range"]:disabled {
 .panel--output {
   padding-top: var(--s3);
 }
+.output-format {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s4);
+  color: var(--ink-muted);
+  font-size: var(--t-xs);
+  font-weight: 560;
+}
+.output-format select {
+  min-width: 0;
+  height: 2rem;
+  padding: 0 var(--s4);
+  border: 0;
+  border-radius: var(--r-sm);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  color: var(--ink);
+  background: var(--control);
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease);
+}
+.output-format select:hover:not(:disabled) {
+  background: var(--control-hover);
+}
+.output-format select:focus-visible {
+  outline-color: var(--focus);
+}
+.output-format select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
 .export-note {
   min-height: 1rem;
   color: var(--ink-muted);
@@ -1497,6 +1530,7 @@ input[type="range"]:disabled {
   .seg button,
   .expo__value,
   .looks__search,
+  .output-format select,
   input[type="range"] {
     height: 2.75rem;
   }

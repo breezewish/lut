@@ -31,7 +31,7 @@ Use one Inter-compatible system sans family. Meaningful UI labels and metadata u
 
 Buttons use a consistent 6 px radius and 32–36 px desktop body; coarse-pointer targets expand to 44 px. Inputs use a compact 30–34 px body inside clear labeled groups. Search, selection, numeric entry, and range controls share dedicated control tokens and authored hover, focus, active, and disabled states instead of browser defaults. Menus render through a portal. A visible spinner in the adjustment header communicates whenever the displayed recipe is still processing. Surfaces use fill changes instead of borders or shadows. Queue status is conveyed per-item by an icon and row fill, not a colored accent stripe.
 
-Look discovery uses a stable searchable thumbnail catalog. Every tile is rendered from a dedicated 132px preview at the active EV. The unverified output color space remains visible as compact toolbar status, while Output itself contains only the export action.
+Look discovery uses a stable searchable thumbnail catalog. Every tile is rendered from a dedicated 132px preview at the active EV. The unverified output color space remains visible as compact toolbar status. Output contains a standard TIFF/JPEG selector and one primary export action.
 
 The six most recently used photos retain decoded WebGPU preview sources, while the three most recent retain their latest comparison and Look thumbnails in UI memory. One serialized renderer shares its LUT, output, and readback workspace across those sources. Returning to a retained source never reads or decodes the RAW again; a UI-retained photo restores its exact visible recipe immediately. Full-resolution export remains uncached and sequential.
 

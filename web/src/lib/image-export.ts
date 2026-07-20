@@ -1,4 +1,4 @@
-export interface GpuStripTiffEncoder {
+export interface GpuStripImageEncoder {
   next_strip_samples(): number;
   write_rendered_strip(pixels: Uint16Array): void;
   /** Consumes the encoder. */
@@ -6,14 +6,14 @@ export interface GpuStripTiffEncoder {
   free(): void;
 }
 
-export interface RenderedTiff {
+export interface RenderedImage {
   bytes: Uint8Array;
   colorProcessingMs: number;
-  tiffEncodingMs: number;
+  encodingMs: number;
 }
 
 export interface GpuStripRenderer {
-  /** Preferred color batch size; TIFF compression keeps its own strip size. */
+  /** Preferred color batch size; the image encoder keeps its own strip size. */
   preferredBatchSamples?: number;
   renderStrip(
     pixels: Uint16Array,
@@ -28,23 +28,23 @@ export interface GpuStripRenderer {
   }>;
 }
 
-export interface GpuRenderedTiff extends RenderedTiff {
+export interface GpuRenderedImage extends RenderedImage {
   gpuInputPreparationMs: number;
   gpuExecutionAndReadbackMs: number;
   gpuOutputPreparationMs: number;
 }
 
-/** Writes already color-rendered row bands into the encoder's fixed strips. */
-export class RenderedTiffStream {
+/** Writes already color-rendered row bands into an encoder's fixed strips. */
+export class RenderedImageStream {
   private pending = new Uint16Array(0);
   private sampleCount = 0;
-  private tiffEncodingMs = 0;
+  private encodingMs = 0;
   private consumed = false;
 
-  constructor(private readonly encoder: GpuStripTiffEncoder) {}
+  constructor(private readonly encoder: GpuStripImageEncoder) {}
 
   write(pixels: Uint16Array): void {
-    if (this.consumed) throw new Error("TIFF stream is already finished.");
+    if (this.consumed) throw new Error("Image stream is already finished.");
     let offset = 0;
     for (;;) {
       const requested = this.encoder.next_strip_samples();
@@ -76,31 +76,31 @@ export class RenderedTiffStream {
       }
       const startedAt = performance.now();
       this.encoder.write_rendered_strip(strip);
-      this.tiffEncodingMs += performance.now() - startedAt;
+      this.encodingMs += performance.now() - startedAt;
       this.sampleCount += requested;
     }
     this.pending = pixels.slice(offset);
   }
 
-  finish(expectedSamples: number): RenderedTiff {
+  finish(expectedSamples: number): RenderedImage {
     if (this.pending.length !== 0 || this.sampleCount !== expectedSamples) {
       throw new Error(
-        `TIFF stream consumed ${this.sampleCount} samples with ${this.pending.length} pending; expected ${expectedSamples}.`,
+        `Image stream consumed ${this.sampleCount} samples with ${this.pending.length} pending; expected ${expectedSamples}.`,
       );
     }
     if (this.encoder.next_strip_samples() !== 0) {
       throw new Error(
-        "TIFF encoder still expects pixels after the final band.",
+        "Image encoder still expects pixels after the final band.",
       );
     }
     const startedAt = performance.now();
     this.consumed = true;
     const bytes = this.encoder.finish();
-    this.tiffEncodingMs += performance.now() - startedAt;
+    this.encodingMs += performance.now() - startedAt;
     return {
       bytes,
       colorProcessingMs: 0,
-      tiffEncodingMs: this.tiffEncodingMs,
+      encodingMs: this.encodingMs,
     };
   }
 
@@ -110,18 +110,18 @@ export class RenderedTiffStream {
   }
 }
 
-/** Renders bounded GPU batches and writes the original TIFF compression strips. */
-export async function renderTiffInGpuStrips(
+/** Renders bounded GPU batches and writes the encoder's original strips. */
+export async function renderImageInGpuStrips(
   sampleCount: number,
   read: (offset: number, length: number) => Uint16Array,
-  encoder: GpuStripTiffEncoder,
+  encoder: GpuStripImageEncoder,
   renderer: GpuStripRenderer,
   ev: number,
-): Promise<GpuRenderedTiff> {
+): Promise<GpuRenderedImage> {
   let offset = 0;
   let consumed = false;
   let colorProcessingMs = 0;
-  let tiffEncodingMs = 0;
+  let encodingMs = 0;
   let gpuInputPreparationMs = 0;
   let gpuExecutionAndReadbackMs = 0;
   let gpuOutputPreparationMs = 0;
@@ -132,7 +132,7 @@ export async function renderTiffInGpuStrips(
       const remaining = sampleCount - offset;
       if (requested > remaining) {
         throw new Error(
-          `TIFF encoder requested ${requested} samples with ${remaining} remaining.`,
+          `Image encoder requested ${requested} samples with ${remaining} remaining.`,
         );
       }
       const batchMultiplier = Math.max(
@@ -154,7 +154,7 @@ export async function renderTiffInGpuStrips(
       while (batchOffset < batchSamples) {
         const stripSamples = encoder.next_strip_samples();
         if (stripSamples === 0 || stripSamples > batchSamples - batchOffset) {
-          throw new Error("TIFF strip boundaries changed within a GPU batch.");
+          throw new Error("Image strip boundaries changed within a GPU batch.");
         }
         const renderedStrip = rendered.pixels.subarray(
           batchOffset,
@@ -162,24 +162,24 @@ export async function renderTiffInGpuStrips(
         );
         const encodingStartedAt = performance.now();
         encoder.write_rendered_strip(renderedStrip);
-        tiffEncodingMs += performance.now() - encodingStartedAt;
+        encodingMs += performance.now() - encodingStartedAt;
         batchOffset += stripSamples;
         offset += stripSamples;
       }
     }
     if (offset !== sampleCount) {
       throw new Error(
-        `TIFF encoder consumed ${offset} of ${sampleCount} samples.`,
+        `Image encoder consumed ${offset} of ${sampleCount} samples.`,
       );
     }
     const startedAt = performance.now();
     consumed = true;
     const bytes = encoder.finish();
-    tiffEncodingMs += performance.now() - startedAt;
+    encodingMs += performance.now() - startedAt;
     return {
       bytes,
       colorProcessingMs,
-      tiffEncodingMs,
+      encodingMs,
       gpuInputPreparationMs,
       gpuExecutionAndReadbackMs,
       gpuOutputPreparationMs,
