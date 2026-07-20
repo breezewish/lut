@@ -1187,6 +1187,9 @@ input.chromatic-range--tint::-moz-range-track {
   grid-template-columns: repeat(auto-fill, minmax(5rem, 1fr));
   gap: var(--s5);
 }
+.looks__catalog[data-orientation="portrait"] .looks__grid {
+  grid-template-columns: repeat(auto-fill, minmax(3.5rem, 1fr));
+}
 .look {
   position: relative;
   display: flex;
@@ -1217,7 +1220,7 @@ input.chromatic-range--tint::-moz-range-track {
 .look__thumb {
   position: relative;
   width: 100%;
-  aspect-ratio: 3 / 2;
+  aspect-ratio: var(--preview-aspect, 3 / 2);
   overflow: hidden;
   border-radius: var(--r-xs);
   background: var(--raised);
@@ -1340,8 +1343,11 @@ input.chromatic-range--tint::-moz-range-track {
   position: relative;
   flex: 0 0 auto;
   height: 100%;
-  aspect-ratio: 3 / 2;
+  aspect-ratio: var(--preview-aspect, 3 / 2);
   min-width: 4rem;
+}
+.photo-wrap[data-orientation="portrait"] {
+  min-width: 2.75rem;
 }
 .photo-wrap--add {
   aspect-ratio: 1 / 1;

@@ -144,11 +144,18 @@ async function handleCommand(
       let found = false;
       try {
         raw.openPreview(new Uint8Array(data.buffer), PREVIEW_MAX_EDGE);
+        const metadata = raw.metadata();
         const thumbnail = raw.thumbnailData();
         const jpeg = thumbnail && (await thumbnailJpeg(thumbnail));
         if (jpeg) {
           found = true;
-          postThumbnail(data.requestId, data.fileId, jpeg);
+          postThumbnail(
+            data.requestId,
+            data.fileId,
+            jpeg,
+            metadata.width,
+            metadata.height,
+          );
         }
       } finally {
         raw.delete();
@@ -185,7 +192,13 @@ async function handleCommand(
         const thumbnail = previewRaw.thumbnailData();
         const thumbnailBytes = thumbnail && (await thumbnailJpeg(thumbnail));
         if (thumbnailBytes) {
-          postThumbnail(data.requestId, data.fileId, thumbnailBytes);
+          postThumbnail(
+            data.requestId,
+            data.fileId,
+            thumbnailBytes,
+            metadata.width,
+            metadata.height,
+          );
         }
         const sensorBackend = previewRaw.supportsWebGpuAahd()
           ? "webgpu-aahd"
@@ -540,12 +553,14 @@ function postThumbnail(
   requestId: number,
   fileId: string,
   jpeg: Uint8Array<ArrayBuffer>,
+  width: number,
+  height: number,
 ): void {
   const reply: WorkerReply = {
     requestId,
     ok: true,
     type: "thumbnail",
-    result: { fileId, jpeg },
+    result: { fileId, jpeg, width, height },
   };
   context.postMessage(reply, [jpeg.buffer]);
 }

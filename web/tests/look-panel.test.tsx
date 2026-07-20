@@ -36,6 +36,58 @@ test("composites worker-created thumbnails without synchronous pixel painting", 
   unmount();
 });
 
+test("keeps portrait geometry while Look thumbnails replace placeholders", () => {
+  const look = {
+    id: "look",
+    group: "Test",
+    name: "Look",
+    file: "look.ralut",
+    sha256: "00",
+  };
+  const { container, rerender } = render(
+    <LookPanel
+      looks={[look]}
+      activeId="look"
+      onChoose={() => {}}
+      thumbs={new Map()}
+      query=""
+      onQuery={() => {}}
+      thumbnailAspect={3 / 4}
+    />,
+  );
+
+  const catalog = container.querySelector(".looks__catalog");
+  const placeholder = container.querySelector(".look__thumb");
+  expect(catalog).toHaveAttribute("data-orientation", "portrait");
+  expect(catalog).toHaveStyle({ "--preview-aspect": String(3 / 4) });
+
+  rerender(
+    <LookPanel
+      looks={[look]}
+      activeId="look"
+      onChoose={() => {}}
+      thumbs={
+        new Map([
+          [
+            "look",
+            {
+              bitmap: { width: 99, height: 132 } as ImageBitmap,
+              width: 99,
+              height: 132,
+            },
+          ],
+        ])
+      }
+      query=""
+      onQuery={() => {}}
+      thumbnailAspect={3 / 4}
+    />,
+  );
+
+  expect(container.querySelector(".look__thumb")).toBe(placeholder);
+  expect(catalog).toHaveStyle({ "--preview-aspect": String(3 / 4) });
+});
+
 test("groups interleaved looks by camera family without changing their order", () => {
   const { unmount } = render(
     <LookPanel

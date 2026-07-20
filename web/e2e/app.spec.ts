@@ -8,6 +8,7 @@ import { unzipSync } from "fflate";
 import { decodeRgb16Tiff } from "./tiff";
 
 const linearFixture = resolve("tests/fixtures/linear.dng");
+const leicaFixture = resolve("tests/fixtures/leica-m8.dng");
 const lossyFixture = resolve("vendor/LibRaw-Wasm/test/integration/lossy.dng");
 const sonyFixture = resolve("vendor/LibRaw-Wasm/example-sony.ARW");
 const nikonHighEfficiencyFixture = resolve(
@@ -40,6 +41,21 @@ function firstJpegQuantizationTable(bytes: Uint8Array): Uint8Array {
     offset += length;
   }
   throw new Error("JPEG quantization table is missing");
+}
+
+function setDngOrientation(bytes: Buffer, orientation: number): void {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const littleEndian = String.fromCharCode(bytes[0], bytes[1]) === "II";
+  const ifdOffset = view.getUint32(4, littleEndian);
+  const entryCount = view.getUint16(ifdOffset, littleEndian);
+  for (let index = 0; index < entryCount; index += 1) {
+    const entryOffset = ifdOffset + 2 + index * 12;
+    if (view.getUint16(entryOffset, littleEndian) === 274) {
+      view.setUint16(entryOffset + 8, orientation, littleEndian);
+      return;
+    }
+  }
+  throw new Error("DNG fixture has no Orientation tag");
 }
 
 test("identifies the application as LUTify", async ({ page }) => {
@@ -133,6 +149,40 @@ test("shows an embedded camera JPEG before the processed preview", async ({
   const heights = geometry.map(({ cssHeight }) => cssHeight);
   expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(3);
   expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(3);
+});
+
+test("shows portrait photos vertically in the filmstrip and Look catalog", async ({
+  page,
+}) => {
+  test.setTimeout(45_000);
+  const portrait = Buffer.from(await readFile(leicaFixture));
+  setDngOrientation(portrait, 6);
+
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "portrait.dng",
+    mimeType: "image/x-adobe-dng",
+    buffer: portrait,
+  });
+  const photo = page.locator(".photo-wrap", {
+    has: page.getByRole("button", { name: /portrait\.dng — Ready/ }),
+  });
+  const look = page.locator(".look__thumb").first();
+  await expect(photo).toHaveAttribute("data-orientation", "portrait", {
+    timeout: 30_000,
+  });
+  await expect(page.locator(".looks__catalog")).toHaveAttribute(
+    "data-orientation",
+    "portrait",
+  );
+
+  const photoBox = await photo.boundingBox();
+  const lookBox = await look.boundingBox();
+  expect(photoBox).not.toBeNull();
+  expect(lookBox).not.toBeNull();
+  expect(photoBox!.height).toBeGreaterThan(photoBox!.width);
+  expect(lookBox!.height).toBeGreaterThan(lookBox!.width);
 });
 
 test("keeps canvases mounted and visible while interaction frames arrive", async ({

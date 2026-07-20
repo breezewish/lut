@@ -1,4 +1,5 @@
 import { memo, useEffect, useId, useRef } from "react";
+import type { CSSProperties } from "react";
 import { Check, Search } from "lucide-react";
 
 import type { LutDefinition } from "../types";
@@ -39,6 +40,7 @@ export const LookPanel = memo(function LookPanel({
   thumbs,
   query,
   onQuery,
+  thumbnailAspect,
   disabled = false,
 }: {
   looks: LutDefinition[];
@@ -47,6 +49,7 @@ export const LookPanel = memo(function LookPanel({
   thumbs: Map<string, LookThumbImage>;
   query: string;
   onQuery: (value: string) => void;
+  thumbnailAspect?: number;
   disabled?: boolean;
 }) {
   const activeRef = useRef<HTMLButtonElement>(null);
@@ -83,7 +86,21 @@ export const LookPanel = memo(function LookPanel({
           onChange={(event) => onQuery(event.target.value)}
         />
       </label>
-      <div className="looks__catalog" role="group" aria-label="Built-in looks">
+      <div
+        className="looks__catalog"
+        role="group"
+        aria-label="Built-in looks"
+        data-orientation={
+          thumbnailAspect !== undefined && thumbnailAspect < 1
+            ? "portrait"
+            : undefined
+        }
+        style={
+          thumbnailAspect === undefined
+            ? undefined
+            : ({ "--preview-aspect": thumbnailAspect } as CSSProperties)
+        }
+      >
         {visible.length === 0 ? (
           <p className="looks__empty" role="status">
             No looks match “{query}”.

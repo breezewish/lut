@@ -143,6 +143,12 @@ function hasUsablePreview(item: QueueItem): boolean {
     item.status === "export-error"
   );
 }
+
+/** Preserves portrait and square framing without widening landscape tiles. */
+function thumbnailAspectRatio(width: number, height: number): number {
+  return width > height ? 3 / 2 : width / height;
+}
+
 function previewRecipeKey(
   fileId: string,
   ev: number,
@@ -722,7 +728,7 @@ export default function App() {
   }, [client]);
 
   useEffect(() => {
-    return client.onThumbnail(({ fileId, jpeg }) => {
+    return client.onThumbnail(({ fileId, jpeg, width, height }) => {
       performance.mark("lutify:thumbnail");
       const filmstripUrl = URL.createObjectURL(
         new Blob([jpeg], { type: "image/jpeg" }),
@@ -730,7 +736,10 @@ export default function App() {
       const previousUrl = filmstripThumbUrls.current.get(fileId);
       if (previousUrl) URL.revokeObjectURL(previousUrl);
       filmstripThumbUrls.current.set(fileId, filmstripUrl);
-      updateItem(fileId, { thumbUrl: filmstripUrl });
+      updateItem(fileId, {
+        thumbUrl: filmstripUrl,
+        thumbnailAspect: thumbnailAspectRatio(width, height),
+      });
       if (fileId === activeId) {
         const previewUrl = URL.createObjectURL(
           new Blob([jpeg], { type: "image/jpeg" }),
@@ -866,6 +875,10 @@ export default function App() {
         baseEv: result.baseEv,
         camera: result.metadata.camera || "Unknown camera",
         dimensions: `${result.metadata.width} × ${result.metadata.height}`,
+        thumbnailAspect: thumbnailAspectRatio(
+          result.metadata.width,
+          result.metadata.height,
+        ),
       });
     };
 
@@ -1955,6 +1968,7 @@ export default function App() {
                     thumbs={visibleThumbs}
                     query={lookQuery}
                     onQuery={setLookQuery}
+                    thumbnailAspect={active?.thumbnailAspect}
                     disabled={exporting || !active}
                   />
                 ) : (

@@ -8,6 +8,7 @@ import {
   X,
 } from "lucide-react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties } from "react";
 import { memo } from "react";
 
 import type { QueueItem } from "../types";
@@ -85,7 +86,22 @@ export const Filmstrip = memo(function Filmstrip({
             const selected = selectedIds.has(item.id);
             const active = item.id === activeId;
             return (
-              <li key={item.id} className="photo-wrap">
+              <li
+                key={item.id}
+                className="photo-wrap"
+                data-orientation={
+                  item.thumbnailAspect !== undefined && item.thumbnailAspect < 1
+                    ? "portrait"
+                    : undefined
+                }
+                style={
+                  item.thumbnailAspect === undefined
+                    ? undefined
+                    : ({
+                        "--preview-aspect": item.thumbnailAspect,
+                      } as CSSProperties)
+                }
+              >
                 <button
                   type="button"
                   aria-pressed={selected}

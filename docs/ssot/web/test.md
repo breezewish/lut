@@ -17,6 +17,7 @@
 - Decode, rerender, and export issue only same-origin static GET requests; no photo data is uploaded.
 - A populated queue accepts another drop, and duplicate files in the same drop event create only one queue entry.
 - A one-photo import selects that new photo, a multi-photo import selects its first new photo, and after the selected Preview is usable every later photo is asked once for an embedded filmstrip thumbnail, including JPEG and RGB bitmap sources, without changing the active photo or fully decoding the queued RAWs.
+- A rotated portrait RAW uses taller-than-wide filmstrip and Look thumbnails from its orientation-correct metadata while landscape thumbnails retain the compact 3:2 layout.
 - Synthetic LinearRaw, real Leica DNG, and Sony ARW output decode to exactly the same RGB16 dimensions and samples in native and WASM LibRaw builds in both full-size and half-size modes.
 - Full-resolution export sampled to display size and fast Preview satisfy the RGB8 quality contract for Linear DNG, lossy Linear DNG, Leica Bayer DNG, rotated Leica Bayer DNG, Sony Bayer ARW, and Fujifilm X-Trans RAF; fixed crops are emitted for visual inspection.
 - A legacy diagonal Fujifilm Super CCD RAF fails during format identification with a reliability error instead of displaying a processed image that disagrees materially with export.

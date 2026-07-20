@@ -282,6 +282,8 @@ test("selects the first photo and preloads later filmstrip thumbnails", async ()
           result: {
             fileId: command.fileId,
             jpeg: new Uint8Array([1, 2, 3]),
+            width: 3,
+            height: 4,
           },
         });
         this.reply(command, {
@@ -369,6 +371,11 @@ test("selects the first photo and preloads later filmstrip thumbnails", async ()
         .querySelector("img.photo__thumb"),
     ).not.toBeNull();
   });
+  const secondPhoto = screen
+    .getByRole("button", { name: /^second\.dng/ })
+    .closest(".photo-wrap");
+  expect(secondPhoto).toHaveAttribute("data-orientation", "portrait");
+  expect(secondPhoto).toHaveStyle({ "--preview-aspect": String(3 / 4) });
   expect(firstButton).toHaveAttribute("aria-current", "true");
   expect(
     FilmstripThumbnailWorker.instance.commands.filter(

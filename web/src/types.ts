@@ -25,6 +25,8 @@ export interface QueueItem {
   lutId: string;
   camera?: string;
   dimensions?: string;
+  /** Stable orientation-aware aspect ratio for filmstrip and Look thumbnails. */
+  thumbnailAspect?: number;
   error?: string;
   /** Filmstrip thumbnail URL from the camera thumbnail or processed Preview. */
   thumbUrl?: string;
@@ -151,6 +153,8 @@ export type DisplayPreviewResult = PreviewResult | BitmapPreviewResult;
 export interface CameraPreview {
   fileId: string;
   jpeg: Uint8Array<ArrayBuffer>;
+  width: number;
+  height: number;
 }
 
 export interface LookPreviewResult {
