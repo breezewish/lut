@@ -102,7 +102,7 @@ test("shows an embedded camera JPEG before the processed preview", async ({
   expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(3);
 });
 
-test("keeps the previous canvases visible until interaction frames are ready", async ({
+test("keeps canvases mounted and visible while interaction frames arrive", async ({
   page,
 }) => {
   await page.addInitScript(() => {
@@ -168,6 +168,12 @@ test("keeps the previous canvases visible until interaction frames are ready", a
   const previousLut = await lutPreview.evaluate((canvas: HTMLCanvasElement) =>
     canvas.toDataURL(),
   );
+  await basePreview.evaluate((canvas: HTMLCanvasElement) => {
+    canvas.dataset.continuityToken = "base";
+  });
+  await lutPreview.evaluate((canvas: HTMLCanvasElement) => {
+    canvas.dataset.continuityToken = "look";
+  });
 
   await page.evaluate(() => {
     (window as Window & { delayPreviewRenders?: boolean }).delayPreviewRenders =
@@ -181,21 +187,30 @@ test("keeps the previous canvases visible until interaction frames are ready", a
   expect(await basePreview.isVisible()).toBe(true);
   expect(await lutPreview.count()).toBe(1);
   expect(await lutPreview.isVisible()).toBe(true);
+  await expect(basePreview).toHaveAttribute("data-continuity-token", "base");
+  await expect(lutPreview).toHaveAttribute("data-continuity-token", "look");
+  // A fast interaction frame may already have replaced the old pixels. The
+  // invariant is that the same canvases stay mounted and never flash blank.
   expect(
-    await basePreview.evaluate((canvas: HTMLCanvasElement) =>
-      canvas.toDataURL(),
+    await basePreview.evaluate(
+      (canvas: HTMLCanvasElement) => canvas.toDataURL().length,
     ),
-  ).toBe(previousBase);
+  ).toBeGreaterThan(1_000);
   expect(
-    await lutPreview.evaluate((canvas: HTMLCanvasElement) =>
-      canvas.toDataURL(),
+    await lutPreview.evaluate(
+      (canvas: HTMLCanvasElement) => canvas.toDataURL().length,
     ),
-  ).toBe(previousLut);
+  ).toBeGreaterThan(1_000);
   await expect
     .poll(() =>
       basePreview.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
     )
     .not.toBe(previousBase);
+  await expect
+    .poll(() =>
+      lutPreview.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
+    )
+    .not.toBe(previousLut);
 
   await expect(
     page.getByRole("button", { name: "Export selected" }),
@@ -209,6 +224,9 @@ test("keeps the previous canvases visible until interaction frames are ready", a
       (window as Window & { previewRenderEdges?: number[] }).previewRenderEdges
         ?.length ?? 0,
   );
+  await lutPreview.evaluate((canvas: HTMLCanvasElement) => {
+    canvas.dataset.continuityToken = "look";
+  });
   await page.getByRole("button", { name: "PROVIA", exact: true }).click();
   await page.waitForTimeout(100);
   await expect(processing).toBeVisible();
@@ -216,11 +234,12 @@ test("keeps the previous canvases visible until interaction frames are ready", a
   const proviaPreview = page.getByLabel("PROVIA preview");
   expect(await proviaPreview.count()).toBe(1);
   expect(await proviaPreview.isVisible()).toBe(true);
+  await expect(proviaPreview).toHaveAttribute("data-continuity-token", "look");
   expect(
-    await proviaPreview.evaluate((canvas: HTMLCanvasElement) =>
-      canvas.toDataURL(),
+    await proviaPreview.evaluate(
+      (canvas: HTMLCanvasElement) => canvas.toDataURL().length,
     ),
-  ).toBe(currentLut);
+  ).toBeGreaterThan(1_000);
   await expect
     .poll(() =>
       proviaPreview.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()),
